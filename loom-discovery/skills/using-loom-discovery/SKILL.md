@@ -57,6 +57,13 @@ When in doubt, ask "are we deciding whether it's worth doing, or are we
 figuring out what the problem/users actually are?" — the answer picks the
 member.
 
+**Step 4 — brief before a complex fork.** A discovery fork this router
+surfaces (a value commitment, an on-ramp choice) can itself be
+non-trivial. Before you ask the user a discovery fork this complex —
+**≥3 trade-offs, ≥2 implementation paths, or architectural blast radius**
+— run `dev-workflow:brief-before-asking` first instead of improvising
+the question.
+
 ## Family
 
 - `business-value` — adversarial worth-it check (Shape Up betting

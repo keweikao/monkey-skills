@@ -15,6 +15,8 @@ If you are a subagent already dispatched with an explicit role prompt, **do not*
 **You have loom-spec.** This skill does not draft or critique a spec itself —
 it is the thin entry that decides which of loom-spec's two member skills the
 work needs, after checking whether spec work is even the right station yet.
+
+**Brief before you ask a complex spec fork.** Before you ask the user a spec fork this complex — **≥3 trade-offs, ≥2 implementation paths, or architectural blast radius** — run `dev-workflow:brief-before-asking` first instead of improvising the question.
 </EXTREMELY-IMPORTANT>
 
 ## §Intake
