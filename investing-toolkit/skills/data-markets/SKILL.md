@@ -3,8 +3,9 @@ name: data-markets
 description: |
   Layer-1 unified data fetch across US/JP/TW/KR/CN equities + macro — one
   pack.py facade, auto market detection from ticker suffix (.TW/.KS/.SS/.T/
-  bare-4-digit), 5 pack types (snapshot / memo-fetch / comps-multiples /
-  screener-batch / regime-pack). Emits a raw data pack（原始資料包，非渲染卡片）—
+  bare-4-digit), 7 pack types (snapshot / memo-fetch / comps-multiples /
+  screener-batch / regime-pack / kpi-quarterly / kpi-topline-backfill).
+  Emits a raw data pack（原始資料包，非渲染卡片）—
   structured JSON straight from source clients including SEC EDGAR,
   EDINET, TWSE, and FRED (+14 more) through a shared cache layer; use
   this for a 資料層 health check, verifying cache writes/hits (快取),
@@ -58,9 +59,13 @@ is unwritable.
 | `comps-multiples` | single or batch | `pack.py --tickers 005930.KS,000660.KS --pack comps-multiples` |
 | `screener-batch` | batch (≥2) | `pack.py --tickers 600519.SS,000858.SZ,300750.SZ --pack screener-batch` |
 | `regime-pack` | none — **requires `--market`** | `pack.py --pack regime-pack --market tw` |
+| `kpi-quarterly` | single, **US-only** | `pack.py --ticker AAPL --pack kpi-quarterly` |
+| `kpi-topline-backfill` | single, **US-only** | `pack.py --ticker AAPL --pack kpi-topline-backfill` |
 
 `regime-pack` has no ticker dimension; omitting `--market` is a usage
-error (exit 64).
+error (exit 64). `kpi-quarterly` and `kpi-topline-backfill` are refused
+(exit 64) for any market but `us` — the facade's `US_ONLY_PACKS` guard
+names this as a market-availability problem, not a pack-name typo.
 
 ## Ticker-suffix routing
 
@@ -155,6 +160,91 @@ float). Output shape:
 
 analysis-kpi's `kpi_8k_candidates.py` invokes this walker by SUBPROCESS
 (not import) to cross the analysis↔data-markets layer boundary.
+
+## Top-line revenue lane (US SEC)
+
+`kpi-quarterly`'s per-filing parse (`extract_dimensional_revenue`) now
+ALSO resolves and emits the company's flat top-line (total) revenue fact
+for every filing it walks, at zero extra fetch cost — the candidate facts
+were already inside the parse, only dropped by the dimensional gate
+before. Per filing, exactly ONE concept is emitted: the first-present
+entry, in this fixed order, from a closed allowlist — `Revenues` →
+`RevenuesNetOfInterestExpense` →
+`RevenueFromContractWithCustomerExcludingAssessedTax` →
+`RevenueFromContractWithCustomerIncludingAssessedTax`. A filing with no
+allowlist candidate emits nothing for that filing and is recorded under
+`coverage.top_line_gaps` with a named reason — never guessed.
+
+`--pack kpi-topline-backfill` (**US-only**, single ticker) reaches
+further back via the SEC `companyconcept` REST endpoint over the same
+allowlist, picking the first concept with any reported history. It is
+**annual-only by design**: a `companyconcept` row carries no fiscal
+calendar, so four skip classes land in `coverage.skipped_rows` with a
+named reason rather than a guess — never fewer than a row's actual
+disqualifier, never a fabricated one:
+
+- `source_filing_unidentifiable` — the row carries no `form` (leaving
+  the carrying filing's dei fiscal-period focus undecidable) and/or no
+  `accn` (which is the `fiscal_calendars` key — a `None` key would be
+  matched by any equally accession-less fact downstream);
+- `carrier_form_not_allowlisted` — the row's carrying form is not one
+  whose annual focus this lane can state honestly. A 12-month top-line
+  row is **not** necessarily carried by a 10-K: a live capture of the
+  endpoint's `form` domain (`tests/data/fixtures/companyconcept_form_
+  domain_2026-07-25.json`, 8 filers, 2026-07-25) observed
+  `{"10-K": 48, "20-F": 47, "20-F/A": 8}` on annual-span rows — TM and
+  HMC, us-gaap-tagging foreign private issuers, carry their entire
+  top-line history on 20-F/20-F/A. Labelling those `FY` would stamp
+  `source_form: "10-K"` on filings that never were. (IFRS-tagging FPIs
+  — TSM, SAP, SHEL, BP — 404 out of the us-gaap endpoint entirely, so
+  they cannot reach this lane at all. `10-K/A` is excluded too, which
+  costs value freshness: it is the canonical carrier of a *restated*
+  annual figure, so an amended year keeps its original number here.)
+- `non_annual_row_skipped` — duration ≠ 12 months (quarterly/YTD row);
+- `new_year_boundary_ambiguous` — the period end has **crossed into
+  January**, landing within `FISCAL_BOUNDARY_TOLERANCE_DAYS` *after*
+  Jan 1, where the period-end-year labeling convention is unsound for a
+  52/53-week filer whose fiscal year rolls past New Year, and this lane
+  (unlike `kpi-quarterly`) has no dei fiscal calendar to disambiguate.
+  The check is deliberately **one-sided**: a December year-end, however
+  close to Jan 1, gets the SAME label from both lanes *provided the
+  filer's nominal fiscal-year end is itself in December* (`kpi-quarterly`
+  walks to the first fiscal-year end at-or-after the period end, which
+  for a December-nominal filer is the period end's own calendar year), so
+  it is backfilled normally — a symmetric check would silently drop the
+  entire history of every December-fiscal-year-end filer.
+
+  **Known residual — this lane can mislabel a January-nominal filer's
+  late-December year.** The agreement above holds along the period end
+  only; the divergence is two-sided along the *nominal* fiscal-year end,
+  which this lane never sees. When a filer's `dei:CurrentFiscalYearEndDate`
+  sits in early January but the year's actual end drifted back into late
+  December (a 52/53-week filer — the nominal drifts per filing),
+  `kpi-quarterly` walks *forward* to the January nominal and answers the
+  NEXT fiscal year while this lane answers the period-end year. The guard
+  does not fire, no coverage reason is emitted, and the row is backfilled
+  under a fiscal year one lower than `kpi-quarterly` assigns it — which
+  surfaces as a spurious restatement dagger where the two lanes overlap,
+  not as a missing value. This lane cannot detect the case (its
+  `companyconcept` rows carry no dei calendar, and their `fy`/`fp` are the
+  carrying filing's focus, not the fact's), so **treat `kpi-quarterly` as
+  the authority for any fiscal year both lanes cover.** Tracked in
+  `docs/loom/BACKLOG.md` under the 2.36.0 follow-ups, item (j).
+
+The filing-identity checks run first — a filer this lane cannot serve
+at all (a 20-F-only foreign private issuer) reports one actionable
+reason per row instead of a period-shaped one, and one unusable row's
+malformed dates can no longer abort an otherwise good backfill. A row
+that survives all four checks also seeds this pack's own
+`fiscal_calendars` map (keyed by accession, focus always `"FY"` — the
+only value this lane can state honestly, since the allowlisted annual
+carrier form is the literal `10-K`), which the envelope carries
+alongside `facts` and `coverage`.
+Downstream, `kpi_xbrl.facts_to_points` reads that map to derive each
+point's `source_form` and refuses to emit a point when it is absent —
+so a backfill pack missing `fiscal_calendars` loses 100% of its facts at
+ingest. The envelope also carries `"source_kind": "xbrl-companyfacts"`
+so the KPI ingest layer assigns these points the correct provenance.
 
 ## API keys
 

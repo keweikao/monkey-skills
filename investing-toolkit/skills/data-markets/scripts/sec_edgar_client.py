@@ -2317,7 +2317,15 @@ def _dimensional_revenue_candidate_gates(fact: dict) -> bool:
     concept is revenue-shaped (`_is_revenue_concept`) + the fact's XBRL unit
     is a currency amount (`_is_currency_amount_fact`) + a reported numeric
     value (never NaN). Does NOT check the axis signature itself — callers
-    combine this with `_dimension_signature`'s `dimensions`/`exclusions`."""
+    combine this with `_dimension_signature`'s `dimensions`/`exclusions`.
+
+    Sibling duplicate: `_is_top_line_revenue_fact` (below) repeats this
+    function's `period_type != "duration"` line for the opposite
+    (`is_dimensioned` FALSE) polarity — this is only the 2nd occurrence, so
+    per this repo's Rule-of-Three standard it is NOT YET extracted into a
+    shared `_duration_currency_nonnan_gates(fact)` helper. If a THIRD such
+    admission-gate predicate appears, that is the trigger to extract it —
+    whoever edits one of these two should check the other stays correct."""
     if not fact.get("is_dimensioned"):
         return False
     if fact.get("period_type") != "duration":
@@ -2370,6 +2378,93 @@ def _dimensional_axis_exclusions(fact: dict) -> list[dict]:
         return []
     _dimensions, _consolidation, exclusions = _dimension_signature(fact)
     return exclusions
+
+
+# CLOSED, ORDERED allowlist for the company TOP-LINE (total) revenue concept
+# (Task 1, docs/loom/plans/2026-07-25-company-total-revenue.md; brief
+# docs/loom/specs/2026-07-25-company-total-revenue.md §Decision). Grounded in
+# XBRL US DQC Revenue Guidance (https://xbrl.us/data-rule/guid-revenue/):
+# "use the more specific revenue-from-contracts-with-customers element when
+# all income is ASC 606; for mixed revenue types, `Revenues` is the total."
+# DELIBERATELY NARROWER than `_REVENUE_ALLOW_CONCEPT_LOCAL_NAMES` above (which
+# also allows non-top-line-but-legitimate concepts like
+# `RevenueNotFromContractWithCustomer`) and NOT a reuse/extension of it — a
+# concept can be legitimate operating revenue for the dimensional lane without
+# being the company's flat top-line total. Live-probe-verified 2026-07-25 (8
+# filers): JPM emits 7 FLAT revenue-shaped concepts, only `Revenues` /
+# `RevenuesNetOfInterestExpense` are the total (the other 5 are income-
+# statement components — InvestmentBankingRevenue, PrincipalTransactionsRevenue,
+# BrokerageCommissionsRevenue, etc.); WMT's `Revenues` (713,163M, its own
+# "Total revenues" line) is the total, not RFCC (706,413M, excludes
+# membership/other); AAPL reports only the RFCC-Excluding concept (all-ASC-606,
+# no `Revenues` tag at all). ORDER matters — `select_top_line_concept` below
+# picks the FIRST-PRESENT entry, mirroring the guidance's stated preference.
+_TOP_LINE_REVENUE_CONCEPTS = (
+    "Revenues",
+    "RevenuesNetOfInterestExpense",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+)
+
+
+def _is_top_line_revenue_fact(fact: dict) -> bool:
+    """True ONLY when `fact` is the company's flat top-line revenue total
+    (Task 1, docs/loom/plans/2026-07-25-company-total-revenue.md): NOT
+    dimensioned (`is_dimensioned` explicitly False — a qualifier-only fact
+    such as XOM's `Revenues` under `ConsolidationItemsAxis=
+    OperatingSegmentsMember`, 452,209M against a true total of 332,238M, must
+    never qualify), a DURATION context, a currency-denominated amount
+    (`_is_currency_amount_fact`), a reported numeric value (never NaN), and
+    the concept's local name is in the closed `_TOP_LINE_REVENUE_CONCEPTS`
+    allowlist — this is what rejects JPM's 5 flat-but-component revenue
+    concepts (InvestmentBankingRevenue, PrincipalTransactionsRevenue, ...)
+    that would otherwise pass every other gate here.
+
+    Repeats — as a single duplicated line, not a reimplementation — only
+    `_dimensional_revenue_candidate_gates`'s `period_type != "duration"`
+    check (that function requires `is_dimensioned` TRUE, the opposite
+    polarity, and a DIFFERENT concept test — `_is_revenue_concept`'s
+    allow/deny gate rather than this closed allowlist — so sharing that
+    whole function here would either invert its meaning or require
+    reshaping it, both of which change dimensional-extraction behavior,
+    which this task must not do). `_is_currency_amount_fact` and `_is_nan`
+    ARE genuinely reused below — called, not reimplemented — since neither
+    has a polarity or concept-set dependency that differs between the two
+    predicates."""
+    if fact.get("is_dimensioned") is not False:
+        return False
+    if fact.get("period_type") != "duration":
+        return False
+    if not _is_currency_amount_fact(fact):
+        return False
+    if _is_nan(fact.get("numeric_value")):
+        return False
+    concept = fact.get("concept")
+    if not concept:
+        return False
+    local_name = concept.rsplit(":", 1)[-1]
+    return local_name in _TOP_LINE_REVENUE_CONCEPTS
+
+
+def select_top_line_concept(facts: list[dict]) -> str | None:
+    """Resolve the ONE winning top-line concept for a filing's candidate
+    facts (Task 1, docs/loom/plans/2026-07-25-company-total-revenue.md):
+    first-present in `_TOP_LINE_REVENUE_CONCEPTS` ORDER among the facts that
+    pass `_is_top_line_revenue_fact` — never the first fact by list position.
+    Live-probe-verified: WMT reports both `Revenues` (713,163M) and RFCC
+    (706,413M); this returns `Revenues` because it ranks first in the
+    allowlist, matching WMT's own "Total revenues" line. Returns None when no
+    candidate qualifies (`facts` empty, or every fact is a non-allowlist
+    component / dimensioned qualifier) — never a fabricated guess."""
+    winning_local_names = {
+        fact["concept"].rsplit(":", 1)[-1]
+        for fact in facts
+        if _is_top_line_revenue_fact(fact)
+    }
+    for local_name in _TOP_LINE_REVENUE_CONCEPTS:
+        if local_name in winning_local_names:
+            return local_name
+    return None
 
 
 _AVG_DAYS_PER_MONTH = 30.44
@@ -2493,6 +2588,446 @@ def _duration_weeks(fact: dict, ticker: str, period_end: str) -> int:
 # 52/53-week drift with margin, far below a quarter's width. Task 16 builds
 # the beyond-tolerance unclassifiable DQC flag on this same constant.
 FISCAL_BOUNDARY_TOLERANCE_DAYS = 10
+
+
+def _top_line_backfill_error_slot(ticker: str, detail: str) -> dict:
+    """Loud, sentinel-compatible error slot for `build_top_line_backfill`
+    (Task 3, docs/loom/plans/2026-07-25-company-total-revenue.md) — mirrors
+    this file's `_acquire_error`/`_dimensional_revenue_error_slot`
+    convention — never a fabricated/empty Lane A pack."""
+    return {
+        "error": f"SEC EDGAR top-line backfill failed for {ticker!r}: {detail}",
+        "error_class": "top_line_backfill_failed",
+        "identifier": ticker,
+    }
+
+
+# The `form` values on a companyconcept row whose annual dei fiscal-period
+# focus Lane A can state HONESTLY, and the focus each states (Task 3 +
+# seam fix 18fc47fd, docs/loom/plans/2026-07-25-company-total-revenue.md).
+#
+# WHY "ANNUAL ROW => FY => 10-K" IS NOT A SAFE INFERENCE. `companyconcept`
+# carries no dei tags at all, so Lane A cannot READ a filing's
+# `DocumentFiscalPeriodFocus` the way Lane B does (`_extract_dei_calendar`);
+# the only filing-level evidence it holds is the row's own `form`, passed
+# through verbatim by `summarize_concept`. The consumer's mapping is one-way:
+# `kpi_xbrl._SOURCE_FORM_BY_FOCUS` has exactly ONE annual key, "FY", and it
+# maps to the literal "10-K". So declaring focus "FY" is a declaration that
+# the carrying filing WAS a 10-K, and this allowlist is the set of forms for
+# which that declaration round-trips back to the truth.
+#
+# GROUNDING (live capture, committed:
+# `investing-toolkit/tests/data/fixtures/companyconcept_form_domain_
+# 2026-07-25.json`; regenerate with the sibling
+# `capture_companyconcept_form_domain.py`). Endpoint
+# `data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json`,
+# captured 2026-07-25 over all four `_TOP_LINE_REVENUE_CONCEPTS` for 8
+# filers. Forms OBSERVED on annual-span (330-400d) rows, verbatim:
+#
+#     {"10-K": 48, "20-F": 47, "20-F/A": 8}
+#
+#   - 10-K       — AAPL, INTC (domestic filers). The allowlisted case.
+#   - 20-F, 20-F/A — TM, HMC: us-gaap-tagging FOREIGN PRIVATE ISSUERS whose
+#     ENTIRE top-line history is annual-span and carried on these two. This
+#     is the hazard, observed: without the allowlist, 55 rows across two
+#     filers would land in the durable store stamped `source_form: "10-K"`
+#     for filings that were never 10-Ks.
+#
+# NOT observed anywhere in that sample: `10-K/A`, `40-F`, `8-K`, `S-1`,
+# `424B`. They are plausible carriers, not established ones — an earlier
+# revision of this comment asserted them as fact and was wrong to.
+# They stay excluded because the allowlist is a positive list, not because
+# they were seen.
+#
+# BOUNDING THE RISK: "foreign private issuer" is NOT a uniform class here.
+# IFRS-tagging FPIs (TSM, SAP, SHEL, BP in the capture) 404 out of the
+# us-gaap endpoint entirely, on all four concepts — they cannot reach Lane A
+# by any path, so the exposure is limited to us-gaap-tagging FPIs like
+# TM/HMC.
+#
+# TWO DIFFERENT REFUSALS, deliberately not distinguished in the code because
+# both land on the same answer, but they are not the same judgement:
+#   - WRONG REGIME (20-F, 20-F/A, 40-F): a different annual report under a
+#     different disclosure regime. Refused outright; its dei focus is not
+#     this lane's to translate.
+#   - SAME REGIME, AMENDMENT (10-K/A): its dei `DocumentFiscalPeriodFocus`
+#     genuinely IS "FY", so ONLY the literal form distinguishes it from an
+#     allowlisted 10-K. This one is a DEFERRAL, and it has a cost worth
+#     naming: a 10-K/A is the canonical carrier of a RESTATED annual figure,
+#     so excluding it means Lane A keeps the ORIGINAL number for an amended
+#     year and never learns the correction. That is value staleness, not
+#     just missing coverage. Pinned by a red test
+#     (`test_backfill_skips_row_whose_carrier_form_is_not_allowlisted`) so
+#     widening the allowlist is a deliberate act; tracked as a follow-up.
+#
+# Reading the row's own `fp` would rescue none of them: `fp` is the FILING's
+# focus, the very field this lane is forbidden to consult, and it is "FY" on
+# a 20-F too.
+_TOP_LINE_ANNUAL_CARRIER_FORMS: dict[str, str] = {"10-K": "FY"}
+
+
+def _top_line_backfill_calendar(fiscal_period_focus: str) -> dict:
+    """One `fiscal_calendars` entry for a Lane A row, in the EXACT shape
+    `_extract_dei_calendar` emits for Lane B (`{fiscal_period_focus,
+    fiscal_year_end, fiscal_year_focus}`) — the shape
+    `kpi_xbrl._require_source_form` and `_q4_basis_mismatch_reason` read.
+
+    Only the focus is stated. `fiscal_year_end` and `fiscal_year_focus` are
+    dei cover tags that a `companyconcept` row simply does not carry, so
+    they are `None` — the same `None` `_extract_dei_calendar` returns for a
+    tag absent from a filing's records, never a fabricated value.
+
+    KNOWN CONSUMER-SIDE LIMIT of that `None` (an earlier revision of this
+    docstring claimed the opposite, and was wrong). Two unstated
+    `fiscal_year_end`s do NOT fail loud downstream — they compare EQUAL.
+    `kpi_xbrl._q4_basis_mismatch_reason` guards the map ENTRY, not the
+    field (`if fy_cal is None or ytd9_cal is None`, kpi_xbrl.py:989); a
+    Lane A entry is a present dict, so it passes that guard, and the
+    field comparison at :997 then evaluates `None != None` as False and
+    reports "shared basis confirmed" for two calendars neither of which
+    was ever stated.
+
+    NOT REACHABLE TODAY: that check runs only for a Q4 derivation, which
+    needs a 9-month-YTD row, and Lane A is annual-only — `derive_q4_points`
+    also reads ONE pack's map. But `pack_us.py:1017-1019` already merges
+    two lanes' calendars into a single envelope, which is the shape that
+    would reach it. Fixing it belongs to the consumer (tighten the guard to
+    the FIELD), not to this producer, which has nothing truthful to put
+    there; tracked as a consumer-side follow-up."""
+    return {
+        "fiscal_period_focus": fiscal_period_focus,
+        "fiscal_year_end": None,
+        "fiscal_year_focus": None,
+    }
+
+
+def _is_near_new_year_boundary(period_end_date: date) -> bool:
+    """True when `period_end_date` has CROSSED INTO January — it lands
+    within `FISCAL_BOUNDARY_TOLERANCE_DAYS` AFTER the Jan-1 boundary of its
+    OWN calendar year. This is the New-Year-boundary hazard Task 3
+    (docs/loom/plans/2026-07-25-company-total-revenue.md) must fail loud
+    on: Lane A's annual fiscal-year label is the period-end CALENDAR year
+    (SEC annual-labeling convention), which is unsound for a 52/53-week
+    filer whose year-end rolls past New Year (a FY2024 ending 2025-01-03) —
+    and Lane A has no dei fiscal calendar to disambiguate (unlike Lane B).
+
+    THE GUARD IS ONE-SIDED BECAUSE THE HAZARD IS ASYMMETRIC ALONG
+    `period_end`. The BEFORE-New-Year side is deliberately NOT checked, and
+    that is not a narrowed tolerance — it is the shape of the divergence.
+    Lane B's `_derive_fiscal_label` walks to the first nominal fiscal-year
+    end at-or-after `period_end`, so for a filer whose dei nominal year-end
+    is ITSELF IN DECEMBER it lands on the period end's OWN calendar year —
+    the very label Lane A's rule derives. The two rules AGREE there, so
+    there is nothing to disambiguate. Skipping the before-side too (as an
+    earlier revision did) costs the ENTIRE Lane A backfill of every
+    December-fiscal-year-end filer — most of the US market — to guard a
+    divergence that cannot occur there.
+
+    THAT AGREEMENT IS CONDITIONAL ON A DECEMBER NOMINAL, AND THIS PREDICATE
+    NEVER SEES THE NOMINAL. The divergence is two-sided along the dei
+    nominal fiscal-year end — a per-filing value that DRIFTS for 52/53-week
+    filers (see `_derive_fiscal_label`). When that nominal sits in EARLY
+    JANUARY while the row's actual period end drifted BACK into late
+    December, Lane B's walk goes FORWARD to the January nominal and answers
+    the NEXT year while Lane A answers the period-end year, and this guard
+    does not fire. Measured against both real label functions:
+    `2024-12-28` with nominal `--01-03` gives Lane A 2024 / Lane B 2025 FY;
+    `2025-12-31` with `--01-02` gives Lane A 2025 / Lane B 2026 FY.
+
+    THAT RESIDUAL IS NOT CLOSABLE HERE, which is why it is documented
+    rather than guarded. Lane A's `companyconcept` rows carry only
+    `{start, end, value, accn, form, fy, fp, filed}` (`summarize_concept`)
+    — no dei calendar, whose absence is this guard's entire reason to
+    exist — and `fy`/`fp` are the CARRYING FILING's focus rather than the
+    fact's own — the trap named in `build_top_line_backfill`. Measured
+    2026-07-25 over all 777 `concept_*.json` files in the local EDGAR
+    cache — which splits across two cache-envelope payload shapes (480
+    files with the body at `data`, 297 with it nested one level deeper at
+    `data.data`; a re-run must cover both, or it silently drops whichever
+    shape it doesn't parse) — under a predicate stated here so the next
+    reader can re-run it rather than take the number on trust: us-gaap
+    `companyconcept` payloads, rows as `summarize_concept` reshapes them
+    (USD unit preferred), `start`/`end`/`accn`/`filed` all present and
+    `fy` an int, and `end - start` within 340-380 days — of 15276 such
+    annual rows, 10175 (66.6%) carry an `fy` differing from `end`'s own
+    calendar year.
+
+    On a comparative row — which is what a BACKFILL lane is made of — a
+    late-December row from a January-nominal filer is therefore identical
+    in every readable field to a plain December filer's row. Stated
+    precisely, because the one exception must not be oversold: `fy` IS
+    authoritative on a row that is its OWN filing's current-period fact
+    (this module's own live verification, 90/90 — see
+    `_derive_fiscal_label`), so a lane that grouped rows by accession could
+    recover the nominal label for years whose own 10-K is still in the
+    API's XBRL window — but not for the older comparative-only years this
+    lane exists to reach, and only by reading a field this module forbids
+    by name. That partial route is recorded, and not taken, in
+    `docs/loom/BACKLOG.md` ("investing-toolkit top-line revenue lane
+    2.36.0", item (j)); Lane B, which HAS the calendar, stays the authority
+    wherever both lanes cover one year.
+
+    Pinned in both directions by
+    `test_sec_edgar_top_line_backfill.py::test_backfill_excludes_new_year_
+    boundary_row_with_named_reason` (skips) and
+    `::test_backfill_keeps_december_year_end_row_both_lanes_label_alike`
+    (keeps) — the second pins the AGREEMENT case, whose filer is
+    December-nominal, never the residual above.
+
+    Reuses the SAME `FISCAL_BOUNDARY_TOLERANCE_DAYS` the month-lane
+    fiscal-boundary matching uses (`_derive_fiscal_label`) — never a new,
+    uncoordinated tolerance."""
+    # One-sided by construction: measured only AFTER Jan 1 of the period
+    # end's own calendar year. `period_end_date` is the ONLY axis available
+    # here — see the docstring for the dei-nominal axis this therefore
+    # cannot see, and the divergence class it consequently misses.
+    days_into_the_year = (period_end_date - date(period_end_date.year, 1, 1)).days
+    return days_into_the_year <= FISCAL_BOUNDARY_TOLERANCE_DAYS
+
+
+def build_top_line_backfill(ticker: str) -> dict:
+    """Annual-only `companyconcept` REST backfill for `ticker`'s top-line
+    (total) revenue (Task 3, docs/loom/plans/2026-07-25-company-total-
+    revenue.md, Smallest End State #2) — fills fiscal years older than the
+    filings Lane B (`extract_dimensional_revenue`) fetched, reshaped into
+    the SAME fact shape Lane B emits (`dimensions == {}`, `period_start`,
+    `period_end`, `accession`, `filed`, `fiscal_year`, `fiscal_quarter`,
+    `duration_months`, `duration_weeks`, `week_lane_band`) so both lanes
+    append to the one `total_revenue` series.
+
+    Fetches (`fetch_facts`/`SEC_COMPANYCONCEPT_URL`) each
+    `_TOP_LINE_REVENUE_CONCEPTS` allowlist concept IN ORDER and picks the
+    FIRST concept that actually returns rows — the same first-present
+    ordering `select_top_line_concept` applies to a filing's candidate
+    facts, applied here to which concept the filer has ANY reported
+    history under. A ticker where NO allowlist concept returns rows is a
+    loud error slot (`_top_line_backfill_error_slot`), never an
+    empty-but-successful pack.
+
+    Keeps ANNUAL rows only — `_duration_months` (this module's existing
+    day-span helper, never a hardcoded 365) on the row's own `start`->`end`
+    span must equal 12. A non-annual (quarterly/YTD) row is skipped with a
+    named `coverage` reason, never guessed: `companyconcept` tags BOTH
+    annual and quarterly rows `fp: FY` inside a single 10-K's
+    disaggregated quarterly-info block (`summarize_concept`'s own
+    docstring), so `fp` cannot discriminate annual from quarterly.
+
+    MUST NOT read the row's `fy`/`fp` fields at all: they are the FILING's
+    focus, not the fact's own period (memory `fiscal-year-derive-per-fact-
+    against-filing-calendar` trap #2, live-confirmed 2026-07-25 — every row
+    from NVDA's FY2026 filing is stamped `fy=2026`, including its FY2024
+    and FY2025 comparatives). `fiscal_year` is instead derived from the
+    row's OWN `end` — the SEC annual-labeling convention (a fiscal year is
+    named for the calendar year its period ends in) — EXCEPT for a row
+    whose `end` has CROSSED INTO January, within
+    `FISCAL_BOUNDARY_TOLERANCE_DAYS` AFTER Jan 1
+    (`_is_near_new_year_boundary`), where that convention is unsound for a
+    52/53-week filer whose year-end rolls past New Year and Lane A has no
+    dei calendar to check against: such a row is skipped with a named
+    `coverage` reason instead of guessed — Lane B, which HAS the dei
+    calendar, remains the authority for those years. A DECEMBER year-end is
+    NOT that hazard however close to Jan 1 it sits — PROVIDED the filer's
+    own dei nominal year-end is also in December: Lane B's walk lands on
+    the period end's own calendar year there, the same label this rule
+    derives, so those rows are backfilled normally (see
+    `_is_near_new_year_boundary` for why a symmetric guard would cost the
+    lane most of the US market). A filer whose NOMINAL year-end sits in
+    early January while the row's actual end drifted back into late
+    December is a KNOWN RESIDUAL that this guard does not fire on and this
+    lane cannot detect — such a year is labelled one lower than Lane B
+    labels it, which is a spurious restatement dagger rather than a gap.
+    See that helper's docstring for the measured cases and
+    `docs/loom/BACKLOG.md` item (j) for what would close it.
+
+    Returns the per-accession `fiscal_calendars` map alongside `facts`
+    (Task 3 + seam fix 18fc47fd) — the SAME envelope key Lane B emits, and
+    the one `kpi_xbrl.facts_to_points` reads to derive each point's
+    `source_form`
+    (`_require_source_form`, which RAISES rather than guess a form). Without
+    it EVERY Lane A fact is rejected at ingest and the lane cannot reach the
+    store at all. Only rows whose own `form` is an allowlisted annual
+    carrier (`_TOP_LINE_ANNUAL_CARRIER_FORMS` — see there for the live
+    capture grounding it, and for why "annual row, therefore FY, therefore
+    10-K" is unsound: 20-F/20-F/A carry whole annual histories too) can
+    contribute, and only if the row also identifies its filing by
+    `accn`. A row failing either check is skipped with a named `coverage`
+    reason, never emitted under a fabricated focus."""
+    cik_info = resolve_cik(ticker)
+    if "error" in cik_info:
+        return cik_info
+    cik = cik_info["cik"]
+
+    winning_concept = None
+    rows: list[dict] = []
+    attempted: list[str] = []
+    for concept in _TOP_LINE_REVENUE_CONCEPTS:
+        attempted.append(concept)
+        fetched = fetch_facts(cik, concept)
+        if "error" in fetched:
+            continue
+        candidate_rows = summarize_concept(fetched.get("data", {}))
+        if candidate_rows:
+            winning_concept = concept
+            rows = candidate_rows
+            break
+
+    if winning_concept is None:
+        return _top_line_backfill_error_slot(
+            ticker,
+            "no concept in the top-line allowlist "
+            f"{_TOP_LINE_REVENUE_CONCEPTS!r} returned any companyconcept "
+            f"rows (attempted {attempted!r})",
+        )
+
+    full_concept = f"us-gaap:{winning_concept}"
+    facts: list[dict] = []
+    skipped_rows: list[dict] = []
+    fiscal_calendars: dict[str, dict] = {}
+    for row in rows:
+        period_start = row.get("start")
+        period_end = row.get("end")
+        accession = row.get("accn")
+        # Task 3 + seam fix 18fc47fd: the carrying filing gates the row
+        # BEFORE any period
+        # arithmetic — identity is a property of the FILING, the cheapest
+        # and most fundamental disqualifier, so a filer Lane A cannot serve
+        # at all (a 20-F-only foreign private issuer) reports ONE actionable
+        # reason per row instead of a mix of period-shaped ones.
+        #
+        # ORDERING IS A BEHAVIOUR CHANGE, not message polish: a
+        # non-allowlisted row with malformed dates used to reach
+        # `_duration_span_days` and RAISE, killing the whole backfill.
+        # Gating first turns that into a skip. This is the better
+        # behaviour — one 20-F's bad dates must not destroy a 10-K
+        # backfill — but it does narrow where this lane fails loud, so it
+        # is stated rather than left to be discovered. Allowlisted rows are
+        # unaffected: their date handling is exactly as before.
+        source_form = row.get("form")
+        if not source_form or not accession:
+            missing = " and ".join(
+                label for label, present in (
+                    ("form", source_form), ("accession", accession),
+                ) if not present
+            )
+            skipped_rows.append({
+                "type": "source_filing_unidentifiable",
+                "old": None,
+                "new": None,
+                "accessions": [accession],
+                "reason": (
+                    f"row {period_start!r}->{period_end!r} for {ticker!r} "
+                    f"carries no companyconcept {missing}, so its carrying "
+                    "filing is unidentifiable — skipped rather than "
+                    "defaulted. A missing 'form' leaves the dei "
+                    "fiscal-period focus underivable; a missing 'accn' is "
+                    "the fiscal_calendars KEY, and a None key would be "
+                    "matched by any equally accession-less fact "
+                    "(kpi_xbrl._require_source_form looks up a bare "
+                    "fact.get('accession')), stamping 'source_form: 10-K' "
+                    "on a point traceable to no filing at all"
+                ),
+            })
+            continue
+        fiscal_period_focus = _TOP_LINE_ANNUAL_CARRIER_FORMS.get(source_form)
+        if fiscal_period_focus is None:
+            skipped_rows.append({
+                "type": "carrier_form_not_allowlisted",
+                "old": None,
+                "new": None,
+                "accessions": [accession],
+                "reason": (
+                    f"row {period_start!r}->{period_end!r} for {ticker!r} is "
+                    f"carried by form {source_form!r}, which is not in the "
+                    "allowlist of forms whose annual dei focus Lane A can "
+                    f"state honestly ({sorted(_TOP_LINE_ANNUAL_CARRIER_FORMS)}"
+                    ") — the consumer's only annual focus ('FY') maps to the "
+                    "literal '10-K', so emitting this row would stamp a "
+                    "point with a form its filing never had; Lane A states "
+                    "no focus it cannot stand behind"
+                ),
+            })
+            continue
+        synth_fact = {"period_start": period_start}
+        duration_months = _duration_months(synth_fact, ticker, period_end)
+        if duration_months != 12:
+            skipped_rows.append({
+                "type": "non_annual_row_skipped",
+                "old": None,
+                "new": None,
+                "accessions": [accession],
+                "reason": (
+                    f"row {period_start!r}->{period_end!r} for {ticker!r} "
+                    f"classifies to duration_months={duration_months} (not "
+                    "12) — Lane A backfill is annual-only; the row's own "
+                    "fy/fp are never consulted to override this"
+                ),
+            })
+            continue
+        period_end_date = date.fromisoformat(period_end)
+        if _is_near_new_year_boundary(period_end_date):
+            skipped_rows.append({
+                "type": "new_year_boundary_ambiguous",
+                "old": None,
+                "new": None,
+                "accessions": [accession],
+                "reason": (
+                    f"annual row ending {period_end!r} for {ticker!r} has "
+                    "crossed into January — within "
+                    "FISCAL_BOUNDARY_TOLERANCE_DAYS="
+                    f"{FISCAL_BOUNDARY_TOLERANCE_DAYS} AFTER Jan 1 — where "
+                    "the period-end-year labeling convention is unsound for "
+                    "a 52/53-week filer whose year-end rolls past New Year, "
+                    "and Lane A has no dei calendar to disambiguate; Lane B "
+                    "remains the authority for this fiscal year (a DECEMBER "
+                    "year-end is not this hazard WHEN the filer's nominal "
+                    "year-end is also in December, and is backfilled "
+                    "normally; a late-December end from an EARLY-JANUARY "
+                    "nominal diverges too, but is undetectable here — see "
+                    "_is_near_new_year_boundary)"
+                ),
+            })
+            continue
+        duration_weeks = _duration_weeks(synth_fact, ticker, period_end)
+        week_span_days = _duration_span_days(
+            synth_fact, ticker, period_end, field="duration_weeks",
+        )
+        facts.append({
+            "concept": full_concept,
+            "dimensions": {},
+            "value": float(row.get("value")),
+            "period_start": period_start,
+            "period_end": period_end,
+            "accession": accession,
+            "filed": row.get("filed"),
+            "duration_months": duration_months,
+            "duration_weeks": duration_weeks,
+            "week_lane_band": _week_lane_class(week_span_days),
+            "fiscal_year": period_end_date.year,
+            "fiscal_quarter": "FY",
+            # Same CALENDAR-basis expression `_build_dimensional_revenue_fact`
+            # uses (:3216-3217) — never re-derived, so both lanes of the ONE
+            # `total_revenue` series compute it identically (kickoff
+            # correction: inconsistent field presence across one durable
+            # series is a worse defect than two unrelated producers
+            # differing).
+            "calendar_year": period_end_date.year,
+            "calendar_quarter": f"Q{(period_end_date.month - 1) // 3 + 1}",
+        })
+        # Task 3 + seam fix 18fc47fd: keyed by accession and populated ONLY
+        # from rows that were
+        # actually KEPT, so the map never carries an FY declaration for a
+        # filing this pack emits no fact from. One accession is one filing
+        # with one form, so repeated accessions write an identical entry.
+        fiscal_calendars[accession] = _top_line_backfill_calendar(
+            fiscal_period_focus
+        )
+
+    return {
+        "company": ticker,
+        "facts": facts,
+        "coverage": {"skipped_rows": skipped_rows},
+        "fiscal_calendars": fiscal_calendars,
+    }
 
 
 # Week-based filer quarter structures (Task 2, docs/loom/plans/2026-07-18-
@@ -3222,6 +3757,14 @@ def extract_dimensional_revenue(
     # this loop always runs — empty means "ran, none found", matching the
     # other DQC-style channels above.
     axis_exclusions: list[dict] = []
+    # Task 2, docs/loom/plans/2026-07-25-company-total-revenue.md: Lane B's
+    # top-line lane shares this per-filing loop (zero marginal fetch cost —
+    # same filing, same parse). A filing whose flat facts contain no
+    # allowlist candidate (`select_top_line_concept` returns None) never
+    # fabricates a value — it is recorded here by accession instead. Always
+    # a list, matching the other DQC-style channels above (empty = ran,
+    # none found).
+    top_line_gaps: list[dict] = []
     for filing in selected:
         accession = filing.accession_no
         try:
@@ -3272,10 +3815,39 @@ def extract_dimensional_revenue(
                 fiscal_year_reconciliation.append(reconciliation_flag)
             if not keep:
                 continue
+        # Task 2: resolve this filing's ONE winning flat top-line concept
+        # BEFORE the per-fact loop below — `select_top_line_concept` needs
+        # to see every candidate fact on the filing to rank them, not one
+        # fact at a time. `winning_top_line_concept is None` means no
+        # candidate qualified (recorded under coverage below, never a
+        # fabricated fact).
+        top_line_candidates = [
+            fact for fact in facts_records if _is_top_line_revenue_fact(fact)
+        ]
+        winning_top_line_concept = select_top_line_concept(top_line_candidates)
+        if winning_top_line_concept is None:
+            top_line_gaps.append({
+                "type": "no_top_line_candidate",
+                "old": None,
+                "new": None,
+                "accessions": [accession],
+                "reason": (
+                    f"filing {accession!r} carries no flat fact in the "
+                    f"top-line allowlist {_TOP_LINE_REVENUE_CONCEPTS!r} — "
+                    "no top-line revenue fact emitted for this filing"
+                ),
+            })
         filing_facts: list[dict] = []
         quarantine_flag: dict | None = None
         for fact in facts_records:
-            if not _is_dimensional_revenue_fact(fact):
+            is_dimensional = _is_dimensional_revenue_fact(fact)
+            is_winning_top_line = (
+                winning_top_line_concept is not None
+                and _is_top_line_revenue_fact(fact)
+                and fact.get("concept", "").rsplit(":", 1)[-1]
+                == winning_top_line_concept
+            )
+            if not is_dimensional and not is_winning_top_line:
                 # Task 1: count every disallowed dim_ axis this WOULD-BE
                 # revenue fact carries (never a fact that fails an
                 # unrelated gate — `_dimensional_axis_exclusions` scopes
@@ -3362,6 +3934,7 @@ def extract_dimensional_revenue(
             "fetch_failures": fetch_failures,
             "unlabelable_filings": unlabelable_filings,
             "axis_exclusions": axis_exclusions,
+            "top_line_gaps": top_line_gaps,
         },
         "fiscal_calendars": fiscal_calendars,
     }
