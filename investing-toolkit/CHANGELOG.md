@@ -5,6 +5,65 @@ All notable changes to investing-toolkit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.37.0] — 2026-07-25
+
+### Fixed — `derive_kpi_id` made injective, up to case
+
+`derive_kpi_id` minted the durable series identity for every dimensional KPI
+point by a lossy transform of the fact's XBRL signature, and the loss cut both
+ways — too coarse on one axis, too fine on another. A live 47-filer probe
+measured both: 23 of 47 filers lost their entire dimensional lane to a
+collision that should never have happened, and 21 series were split across two
+identities that should have been one. This release fixes the identity function
+so neither case arises.
+
+The guard's all-or-nothing blast radius — one colliding signature refuses the
+whole pack, not just that series — is unchanged and remains open; it simply has
+far less to fire on now.
+
+- **A non-default `ConsolidationItemsAxis` member now discriminates
+  `kpi_id`.** A segment's operating view and its intersegment eliminations —
+  previously the same id, because the axis was dropped entirely — now mint
+  two distinct series. This axis accounts for 128 of the 149 collisions the
+  47-filer probe found (the other 21 are the case drift below); the 23 filers
+  that lost their whole dimensional lane did so to one kind or the other, not
+  to this one alone. A default or absent member still adds no token, so the
+  already-shipped 2.36.0 fold (an absent tag and an explicit
+  `OperatingSegmentsMember` are one series) is unchanged.
+- **`kpi_id` now carries a 12-hex digest of the case-folded identity
+  tuple**, making it injective up to case — mirroring `kpi_store._series_key`'s
+  own readable-stem-plus-digest pattern. One filer's 10-Q and 10-K spellings
+  of the same segment (e.g. `DataCenterMember` vs `DatacenterMember`) used to
+  mint two ids, permanently splitting that series' quarterly history from its
+  annual history; they now fold into ONE series carrying both. 21 such series
+  were measured on the probe corpus.
+- **The collision guard (`_claim_kpi_id`) now accepts a case-insensitively
+  equal claimant** — both spellings' points append into the one shared
+  series — and still raises on every other, structurally distinct claimant.
+- **`kpi_store` now budgets the series FILENAME length.** The readable
+  `<company>__<kpi_id>` stem is capped so the atomic-write temp file stays
+  within the 255-byte filesystem limit; the collision-proofing digest is still
+  computed over the FULL raw `(company, kpi_id)` pair, and any filename that
+  already fit is byte-identical. Found by the close-out dogfood, not by the
+  suite: the id digest added 14 bytes, which pushed JNJ's 4-axis signatures
+  from 243 to 257 bytes and aborted that filer's entire ingest with
+  `OSError: [Errno 63] File name too long`. `kpi_id` values are unaffected —
+  only the file the series is stored in.
+
+**Breaking: `kpi_id` values change format.** Any series written by an
+earlier version will not line up with points written by this one. No
+migration is shipped, and none is possible: under the old scheme, a
+non-default consolidation member produced an id byte-identical to the
+default member's, so no script could tell the two apart after the fact.
+Anyone holding an existing `kpi-store` should re-ingest from source. Shipped
+as a minor bump because the store is verifiably empty at ship time — no
+consumer is broken in fact — not because the change is non-breaking.
+
+Offline suite: 1087 passed, 2 skipped, 61 deselected (`-m "not network"`).
+Close-out dogfood: the real `ingest_pack` → `kpi_store.append` path run over
+all 47 cached live SEC packs into an isolated store — 47 of 47 ingested, 0
+aborted, 51,147 facts → 2,100 series → 35,415 stored points.
+
 ## [v2.36.0] — 2026-07-25
 
 ### Added — company total (top-line) revenue, two-lane store ingestion

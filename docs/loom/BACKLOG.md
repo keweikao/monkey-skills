@@ -194,53 +194,145 @@
   fixtures" though it now also exercises the -ci 2330 fixture; the 2330 fact-count literal
   `2002` is a 3rd pin copy — touch-up on next edit.
 
-## investing-toolkit kpi_id identity vs the consolidation axis and concept-case drift (COMMITTED-NEXT)
-- Status: COMMITTED-NEXT
-- Start: next investing-toolkit arc. User-decided 2026-07-25 to ship 2.36.0 first
-  and take this separately, because `derive_kpi_id` is a DURABLE identity
-  function — changing it fragments every series already stored under the old
-  slug, so it needs its own brief, its own review, and an explicit decision
-  about existing data rather than a close-out patch.
-- Origin: 7-filer live end-to-end run, 2026-07-25, branch feat-total-revenue-lane.
-  Full pipeline per filer (real SEC fetch -> pack -> ingest -> isolated store).
-  Result: the arc's own capability (total revenue in the store) works for 6 of 7;
-  the inherited DIMENSIONAL lane aborts entirely for 2 of 7.
-- Live evidence, verbatim:
-  - **XOM** — `('us-gaap:Revenues', (StatementBusinessSegments=Upstream,
-    StatementGeographical=US), 'IntersegmentEliminationMember')` and the same
-    concept+dims under `'OperatingSegmentsMember'` both derive
-    `revenues__statementbusinesssegments-upstream__statementgeographical-us`.
-    The guard refuses, correctly — but they are GENUINELY DIFFERENT SERIES (a
-    segment's operating view versus its intersegment eliminations), not one
-    series with a qualifier. `derive_kpi_id` drops the axis, so the ids collide.
-    XOM's Lane A is also unavailable, for an unrelated and correctly-loud reason:
-    no allowlist concept returns companyconcept rows for it at all.
-  - **JPM** — `jpm:OperatingRevenueRealEstateMortgagesChangesinFairValueof...`
-    and `...ChangesInFairValueOf...` — the SAME concept tagged with different
-    capitalization across filings — both derive one lowercased slug. JPM's
-    Lane A works (51 points, total_revenue 182,447,000,000 correct); only the
-    dimensional lane aborts.
-- What: the axis is a QUALIFIER for matching (`_fact_matches` folds an absent tag
-  to the default member) but is DISCRIMINATING for identity when the member is
-  non-default. The likely shape of the fix is to include a non-default
-  consolidation member in the slug, so `(dims, None)` and
-  `(dims, OperatingSegmentsMember)` keep one id while
-  `(dims, IntersegmentEliminationMember)` gets its own. That is a durable-id
-  change: decide what happens to series already written under the current slug
-  before touching it. The JPM case is separate and harder — the source data
-  carries a typo, and case-normalizing the signature key would make the
-  consumer's exact-concept match miss one of the two facts, so it is NOT the
-  same fix.
-- Also revisit together: BACKLOG item (l) of the 2.36.0 follow-ups (a collision
-  aborts BOTH lanes for the WHOLE pack). Filed there as deliberate, and the
-  reasoning still holds in isolation — but two of seven real filers now hit it,
-  which turns "fail loud on an ambiguous series" into "this filer is entirely
-  unavailable". Per-lane isolation of the claim map is the candidate, never a
-  weaker guard.
-- Verified working in the same run, for scope: AAPL 416,161,000,000;
-  WMT 713,163,000,000 (correctly `Revenues`, not RFCC's 706,413,000,000 — the
-  allowlist ordering discriminating live); NVDA 215,938,000,000;
-  COST 275,235,000,000; JPM 182,447,000,000; INTC 473 of 473 facts appended.
+## investing-toolkit kpi_id identity 2.37.0 — post-ship follow-ups (OPEN)
+
+- Status: OPEN. Filed at close-out 2026-07-26 (branch `feat-kpi-id-consolidation-axis`).
+- (a) 🟡 **No committed dogfood HARNESS.** The close-out dogfood (real
+  `ingest_pack` → `kpi_store.append` over 47 cached live packs) is what caught the
+  filename-length regression the 1084-test suite and the replay probe both missed —
+  but it ran from a session scratchpad and was NOT committed, so the next arc has to
+  rebuild it. The committed probe
+  (`tests/data/fixtures/capture_kpi_id_identity_probe.py`) replays the selector loop
+  only, by design. Making the dogfood repo-ready is real work (fetch/cache path,
+  isolated stores, counts-only output) and wants its own test + review, which is why
+  it was filed rather than patched in at close-out. Re-trigger: the next arc that
+  changes a producer or the store's write path — per
+  `docs/loom/memory/a-data-probe-is-not-a-pipeline-dogfood.md`, do NOT let a probe
+  stand in for it again.
+- (a2) 🟡 **`_signature_key` and `derive_kpi_id` disagree about the
+  ConsolidationItemsAxis — the guard can raise a FALSE collision.**
+  `derive_kpi_id` EXCLUDES `srt:ConsolidationItemsAxis` from the breakdown pairs
+  (`kpi_xbrl_ingest.py:255`); `_signature_key` leaves it in (`:348`). So a fact
+  carrying that axis INSIDE `dimensions` — rather than in its own `consolidation`
+  field — yields ONE kpi_id but TWO claim keys, and `_claim_kpi_id` refuses a pair
+  the id derivation is explicitly tested to fold
+  (`test_kpi_xbrl_ingest.py:662-669`). Executed probe, close-out review round 3:
+  `{SegmentAxis: DataCenterMember, srt:ConsolidationItemsAxis: OperatingSegmentsMember}`
+  + `consolidation=None` versus `{SegmentAxis: DataCenterMember}` +
+  `consolidation="OperatingSegmentsMember"` → identical id, non-equal claim keys,
+  raise. **Not reachable through the shipped producer**:
+  `sec_edgar_client._dimension_signature` allowlists four breakdown axes and routes
+  the consolidation axis to its own field (`:2265-2281`), so only a hand-built or
+  third-party `--pack` can express it; and it fails LOUD (whole-pack abort), never a
+  silent merge. Deliberately NOT fixed at close-out: aligning the two would change
+  `_signature_key`'s selector grouping, a wider blast radius than the defect, and the
+  brief scoped that function as untouched. Both affected docstrings now state the
+  divergence instead of claiming unification. Re-trigger: any arc that admits
+  third-party fact-packs, or the next touch of either key builder.
+- (a3) 🟢 **Two modules disagree on what "the consolidation axes" means.**
+  `kpi_xbrl_ingest._CONSOLIDATION_AXIS_LOCAL` (`:101`) names ONE axis; the producer's
+  `sec_edgar_client._CONSOLIDATION_AXIS_LOCAL_NAMES` (`:1997-2000`) names TWO
+  (`ConsolidationItemsAxis`, `ConsolidatedEntitiesAxis`) and folds both into the one
+  `consolidation` field. Unreachable today for the same allowlist reason as (a2);
+  fold into (a2)'s fix when it happens.
+- (b) 🟢 **Predictable temp path in the probe capture script**
+  (`tests/data/fixtures/capture_kpi_id_identity_probe.py:93`): the pack cache is a
+  fixed name under the world-writable system temp dir (CWE-377), and its cached
+  packs become committed evidence. Hand-run dev script only; move to `mkdtemp` or a
+  repo-local ignored dir on next touch.
+- (c) 🟢 **Stale cross-reference in the same script** (~:54-57): it cites "the
+  sibling probe script's fetch loop", but the only committed sibling
+  (`capture_companyconcept_form_domain.py`) has no fetch loop or cache. The
+  reference does not resolve; fix wording on next touch.
+
+## investing-toolkit — full three-statement + management-KPI history in kpi_store (OPEN)
+
+- Status: OPEN — the destination arc the longitudinal work has been building
+  toward. Filed 2026-07-25 after the user stated the intent explicitly: *"這一
+  整段機械處理應該是要做出完整的三大表與管理/非財務指標的年度與季度的連續歷史
+  資料給後續分析用的"*. That intent is the store's charter; this entry records
+  how far the producers actually are from it, and in what order to close the gap.
+- Start: READY. The `kpi_id` identity arc it depended on shipped as 2.37.0
+  (branch `feat-kpi-id-consolidation-axis`); that ordering was a real dependency,
+  not politeness — see §Sequencing.
+- **The container is already right; only the feed is missing.** Grounding:
+  - `report-kpi-tearsheet` is metric-AGNOSTIC — one row per `kpi_id`, periods as
+    columns, whatever the store holds (`report-kpi-tearsheet/SKILL.md`). It never
+    needs to learn about statements or operational KPIs.
+  - `kpi_store` is bitemporal, so a restated line item keeps both vintages — the
+    property that makes it an analysis substrate rather than a snapshot. Downstream
+    analysis reads `kpi_store dump/query`, NOT the tearsheet (the tearsheet is a
+    human one-pager over the same data).
+  - **The TW producer already proves the shape**: `kpi_tw._KPI_FIELDS`
+    (`kpi_tw.py:33-50`) writes a 15-field three-statement spine (revenue,
+    gross_profit, operating_income, pretax_income, net_income, eps_basic,
+    total_assets, total_liabilities, total_equity, cash, operating/investing/
+    financing_cash_flow, capex, fcf) across `_STATEMENTS` (`:53`) into the same
+    store the US dimensional producer writes to.
+
+### Sub-arc (a) — US three-statement producer (mirror the TW lane)
+
+- **Gap**: the US side computes canonical statements but never STORES them.
+  `DCF_CONCEPT_MAPPING` (`pack_us.py:125-175`) is **14 fields chosen for DCF**,
+  assembled into `income_statement` / `cash_flow` / `balance_sheet` inside
+  `pack_memo_fetch` (`pack_us.py:939-941`) — and no caller of `kpi_store.append`
+  consumes a memo-fetch pack (verified 2026-07-25 across every producer in
+  `analysis-kpi/scripts/`). So every memo run re-fetches and accumulates nothing.
+- **Cheap part**: the raw source is already fetched and cached — `action_facts`
+  without `--concept` returns the filer's full concept inventory
+  (`sec_edgar_client.py:695-700`, names + counts, values only per-concept). No new
+  data layer.
+- **Hard part, and the real work**: concept → line-item normalization. Statement
+  hierarchy, sign conventions, and **subtotal reconciliation** (components must add
+  back to the reported subtotal). Without the add-back check this lane is a silent-
+  lie generator — a wrong mapping is invisible in a rendered table.
+- **Identity**: follow the TW precedent — `kpi_id` from a repo-CANONICAL field slug,
+  never the filer's raw concept string (a filer's tagging changes across years;
+  a concept-keyed id fragments the series — `docs/loom/memory/derived-durable-id-
+  slug-is-a-lossy-one-way-door.md`, and the 2.36.0 `total_revenue` decision).
+- Open scope question for the brief: 14 DCF fields (parity with today) vs the TW
+  15-field spine (cross-market comparability) vs a genuinely full statement. The
+  spine is the likely smallest end state; a full statement is a different arc.
+
+### Sub-arc (b) — management / non-financial KPI wiring
+
+- **Gap**: the machinery shipped, the user path did not. `kpi_prose_candidates`
+  (Part 1, 2.28.0) + number robustness (Part 2, 2.29.0) produce verbatim-anchored
+  prose KPI candidates and `commit_to_store` (`kpi_prose_candidates.py:719`) appends
+  them to the SAME store — but nothing is SKILL-wired, so the capability is
+  unreachable from a conversation.
+- **Fail-closed by design, keep it**: `commit_to_store(confirmed=False)` writes
+  NOTHING without an explicit human confirm-all. Wiring must expose that confirm
+  step, never route around it.
+- **Blocked on**: Part 3 (lifecycle / re-verification / table-vs-prose and
+  prose-vs-prose conflict, surface-version marker) — scoped in
+  §"非金錢營運 KPI 自動化" above. Do not re-scope it here (SSOT).
+
+### Sub-arc (c) — rendering the annual + quarterly continuum
+
+- Already filed in full as §"KPI tearsheet — multi-granularity + per-market period
+  menu (OPEN)" — sub-quarter classifier, per-market granularity menu, discrete-vs-
+  cumulative axis, separate views per granularity. **Pointer only, do not restate.**
+- Relevance here: US annual and quarterly each render correctly today; a MIXED
+  table interleaves granularities. Once (a) lands, a company's store holds far more
+  rows and the interleave stops being cosmetic.
+
+### Sequencing (the dependency, stated)
+
+1. `kpi_id` identity arc — **prerequisite for (a), and it SHIPPED as 2.37.0.** (a)
+   multiplies stored series per company by roughly an order of magnitude (statement
+   fields × periods, later × segment dimensions). Collision probability in a lossy
+   id derivation rises with the number of distinct signatures, and a collision
+   aborts an entire pack. Scaling the feed before fixing identity would have scaled
+   the abort surface with it. The 2.37.0 close-out dogfood also showed why this
+   ordering mattered concretely: JNJ's 4-axis signatures put the series FILENAME
+   within 12 bytes of the OS limit, and (a)'s statement fields add more signatures
+   per company, not fewer.
+2. Sub-arc (a) — the largest capability gain per arc, and it has a worked TW
+   precedent to mirror rather than design from scratch.
+3. Sub-arc (c) — becomes user-visible pressure only after (a) fills the store.
+4. Sub-arc (b) — independent of (a) and (c); ordering against them is a priority
+   call, not a dependency. Blocked only on its own Part 3.
 
 ## investing-toolkit top-line revenue lane 2.36.0 — post-ship follow-ups (OPEN)
 - Status: OPEN
@@ -409,18 +501,15 @@
   2.34.0, 2026-07-25); whole-branch review PASS_WITH_NOTES + per-task 🟢 findings,
   logged not fixed. Brief/plan `docs/loom/{specs,plans}/2026-07-24-kpi-xbrl-store-producer.md`.
 - What:
-  (a) 🟡 **kpi_id collision guard keys on a FINER identity than the store.**
-  `ingest_pack`'s guard uses `_signature_key`'s raw `consolidation or None`, but the
-  store folds `consolidation None == default OperatingSegmentsMember`
-  (`_normalize_consolidation`) and `derive_kpi_id` is consolidation-blind. A pack
-  carrying one concept+dims under BOTH raw-None and explicit-default consolidation
-  (or two genuine consolidation views, which `kpi_xbrl.py:771/1704` contemplate)
-  would trip the guard as a FALSE collision though the store treats them as one
-  series. Reconcile: normalize consolidation in `_signature_key`, or compare
-  NORMALIZED signatures in the guard, so it fires only on TRUE identity collisions.
-  Theoretical today (`pack_us` emits one consolidation per signature). Guard added
-  this arc surfaces this LOUD (was a silent double-process before). See memory
-  [[derived-durable-id-slug-is-a-lossy-one-way-door]].
+  (a) ✅ **RESOLVED by the 2.37.0 identity arc — struck 2026-07-26.** This item said
+  the collision guard keyed on a finer identity than the store, and that
+  `derive_kpi_id` was consolidation-blind. Both were fixed on branch
+  `feat-kpi-id-consolidation-axis`: `_signature_key` normalizes the consolidation
+  qualifier through the consumer's own rule (2.36.0), and `derive_kpi_id` now takes
+  the qualifier and gives a NON-default member its own token (`e60a0745`). Its
+  prescribed remedy ("normalize consolidation in `_signature_key`, or compare
+  NORMALIZED signatures in the guard") is what shipped. Kept as a struck line rather
+  than deleted because (b) and (c) below are still open under this same heading.
   (b) 🟢 `kpi_xbrl_ingest.py` has NO try/except wrapper — a bad `--pack` / malformed
   JSON / a fact-pack missing both ticker+company surfaces as a raw traceback (exit 1),
   unlike sibling scripts' clean-message convention. Add clean error handling on next touch.
@@ -459,54 +548,6 @@
   lacks `unit` silently yields `unit=None` (same class as the shipped TWD fix,
   per-field). Non-fatal (the dogfood path carried TWD); consider a fail-loud or a
   canonical-wide TWD default when a TW field's unit is absent.
-
-## investing-toolkit KPI tearsheet — company total (top-line) revenue lane (COMMITTED-NEXT)
-- Status: COMMITTED-NEXT
-- Start: immediately after arc (d) (2.34.0) — user-stated 2026-07-24「接下來就要做 公司總營收」.
-- Origin: arc (d) scope decision (brief `docs/loom/specs/2026-07-24-kpi-xbrl-store-producer.md`
-  §Out of Scope) — v1 shipped dimensional-SEGMENT revenue only; company top-line total
-  (GAP-3 from the 5-filer dogfood) deferred as a distinct, differently-shaped feed.
-  SUPERSEDED 2026-07-25 by a live 8-filer probe (branch feat-total-revenue-lane;
-  brief `docs/loom/specs/2026-07-25-company-total-revenue.md`, plan
-  `docs/loom/plans/2026-07-25-company-total-revenue.md`) that DISPROVED this
-  entry's original premise below — kept for record, replaced by the two-lane
-  decision.
-- What: SUPERSEDED — original premise (now FALSE, disproved 2026-07-25): "the
-  `extract_dimensional_revenue` per-filing parse emits ZERO flat totals, so
-  top-line company revenue is unfetchable via arc (d)'s dimensional path; the
-  only shipped source is `action_facts(ticker,'Revenues')` → the
-  companyconcept series". A live probe (8/8 filers, real SEC fetch,
-  2026-07-25, evidence in the brief's §Probe findings) found every filer's
-  per-filing XBRL parse ALSO carries a flat (non-dimensioned) top-line
-  revenue fact. But "flat" alone is not sufficient: JPM emits 7 flat
-  revenue-shaped concepts of which only 2 (`Revenues` /
-  `RevenuesNetOfInterestExpense`) are the true total (the other 5 are
-  income-statement components), and a consolidation-qualifier-only flat fact
-  is NOT the consolidated total (XOM's `Revenues` under
-  `ConsolidationItemsAxis=OperatingSegmentsMember` reads 452,209M against a
-  true total of 332,238M).
-
-  Two-lane decision (see brief §Decision for full grounding):
-  - **Lane B (primary, per-filing)** — the existing per-filing XBRL parse
-    also emits the filing's ONE winning flat top-line fact, picked by a
-    closed ordered allowlist grounded in XBRL US DQC Revenue Guidance
-    (`Revenues` > `RevenuesNetOfInterestExpense` >
-    `RevenueFromContractWithCustomer...ExcludingAssessedTax` >
-    `...IncludingAssessedTax`), gated to `is_dimensioned == False` only.
-    Ingested under the fixed canonical `kpi_id == "total_revenue"` (NOT a
-    concept-derived slug — a filer's tagging changing across years must not
-    fragment the durable series), `source_kind == "xbrl-topline"`.
-  - **Lane A (annual-only backfill, companyconcept)** — reshapes the
-    `companyconcept` REST series (`action_facts(ticker,'Revenues')`-style
-    fetch, `sec_edgar_client.py:666-711,271-294`) into the same point shape
-    to backfill fiscal years older than the filings Lane B fetched — ANNUAL
-    ROWS ONLY, never reading the row's `fy`/`fp` (those are the FILING's
-    focus, not the fact's own period — memory
-    `fiscal-year-derive-per-fact-against-filing-calendar` trap #2).
-    `source_kind == "xbrl-companyfacts"` (already trusted).
-  - Overlap discipline: a fiscal year covered by both lanes must agree
-    (pinned by a real-data e2e test); a same-dedup-key value disagreement
-    fails loud rather than silently storing a fabricated `†`.
 
 ## investing-toolkit `source_kind` naming debt — endpoint-name axis vs shape axis (OPEN)
 - Status: OPEN

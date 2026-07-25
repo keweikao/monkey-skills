@@ -35,6 +35,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -100,6 +101,21 @@ def _run_dump(company, env) -> subprocess.CompletedProcess:
     )
 
 
+def _assert_digest_suffixed(kpi_id, expected_prefix):
+    """Assert `kpi_id` is exactly `expected_prefix + "__" + <12-lowercase-hex>`
+    — `derive_kpi_id`'s shipped shape since Task 2 (the CASE-FOLDED-identity
+    digest, `docs/loom/plans/2026-07-25-kpi-id-injective-identity.md` Task 2).
+    A shared shape-check so each call site does not hand-roll the regex; the
+    digest's exact VALUE is never asserted (it is a derived hash, not a
+    literal this suite pins), only its shape and that the readable prefix it
+    is appended to is unchanged.
+    """
+    match = re.fullmatch(re.escape(expected_prefix) + r"__([0-9a-f]{12})", kpi_id)
+    assert match is not None, (
+        f"expected {expected_prefix!r} + __<12-hex digest>; got {kpi_id!r}"
+    )
+
+
 def test_ingest_appends_each_vintage(tmp_path):
     """The real 2-vintage restatement pack (ONE dimensional signature) ingests
     as TWO store points under ONE kpi_id. `kpi_store dump` groups them into a
@@ -146,14 +162,16 @@ def test_ingest_appends_each_vintage(tmp_path):
     )
 
 
-def _collision_pack() -> dict:
-    """SYNTHETIC collision probe — NOT a real filing. Built from the real
-    fixture's fact shape (accession/fiscal_calendars untouched), varying
-    ONLY the dimension member's namespace prefix (`ns1:` vs `ns2:`) so two
-    DISTINCT dimensional signatures collapse to the SAME `derive_kpi_id`
-    slug (both strip to local-name `product`). Real us-gaap/srt taxonomies
-    never actually collide this way — this fixture exists solely to force
-    the fail-loud guard's raise path.
+def _namespace_variant_pack() -> dict:
+    """SYNTHETIC namespace-variant probe — NOT a real filing. Built from the
+    real fixture's fact shape (accession/fiscal_calendars untouched), varying
+    ONLY the dimension member's namespace prefix (`ns1:` vs `ns2:`) so the two
+    facts share ONE readable-prefix slug (both strip to local-name `product`)
+    but remain STRUCTURALLY distinct under `derive_kpi_id`'s digest (Task 2),
+    which folds on CASE only, never on namespace. Real us-gaap/srt taxonomies
+    never actually collide this way — this fixture exists to prove the
+    readable-prefix collision that used to reach `_claim_kpi_id`'s raise
+    (pre-Task-2) is now resolved by construction, one layer below the guard.
     """
     pack = _real_shaped_pack()
     base = pack["facts"][0]
@@ -168,32 +186,45 @@ def _collision_pack() -> dict:
     return pack
 
 
-def test_ingest_raises_on_kpi_id_collision(tmp_path):
-    """Two facts with DISTINCT dimensional signatures (`ns1:ProductMember`
-    vs `ns2:ProductMember` — different values, so different `_signature_key`
-    tuples) whose `derive_kpi_id` slugs COLLAPSE to the same `kpi_id` (both
-    strip to `product`) must be rejected loudly — a silent collision would
-    merge two DIFFERENT segments' revenues into one store series (a false
-    restatement †). Regression (same test, so both directions stay coupled):
-    the real 2-vintage SAME-signature pack — where multiple vintages
-    legitimately share one kpi_id — must NOT raise; the guard fires only on
-    distinct-signature collisions, never on expected vintage grouping.
+def test_ingest_splits_namespace_variant_signatures_into_distinct_series(tmp_path):
+    """Two facts with DISTINCT dimensional signatures (`ns1:ProductMember` vs
+    `ns2:ProductMember` — different namespace prefixes, so different raw
+    dimension VALUES) whose OLD readable-prefix-only slug used to COLLAPSE to
+    the same kpi_id (both strip to `product`) now mint DIFFERENT ids and
+    ingest as TWO series — no raise.
+
+    RE-PINNED (`docs/loom/memory/a-test-can-pin-behaviour-with-a-false-
+    rationale.md`): this test used to assert the guard raised, on the theory
+    that `derive_kpi_id`'s readable prefix WAS the whole id, so a namespace-
+    stripped collision at that layer was a real collision needing a fail-loud
+    catch. Since Task 2, `derive_kpi_id` appends a `__<12-hex>` digest of the
+    CASE-FOLDED (never namespace-folded) raw identity tuple:
+    `ns1:ProductMember`.casefold() != `ns2:ProductMember`.casefold(), so the
+    two digests differ and the ids are genuinely distinct BY CONSTRUCTION —
+    the guard has nothing left to fire on for this scenario, and correctly
+    so: these ARE two different segment breakdowns under two different vendor
+    namespaces, not one series split by a filer's spelling quirk. Regression
+    (same test, so both directions stay coupled): the real 2-vintage
+    SAME-signature pack — where multiple vintages legitimately share one
+    kpi_id — must still NOT raise.
     """
     store_dir = tmp_path / "store"
     env = {**os.environ, "KPI_STORE_DIR": str(store_dir)}
 
-    collision_path = tmp_path / "collision_pack.json"
-    collision_path.write_text(json.dumps(_collision_pack()), encoding="utf-8")
-    collision_result = _run_ingest(collision_path, env)
-    assert collision_result.returncode != 0, (
-        "distinct-signature kpi_id collision must be rejected, not silently "
-        f"merged: stdout={collision_result.stdout!r}"
+    namespace_variant_path = tmp_path / "namespace_variant_pack.json"
+    namespace_variant_path.write_text(
+        json.dumps(_namespace_variant_pack()), encoding="utf-8"
     )
-    assert "collision" in collision_result.stderr.lower(), (
-        f"rejection must name the collision: stderr={collision_result.stderr!r}"
+    namespace_variant_result = _run_ingest(namespace_variant_path, env)
+    assert namespace_variant_result.returncode == 0, (
+        "structurally distinct namespace-variant signatures must ingest as "
+        f"two series, not raise: stdout={namespace_variant_result.stdout!r} "
+        f"stderr={namespace_variant_result.stderr!r}"
     )
-    assert "product" in collision_result.stderr, (
-        f"rejection must name the colliding kpi_id: stderr={collision_result.stderr!r}"
+    summary = json.loads(namespace_variant_result.stdout)
+    assert len(summary["kpi_ids"]) == 2, (
+        "the two namespace-variant signatures must mint distinct ids; got "
+        f"{summary['kpi_ids']}"
     )
 
     # Regression: the real SAME-signature 2-vintage pack must NOT trip the
@@ -205,6 +236,182 @@ def test_ingest_raises_on_kpi_id_collision(tmp_path):
         "SAME-signature vintages must still ingest without raising: "
         f"stdout={vintage_result.stdout!r} stderr={vintage_result.stderr!r}"
     )
+
+
+def _case_variant_pack() -> dict:
+    """REAL observed spelling-drift shape (brief §Probe evidence: AMD's 10-Q
+    `DataCenterMember` vs its 10-K `DatacenterMember`). Built from the real
+    fixture's two vintages (accession/value/window untouched), varying ONLY
+    the dimension member's letter case, so both facts share ONE signature
+    under `derive_kpi_id`'s case-folded digest (Task 2) but arrive as TWO raw
+    spellings — each spelling is its own `_fact_matches` selector (fact
+    matching is untouched by this arc), and both selectors must feed the SAME
+    kpi_id.
+    """
+    pack = _real_shaped_pack()
+    fact_a = dict(pack["facts"][0])
+    fact_a["dimensions"] = {"StatementBusinessSegments": "DataCenterMember"}
+    fact_b = dict(pack["facts"][1])
+    fact_b["dimensions"] = {"StatementBusinessSegments": "DatacenterMember"}
+    pack["facts"] = [fact_a, fact_b]
+    return pack
+
+
+def test_ingest_folds_case_variant_selectors_into_one_series(tmp_path):
+    """A pack carrying ONE dimensional signature under TWO spellings — a REAL
+    observed shape (AMD's 10-Q `DataCenterMember` vs its 10-K
+    `DatacenterMember`, brief `docs/loom/specs/2026-07-25-kpi-id-injective-
+    identity.md` §Probe evidence) — must ingest into ONE series holding every
+    vintage from BOTH spellings, instead of raising.
+
+    Task 2 already folds case into `derive_kpi_id`'s digest, so both
+    spellings' selectors derive the IDENTICAL kpi_id; what still blocked this
+    before this task's fix was `_claim_kpi_id` itself — it compared each
+    selector's RAW (un-folded) `_signature_key`, so two selectors landing on
+    one id read as a distinct-signature collision and the guard raised. The
+    fix relaxes ONLY that comparison to case-insensitive equality;
+    `_fact_matches` still exact-matches each selector's own spelling, so both
+    selectors keep hitting only their own facts and the union of both lands
+    on the shared id.
+    """
+    store_dir = tmp_path / "store"
+    env = {**os.environ, "KPI_STORE_DIR": str(store_dir)}
+
+    pack = _case_variant_pack()
+    pack_path = tmp_path / "case_variant_pack.json"
+    pack_path.write_text(json.dumps(pack), encoding="utf-8")
+
+    result = _run_ingest(pack_path, env)
+    assert result.returncode == 0, (
+        "a pure case-variant pair must fold into ONE series, not raise: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+    summary = json.loads(result.stdout)
+    assert len(summary["kpi_ids"]) == 1, (
+        f"both spellings must land in ONE series; got {summary['kpi_ids']}"
+    )
+    assert summary["appended"] == len(pack["facts"]), (
+        f"every fact from BOTH spellings must be appended: {summary['appended']} "
+        f"appended for {len(pack['facts'])} facts"
+    )
+
+    dump = _run_dump(pack["company"], env)
+    assert dump.returncode == 0, (
+        f"dump failed: stdout={dump.stdout!r} stderr={dump.stderr!r}"
+    )
+    payload = json.loads(dump.stdout)
+    assert len(payload["series"]) == 1, (
+        f"expected ONE series, got {[s['kpi_id'] for s in payload['series']]}"
+    )
+    stored_values = sorted(
+        obs["value"]
+        for period in payload["series"][0]["periods"]
+        for obs in period["observations"]
+    )
+    assert stored_values == sorted(fact["value"] for fact in pack["facts"]), (
+        f"every vintage from BOTH spellings must survive; got {stored_values}"
+    )
+
+
+def test_claim_kpi_id_still_raises_on_a_forced_collision(ingest_module):
+    """SYNTHETIC-BY-NECESSITY. After Task 2, `derive_kpi_id`'s digest is
+    injective over the raw (case-folded-only) identity tuple, so no ordinary
+    production input can make two STRUCTURALLY different signatures land on
+    one kpi_id any more — that unreachability is the whole point of the
+    digest. This test therefore forces the collision directly at
+    `_claim_kpi_id`, bypassing `derive_kpi_id` entirely, because that is the
+    only way left to exercise the guard's raise branch at all.
+
+    This is NOT proof that today's production inputs can reach the raise
+    path. It is defense-in-depth: proof the raise still fires if some future
+    change to `derive_kpi_id` (a shorter digest, a weaker fold, a
+    hash-truncation bug) reintroduces a real collision.
+
+    One caveat, found by the close-out review and deliberately not fixed here:
+    the raise IS reachable by a hand-built pack that puts
+    `srt:ConsolidationItemsAxis` inside `dimensions` instead of in its own
+    `consolidation` field — `derive_kpi_id` drops that axis from the breakdown
+    pairs while `_signature_key` keeps it, so one id gets two claim keys and
+    the guard raises a FALSE collision. The shipped SEC producer cannot emit
+    that shape (`_dimension_signature` allowlists four breakdown axes and
+    routes the consolidation axis elsewhere), and the failure is loud rather
+    than a silent merge, so it is filed as a BACKLOG next-touch. Stated here
+    because "unreachable" was the claim this test rested on, and it is
+    unreachable only through the producer — not in principle.
+    """
+    claim_kpi_id = ingest_module._claim_kpi_id
+    claimed_by: dict = {}
+    key_a = (
+        "us-gaap:Revenues",
+        (("StatementBusinessSegments", "Alpha"),),
+        "OperatingSegmentsMember",
+    )
+    key_b = (
+        "us-gaap:Revenues",
+        (("StatementBusinessSegments", "Beta"),),
+        "OperatingSegmentsMember",
+    )
+
+    claim_kpi_id(claimed_by, "forced-collision-id", key_a)
+    with pytest.raises(ValueError, match="collision"):
+        claim_kpi_id(claimed_by, "forced-collision-id", key_b)
+
+
+def test_casefold_claim_key_agrees_across_axis_name_case_and_reordered_axes(
+    ingest_module,
+):
+    """SYNTHETIC-BY-NECESSITY, same class as
+    `test_claim_kpi_id_still_raises_on_a_forced_collision` above: exercises
+    `_casefold_claim_key`/`_claim_kpi_id` directly rather than through the
+    `ingest` CLI, because a REAL multi-axis fact where only the AXIS NAME's
+    case drifts between two selectors ALSO flips `derive_kpi_id`'s readable
+    prefix (its `breakdown_axes = sorted(dimensions)` is the same raw,
+    case-sensitive sort `_signature_key` uses), so today the two selectors
+    would mint two DIFFERENT full kpi_ids and never reach this guard's
+    comparison through `ingest_pack` — this exact pair is unreachable via a
+    real ingest today (code-quality finding, kpi_xbrl_ingest.py:198-200 vs
+    :291-296). That is exactly why this is tested at the guard's own unit
+    level: the guard's documented invariant ("mirrors `derive_kpi_id`'s own
+    digest fold") must hold on its own terms, not merely by coincidence of
+    today's prefix/signature-key sort coupling — a future caller (or a
+    `derive_kpi_id` prefix change) could hand two such selectors the SAME
+    kpi_id, exactly as this test does directly.
+
+    `_signature_key` (`kpi_xbrl_ingest.py:274-278`) sorts `dimensions.items()`
+    RAW (case-sensitive) — the identical sort basis `derive_kpi_id`'s prefix
+    uses. With >=2 axes, changing ONLY one axis NAME's case can flip that raw
+    sort order, so the two claim keys' dims tuples differ in ELEMENT ORDER,
+    not just in case. `derive_kpi_id`'s digest re-sorts by the CASEFOLDED
+    value (Task 2), so it folds both to the identical digest regardless of
+    that order — `_casefold_claim_key` must do the same (casefold, THEN
+    re-sort) or it reads the pre-casefold order mismatch as a distinct
+    signature.
+    """
+    signature_key = ingest_module._signature_key
+    casefold_claim_key = ingest_module._casefold_claim_key
+    claim_kpi_id = ingest_module._claim_kpi_id
+
+    key_a = signature_key(
+        "us-gaap:Revenues", {"Alpha": "One", "Zeta": "Two"}, None
+    )
+    key_b = signature_key(
+        "us-gaap:Revenues", {"alpha": "One", "Zeta": "Two"}, None
+    )
+    assert key_a[1] != key_b[1], (
+        "fixture must actually diverge in pre-casefold element order — "
+        f"got {key_a[1]!r} == {key_b[1]!r}, this pair does not exercise the bug"
+    )
+
+    assert casefold_claim_key(key_a) == casefold_claim_key(key_b), (
+        "the two claim keys are ONE signature under derive_kpi_id's own "
+        f"case-fold; got {casefold_claim_key(key_a)!r} != "
+        f"{casefold_claim_key(key_b)!r}"
+    )
+
+    claimed_by: dict = {}
+    claim_kpi_id(claimed_by, "shared-kpi-id", key_a)
+    claim_kpi_id(claimed_by, "shared-kpi-id", key_b)  # must NOT raise
 
 
 def _consolidation_variant_pack() -> dict:
@@ -251,11 +458,15 @@ def test_ingest_collapses_consolidation_variants_of_one_signature(tmp_path):
     )
 
     summary = json.loads(result.stdout)
-    assert summary["kpi_ids"] == [
+    assert len(summary["kpi_ids"]) == 1, (
+        f"both variants must land in ONE series; got {summary['kpi_ids']}"
+    )
+    _assert_digest_suffixed(
+        summary["kpi_ids"][0],
         "revenuefromcontractwithcustomerexcludingassessedtax"
         "__productorservice-assemblyandtest"
-        "__statementbusinesssegments-intelfoundry"
-    ], f"both variants must land in ONE series; got {summary['kpi_ids']}"
+        "__statementbusinesssegments-intelfoundry",
+    )
     assert summary["appended"] == len(pack["facts"]), (
         "every fact must be appended EXACTLY once — fewer means a variant was "
         f"dropped, more means it was double-emitted: {summary['appended']} "
@@ -282,66 +493,95 @@ def test_ingest_collapses_consolidation_variants_of_one_signature(tmp_path):
     )
 
 
-def test_ingest_collision_guard_fires_across_consolidation_variants(tmp_path):
-    """The qualifier collapse must not become a REMOVAL of the guard: two
-    GENUINELY DISTINCT breakdown signatures deriving one `kpi_id` still raise
-    even when they also differ on the consolidation qualifier.
+def test_ingest_splits_namespace_variant_signatures_across_consolidation_variants(
+    tmp_path,
+):
+    """The qualifier normalization in `_signature_key` must not accidentally
+    mask a genuine BREAKDOWN difference: two namespace-variant signatures
+    (`ns1:` vs `ns2:` — see `_namespace_variant_pack`) still mint DISTINCT ids
+    and ingest as two series even when they ALSO differ on the consolidation
+    qualifier.
 
-    Without this, normalizing the qualifier out of `_signature_key` could be
-    "fixed" by dropping the key's discriminating power altogether — the two
-    facts below differ on a real BREAKDOWN member (`ns1:` vs `ns2:`), which is
-    exactly the merge the guard exists to refuse. The sibling
-    `test_ingest_raises_on_kpi_id_collision` pins the same-qualifier case; this
-    one pins the axis the fix touches.
+    RE-PINNED (`docs/loom/memory/a-test-can-pin-behaviour-with-a-false-
+    rationale.md`): this test used to assert the guard raised, on the theory
+    that normalizing the qualifier out of `_signature_key` could be "fixed" by
+    dropping the key's discriminating power altogether, so the guard had to
+    catch a namespace-stripped readable-prefix collision the consumer's own
+    normalization could not tell apart. Since Task 2's digest is injective
+    over the raw (non-namespace-folded) breakdown member text, the two facts
+    below now mint distinct ids BY CONSTRUCTION regardless of their
+    consolidation qualifier — `OperatingSegmentsMember` and `None` both
+    normalize to the SAME default qualifier and add no token to either id, so
+    the split is driven entirely by the breakdown member, exactly as it
+    should be. The sibling
+    `test_ingest_splits_namespace_variant_signatures_into_distinct_series`
+    pins the same-qualifier case; this one pins the axis the fix touches.
     """
     store_dir = tmp_path / "store"
     env = {**os.environ, "KPI_STORE_DIR": str(store_dir)}
 
     pack = _consolidation_variant_pack()
     fact_a, fact_b = (dict(pack["facts"][0]), dict(pack["facts"][1]))
-    # Distinct breakdown members that slug-collapse to the same kpi_id, carried
-    # under DIFFERENT consolidation qualifiers.
+    # Distinct breakdown members that used to slug-collapse to the same
+    # readable-prefix kpi_id, carried under DIFFERENT consolidation qualifiers.
     fact_a["dimensions"] = {"StatementBusinessSegments": "ns1:ProductMember"}
     fact_a["consolidation"] = "OperatingSegmentsMember"
     fact_b["dimensions"] = {"StatementBusinessSegments": "ns2:ProductMember"}
     fact_b["consolidation"] = None
     pack["facts"] = [fact_a, fact_b]
 
-    pack_path = tmp_path / "cross_variant_collision_pack.json"
+    pack_path = tmp_path / "cross_variant_split_pack.json"
     pack_path.write_text(json.dumps(pack), encoding="utf-8")
 
     result = _run_ingest(pack_path, env)
-    assert result.returncode != 0, (
-        "distinct BREAKDOWN signatures must still collide even when their "
-        f"consolidation qualifiers differ: stdout={result.stdout!r}"
+    assert result.returncode == 0, (
+        "distinct BREAKDOWN signatures must ingest as two series even when "
+        f"their consolidation qualifiers differ: stdout={result.stdout!r} "
+        f"stderr={result.stderr!r}"
     )
-    assert "collision" in result.stderr.lower(), (
-        f"rejection must name the collision: stderr={result.stderr!r}"
+    summary = json.loads(result.stdout)
+    assert len(summary["kpi_ids"]) == 2, (
+        "the two breakdown-distinct signatures must mint distinct ids; got "
+        f"{summary['kpi_ids']}"
     )
 
 
-def test_ingest_raises_on_two_non_default_consolidation_members(tmp_path):
-    """Two facts sharing one concept+breakdown but carrying two NON-DEFAULT
-    `ConsolidationItemsAxis` members must be REJECTED loudly.
+def test_ingest_splits_default_and_non_default_consolidation_into_distinct_series(
+    tmp_path,
+):
+    """Two facts sharing one concept+breakdown but carrying the DEFAULT
+    `OperatingSegmentsMember` view on one side and a NON-DEFAULT
+    `ConsolidationItemsAxis` member on the other must ingest as TWO series,
+    not collide.
 
-    This is the axis the sibling collapse test cannot see, and it is what
-    separates NORMALIZING the qualifier from DELETING it. `_normalize_
-    consolidation` folds only `None` into `OperatingSegmentsMember`; it does not
-    make `IntersegmentEliminationMember` the same series. Since `derive_kpi_id`
-    drops the axis entirely, that pair derives ONE kpi_id from two series the
-    consumer keeps apart — so the store's dedup key would silently discard one
-    of them, and failing loud is the only honest answer.
+    Re-pinned polarity (`docs/loom/memory/a-test-can-pin-behaviour-with-a-false-
+    rationale.md`): this test used to assert `returncode != 0` on the theory
+    that `derive_kpi_id` dropped the qualifier entirely, so both facts derived
+    ONE id the guard had to reject to avoid a silent drop. `derive_kpi_id` no
+    longer drops it — a non-default `consolidation` now appends its own
+    `__<member-slug>` token to the readable prefix (Task 1's change, this same
+    arc). A non-default member is DISCRIMINATING for identity: `Operating
+    SegmentsMember` and `IntersegmentEliminationMember` are genuinely different
+    amounts — a segment's operating view vs its intersegment eliminations,
+    adjacent columns of one reconciliation table, not two spellings of the
+    same number. So the two facts now mint DIFFERENT ids by construction, the
+    collision guard has nothing to fire on, and ingest succeeding with two
+    series is the correct outcome, not a gap the guard must patch over.
 
-    Without this test the suite cannot distinguish the shipped
-    `_signature_key` from one that drops `consolidation` from the key
-    altogether: that mutant collapses the pair into a single selector whose
-    qualifier matches only ONE of the two facts, and the other is dropped with
-    no error and no trace — `appended: 1` for a 2-fact pack. The collapse test
-    passes under that mutant; only this one fails.
+    Without this test the suite cannot distinguish the shipped `derive_kpi_id`
+    (which appends the non-default member's slug) from a mutant that keeps
+    dropping the qualifier: that mutant would derive ONE id for both facts and
+    either silently collapse them into one series or spuriously trip the
+    guard — either way the two REAL amounts stop being two series. Asserting
+    two distinct ids AND two distinct stored series rules out both. What this
+    test does NOT cover — two GENUINELY non-default members discriminating
+    against EACH OTHER, rather than against the default — is pinned instead by
+    `test_derive_kpi_id_discriminates_non_default_consolidation`'s
+    `elimination`-vs-`corporate` assertion.
 
-    SYNTHETIC probe (mirrors `_collision_pack`): no real INTC filing tags this
-    concept with an intersegment-elimination member, so the pack is the live
-    fixture's own facts RE-TAGGED on the qualifier axis only. Values /
+    SYNTHETIC probe (mirrors `_namespace_variant_pack`): no real INTC filing
+    tags this concept with an intersegment-elimination member, so the pack is
+    the live fixture's own facts RE-TAGGED on the qualifier axis only. Values /
     dimensions / accessions / windows are the captured ones, never hand-typed.
     """
     store_dir = tmp_path / "store"
@@ -357,31 +597,61 @@ def test_ingest_raises_on_two_non_default_consolidation_members(tmp_path):
     pack_path.write_text(json.dumps(pack), encoding="utf-8")
 
     result = _run_ingest(pack_path, env)
-    assert result.returncode != 0, (
-        "two NON-DEFAULT consolidation members on one concept+breakdown derive "
-        "ONE kpi_id from two series the consumer keeps apart — that must fail "
-        f"loud, never silently drop one: stdout={result.stdout!r}"
+    assert result.returncode == 0, (
+        "a non-default consolidation member discriminates the id — two "
+        "genuinely different amounts must ingest as two series, not collide: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "collision" in result.stderr.lower(), (
-        f"rejection must name the collision: stderr={result.stderr!r}"
+
+    base_id = (
+        "revenuefromcontractwithcustomerexcludingassessedtax"
+        "__productorservice-assemblyandtest"
+        "__statementbusinesssegments-intelfoundry"
     )
-    # Nothing may reach the store: the guard fires before the first append.
-    assert not list(store_dir.glob("*.json")) if store_dir.exists() else True, (
-        "a rejected pack must leave no partial write"
+    summary = json.loads(result.stdout)
+    assert len(summary["kpi_ids"]) == 2, (
+        "the default-member fact keeps the bare signature and the non-default "
+        f"member appends its own token — two ids expected; got {summary['kpi_ids']}"
     )
+    # `derive_kpi_id`'s digest sorts a hex-suffixed id before an
+    # `intersegmentelimination`-suffixed one (every hex char is < 'i'), so the
+    # producer's `sorted(kpi_ids)` output is deterministic here.
+    _assert_digest_suffixed(summary["kpi_ids"][0], base_id)
+    _assert_digest_suffixed(
+        summary["kpi_ids"][1], base_id + "__intersegmentelimination"
+    )
+    assert summary["appended"] == len(pack["facts"]), (
+        "each fact belongs to its own series, so both must be appended: "
+        f"{summary['appended']} appended for {len(pack['facts'])} facts"
+    )
+
+    dump = _run_dump(pack["ticker"], env)
+    assert dump.returncode == 0, (
+        f"dump failed: stdout={dump.stdout!r} stderr={dump.stderr!r}"
+    )
+    payload = json.loads(dump.stdout)
+    stored_ids = sorted(s["kpi_id"] for s in payload["series"])
+    assert len(stored_ids) == 2, (
+        "the operating view and the intersegment-elimination view must be "
+        f"stored as TWO series; got {[s['kpi_id'] for s in payload['series']]}"
+    )
+    _assert_digest_suffixed(stored_ids[0], base_id)
+    _assert_digest_suffixed(stored_ids[1], base_id + "__intersegmentelimination")
 
 
 def test_ingest_kpi_id_derivation(ingest_module):
-    """kpi_id is derived deterministically and INJECTIVELY from the FULL
-    dimensional signature (concept + sorted breakdown axis:member local-names,
-    Member/Axis stripped, lowercased):
+    """kpi_id is derived deterministically and INJECTIVELY (up to case) from
+    the FULL dimensional signature — readable prefix (concept + sorted
+    breakdown axis:member local-names, Member/Axis stripped, lowercased) plus
+    a `__<12-hex>` digest of the case-folded identity tuple (Task 2):
 
       - two DISTINCT signatures → DISTINCT ids (injective);
       - the SAME signature → the SAME id (groups vintages);
       - a signature differing ONLY in srt:ConsolidationItemsAxis → the SAME id
         (it is a reconciliation qualifier, never a breakdown axis — memory
         `match-kpi-on-full-dimensional-signature-not-one-axis`);
-      - the id is a readable stripped-member slug, never a human string.
+      - the id is a readable stripped-member slug followed by a 12-hex digest,
+        never a bare human string.
     """
     derive = ingest_module.derive_kpi_id
     concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
@@ -415,6 +685,233 @@ def test_ingest_kpi_id_derivation(ingest_module):
     assert "clientcomputinggroup" in ccg
     assert "member" not in ccg
     assert "datacentergroup" in dcg
+
+    # New shape (Task 2): a `__<12-lowercase-hex>` digest suffix on every id.
+    _assert_digest_suffixed(
+        ccg, "revenuefromcontractwithcustomerexcludingassessedtax"
+        "__statementbusinesssegments-clientcomputinggroup"
+    )
+    _assert_digest_suffixed(
+        dcg, "revenuefromcontractwithcustomerexcludingassessedtax"
+        "__statementbusinesssegments-datacentergroup"
+    )
+
+
+def test_derive_kpi_id_folds_case_and_stays_injective(ingest_module):
+    """The id gains a `__<12-lowercase-hex>` sha1 digest of the CASE-FOLDED
+    consumer identity tuple `(concept, breakdown dimensions, normalized
+    consolidation)` — mirrors `kpi_store._series_key`'s readable-stem-plus-
+    digest precedent (`kpi_store.py:71-92`: a readable prefix alone is not
+    collision-proof).
+
+    (a) A REAL observed spelling pair — AMD's 10-Q `DataCenterMember` vs its
+    10-K `DatacenterMember` (brief `docs/loom/specs/2026-07-25-kpi-id-
+    injective-identity.md` §Probe evidence table) — must mint the SAME id.
+    Case is FOLDED, not preserved: preserving it would file a filer's
+    quarterly history apart from its annual history (the C->C' amendment).
+    (b) A structurally distinct signature (different breakdown MEMBER, not
+    merely different case) must mint a DIFFERENT id.
+    (c) The id ends with a `__` delimiter followed by EXACTLY 12 lowercase
+    hex characters.
+    """
+    derive = ingest_module.derive_kpi_id
+    concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+
+    q_spelling = derive(concept, {"StatementBusinessSegments": "DataCenterMember"})
+    k_spelling = derive(concept, {"StatementBusinessSegments": "DatacenterMember"})
+    assert q_spelling == k_spelling, (
+        f"a pure case-variant pair must fold to ONE id: {q_spelling!r} != {k_spelling!r}"
+    )
+
+    other = derive(
+        concept, {"StatementBusinessSegments": "ClientComputingGroupMember"}
+    )
+    assert other != q_spelling, (
+        f"a structurally distinct signature must mint a different id: "
+        f"{other!r} == {q_spelling!r}"
+    )
+
+    match = re.fullmatch(r".+__([0-9a-f]{12})$", q_spelling)
+    assert match is not None, (
+        f"id must end with __ followed by exactly 12 lowercase hex chars: {q_spelling!r}"
+    )
+
+
+def test_derive_kpi_id_discriminates_non_default_consolidation(ingest_module):
+    """A non-default `ConsolidationItemsAxis` qualifier (e.g.
+    `IntersegmentEliminationMember`) must mint a DIFFERENT kpi_id than the
+    default `OperatingSegmentsMember` view over the SAME (concept,
+    dimensions) pair — `kpi_xbrl._normalize_consolidation` does NOT fold
+    non-default members together, and `derive_kpi_id` dropping the axis
+    entirely is exactly what would force two series the consumer keeps apart
+    into one id. A default OR absent qualifier must mint the SAME id as no
+    qualifier at all, so the 2.36.0 consolidation-variant fold
+    (`test_ingest_collapses_consolidation_variants_of_one_signature`)
+    survives by construction.
+
+    Also covers the pair the default-vs-non-default split above cannot: TWO
+    GENUINELY non-default members (`IntersegmentEliminationMember` vs
+    `CorporateNonSegmentMember` — both observed on the live 47-filer probe,
+    `tests/data/fixtures/kpi_id_identity_probe_2026-07-25.json`
+    `_summary.consolidation_member_domain`) over the SAME breakdown must
+    ALSO mint distinct ids from each other, not just from the default —
+    `_normalize_consolidation` does not fold any two non-default members
+    together, so `derive_kpi_id` appending each member's own token must
+    discriminate every pair, not only the default/non-default one.
+    """
+    derive = ingest_module.derive_kpi_id
+    concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    dimensions = {"StatementBusinessSegments": "ClientComputingGroupMember"}
+
+    operating = derive(concept, dimensions, "OperatingSegmentsMember")
+    elimination = derive(concept, dimensions, "IntersegmentEliminationMember")
+    absent = derive(concept, dimensions, None)
+    corporate = derive(concept, dimensions, "CorporateNonSegmentMember")
+
+    assert operating != elimination, (
+        f"a non-default consolidation member must discriminate the id: "
+        f"got {operating!r} for both"
+    )
+    assert absent == operating, (
+        f"an absent qualifier must mint the SAME id as the default member: "
+        f"{absent!r} != {operating!r}"
+    )
+    assert elimination != corporate, (
+        "two GENUINELY non-default consolidation members must discriminate "
+        f"each other, not just the default: got {elimination!r} for both"
+    )
+
+
+def test_derive_kpi_id_prefix_orders_axes_by_folded_key_not_raw_case(ingest_module):
+    """Whole-branch close-out finding (feat-kpi-id-consolidation-axis): the
+    readable PREFIX must order its axis=member tokens by the SAME folded key
+    `_canonical_dimension_fold` (and therefore the digest) uses, not by raw
+    (case-sensitive) `sorted(dimensions)`. Two multi-axis signatures whose
+    axis NAMES differ only in case can flip `sorted()`'s raw-text order
+    between them even though every axis is the SAME axis once folded — before
+    the fix this mints two DIFFERENT ids (and therefore two different store
+    series) for what is the identical dimensional identity.
+    """
+    derive = ingest_module.derive_kpi_id
+    concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+
+    sig_a = derive(
+        concept,
+        {"ProductOrService": "AssemblyMember", "productOrServiceB": "TestMember"},
+    )
+    sig_b = derive(
+        concept,
+        {"productOrService": "AssemblyMember", "ProductOrServiceB": "TestMember"},
+    )
+    assert sig_a == sig_b, (
+        f"axis-name case flipping raw sort order must not change the id: "
+        f"{sig_a!r} != {sig_b!r}"
+    )
+
+
+def test_derive_kpi_id_consolidation_default_compared_case_insensitively(
+    ingest_module,
+):
+    """Whole-branch close-out finding: the prefix's own default-vs-non-default
+    consolidation comparison used a raw `!=` against
+    `kpi_xbrl._DEFAULT_CONSOLIDATION_MEMBER`, so a differently-cased spelling
+    of the SAME default member (`OperatingsegmentsMember` vs
+    `OperatingSegmentsMember`) was wrongly treated as non-default and appended
+    a spurious `__operatingsegments` token — minting a second id for what the
+    digest (and `_fact_matches`' own normalized comparison) already treats as
+    the default view.
+    """
+    derive = ingest_module.derive_kpi_id
+    concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    dimensions = {"StatementBusinessSegments": "ClientComputingGroupMember"}
+
+    canonical_case = derive(concept, dimensions, "OperatingSegmentsMember")
+    other_case = derive(concept, dimensions, "OperatingsegmentsMember")
+    assert canonical_case == other_case, (
+        f"a differently-cased spelling of the DEFAULT consolidation member "
+        f"must add NO token, same as the canonically-cased default: "
+        f"{canonical_case!r} != {other_case!r}"
+    )
+
+
+def test_derive_kpi_id_prefix_folds_non_ascii_case_via_casefold(ingest_module):
+    """Whole-branch close-out finding: the prefix folded each token with
+    `.lower()`, not `.casefold()`. The two agree on every ASCII XBRL name in
+    the observed corpus (the digest's own docstring says so), but diverge on
+    German sharp-s: `"Straße".lower() == "straße"` while
+    `"STRASSE".lower() == "strasse"` — genuinely different strings — whereas
+    `.casefold()` maps both to `"strasse"`, matching the digest's own fold
+    (Task 2 already uses `.casefold()` there). `_strip_axis_member_suffix`
+    still runs on the ORIGINAL (un-folded) string first — the `Member` suffix
+    match is case-sensitive, so folding before stripping would silently break
+    it for every existing id.
+    """
+    derive = ingest_module.derive_kpi_id
+    concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+
+    sharp_s = derive(
+        concept, {"StatementBusinessSegments": "StraßeMember"}
+    )
+    double_s = derive(
+        concept, {"StatementBusinessSegments": "STRASSEMember"}
+    )
+    assert sharp_s == double_s, (
+        f".lower() vs .casefold() disagreement on non-ASCII case must not "
+        f"split one identity into two ids: {sharp_s!r} != {double_s!r}"
+    )
+
+
+def test_derive_kpi_id_folds_every_spelling_of_one_identity(ingest_module):
+    """PROPERTY, not one example: every prior case-fold test above (688-725,
+    773, 800, 825) happened to use the ONE worked pair that passes —
+    `DataCenterMember`/`DatacenterMember`, whose case drift lands mid-token,
+    never on the `Axis`/`Member` suffix itself. None of them exercise the
+    close-out finding: `_strip_axis_member_suffix` matched `Axis`/`Member`
+    CASE-SENSITIVELY and ran BEFORE `.casefold()`, so a spelling whose case
+    drift lands ON the suffix token (e.g. `DataCenterMEMBER`) keeps the
+    suffix attached in the READABLE PREFIX while every conventionally-cased
+    spelling strips it — while the DIGEST (built from the raw string,
+    casefolded whole, never suffix-stripped) is unaffected and stays
+    identical. Prefix and digest disagreeing mints a SECOND kpi_id for the
+    SAME signature, and because the collision guard (`_claim_kpi_id`) is
+    keyed on kpi_id, the two ids never meet it — a permanently split series
+    with no fail-loud.
+
+    Several spellings of ONE member identity, and an Axis-suffix analogue
+    (case drift landing on the AXIS token's own suffix), must ALL mint the
+    identical kpi_id.
+    """
+    derive = ingest_module.derive_kpi_id
+    concept = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+
+    member_spellings = [
+        "DataCenterMember",
+        "DatacenterMember",
+        "DataCenterMEMBER",
+        "datacentermember",
+    ]
+    member_ids = {
+        spelling: derive(concept, {"StatementBusinessSegments": spelling})
+        for spelling in member_spellings
+    }
+    assert len(set(member_ids.values())) == 1, (
+        "every spelling of ONE member identity must mint the identical "
+        f"kpi_id, got {member_ids}"
+    )
+
+    axis_spellings = [
+        "ProductOrServiceAxis",
+        "ProductOrServiceAXIS",
+        "productorserviceaxis",
+    ]
+    axis_ids = {
+        spelling: derive(concept, {spelling: "AssemblyMember"})
+        for spelling in axis_spellings
+    }
+    assert len(set(axis_ids.values())) == 1, (
+        "every spelling of ONE axis identity (case drift landing on the "
+        f"Axis suffix) must mint the identical kpi_id, got {axis_ids}"
+    )
 
 
 # --------------------------------------------------------------------------

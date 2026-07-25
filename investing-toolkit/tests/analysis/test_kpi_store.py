@@ -15,6 +15,7 @@ fixture); the CLI is exercised via real `uv run --script` subprocesses.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import importlib.util
 import json
 import os
@@ -22,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 from conftest import KPI_STORE_SCRIPT
 
@@ -495,6 +497,159 @@ def test_append_degrades_loud_when_fcntl_unavailable(
     err = capsys.readouterr().err
     assert err.count("fcntl unavailable") == 1, (
         "the degradation warning must fire exactly once, not per append"
+    )
+
+
+def test_append_survives_long_filename_overflow(kpi_store_module, tmp_path, monkeypatch):
+    """A real over-255-byte JNJ series signature (live dogfood: this branch's
+    kpi_id-consolidation 4-axis kpi_id pushed the atomic-write temp name to
+    257 bytes — 2 over the 255-byte POSIX/APFS/ext4 per-path-component
+    limit) must append and round-trip, not raise `OSError: File name too
+    long`.
+
+    company/kpi_id are the EXACT values that produced the live crash,
+    recovered from the crash traceback's temp filename and cross-checked:
+    sha1("JNJ\\x00<kpi_id>")[:12] == "191dbde92555", the digest suffix
+    the traceback's temp filename actually carried.
+    """
+    monkeypatch.setenv("KPI_STORE_DIR", str(tmp_path))
+
+    company = "JNJ"
+    kpi_id = (
+        "revenuefromcontractwithcustomerexcludingassessedtax__"
+        "productorservice-prezistaprezcobixrezolstasymtuza__"
+        "statementbusinesssegments-pharmaceutical__"
+        "statementgeographical-nonus__"
+        "subsegments-infectiousdiseases__811984cc373e"
+    )
+    assert hashlib.sha1(f"{company}\x00{kpi_id}".encode("utf-8")).hexdigest()[:12] == (
+        "191dbde92555"
+    ), "test setup invariant: this must be the exact kpi_id from the crash"
+
+    point = {
+        "company": company,
+        "kpi_id": kpi_id,
+        "period": "FY2021",
+        "as_of": "2021-11-01",
+        "value": 93775000000,
+        "source_accession": "0000200406-22-000010",
+        "source_table_id": "note-revenue-segment",
+        "source_cell_ref": "r1c1",
+    }
+
+    kpi_store_module.append(point)  # must not raise OSError: File name too long
+
+    result = kpi_store_module.query_latest(company, kpi_id, "FY2021")
+    assert result == point, (
+        "the overflowing-signature point must round-trip by (company, kpi_id), "
+        "not just avoid the exception"
+    )
+
+
+def test_short_pair_filename_stem_unchanged(kpi_store_module):
+    """A short, ordinary (company, kpi_id) pair must produce the EXACT SAME
+    filename stem as before the length-budget fix — truncation must be a
+    no-op below the threshold, or a previously-stored series file becomes
+    an unreachable orphan (the same one-way-door hazard as the kpi_id
+    digest itself, one layer down).
+    """
+    company, kpi_id = "AAPL", "iphone_units"
+    digest = hashlib.sha1(f"{company}\x00{kpi_id}".encode("utf-8")).hexdigest()[:12]
+    expected = f"AAPL__iphone_units__{digest}"
+    assert kpi_store_module._series_key(company, kpi_id) == expected
+
+
+def test_long_shared_prefix_kpi_ids_still_land_in_different_files(
+    kpi_store_module, tmp_path, monkeypatch
+):
+    """Two distinct kpi_ids sharing a common prefix LONG ENOUGH that
+    truncation collapses their readable stems must still land in different
+    files: the digest is computed over the FULL raw (company, kpi_id) pair,
+    never the truncated stem, so truncation can never reintroduce the
+    collision the digest exists to prevent.
+    """
+    monkeypatch.setenv("KPI_STORE_DIR", str(tmp_path))
+
+    shared_prefix = "x" * 300  # far longer than the stem's length budget
+    kpi_id_a = shared_prefix + "_A"
+    kpi_id_b = shared_prefix + "_B"
+
+    # Sanity: truncation actually collapses these two readable stems —
+    # otherwise this test would not exercise the collision-guard path.
+    stem_a = kpi_store_module._series_key("AAPL", kpi_id_a)
+    stem_b = kpi_store_module._series_key("AAPL", kpi_id_b)
+    readable_a = stem_a.rsplit("__", 1)[0]
+    readable_b = stem_b.rsplit("__", 1)[0]
+    assert readable_a == readable_b, (
+        "test setup invariant: the readable stems must actually collide "
+        "under truncation for this to exercise the digest guard"
+    )
+    assert stem_a != stem_b, "digests must still differ so files stay distinct"
+
+    prov = {
+        "source_accession": "0000000000-00-000000",
+        "source_table_id": "t0",
+        "source_cell_ref": "r1c1",
+    }
+    point_a = {"company": "AAPL", "kpi_id": kpi_id_a, "period": "FY2024",
+               "as_of": "2024-11-01", "value": 1, **prov}
+    point_b = {"company": "AAPL", "kpi_id": kpi_id_b, "period": "FY2024",
+               "as_of": "2024-11-01", "value": 2, **prov}
+
+    kpi_store_module.append(point_a)
+    kpi_store_module.append(point_b)
+
+    series_files = list(tmp_path.rglob("*.json"))
+    assert len(series_files) == 2, (
+        f"truncation-colliding readable stems must not share a file; found {series_files}"
+    )
+    stored_values = sorted(
+        json.loads(f.read_text(encoding="utf-8"))["points"][0]["value"]
+        for f in series_files
+    )
+    assert stored_values == [1, 2]
+
+
+def test_atomic_write_affix_bytes_derived_from_real_write(
+    kpi_store_module, tmp_path, monkeypatch
+):
+    """`_ATOMIC_WRITE_AFFIX_BYTES` (kpi_store.py:85) is a HAND-DERIVED count
+    of the fixed overhead `_atomic_write`'s tmp+rename layers onto a series
+    file's STEM — nothing ties the literal `19` to `_atomic_write`'s actual
+    behavior, so a change to its tempfile prefix/suffix pattern would leave
+    the budget constant silently wrong (change the affixes, nothing fails).
+
+    This derives the overhead from a REAL `_atomic_write` call instead of
+    hand arithmetic: `_atomic_write` renames its temp file away before
+    returning, so the temp name is captured via a `Path.rename` spy (the
+    only point it is ever observable), then compared in length against the
+    target's own STEM (`Path.stem` — the same "readable portion, no
+    extension" unit `_MAX_STEM_BYTES` budgets).
+    """
+    store_fs = kpi_store_module._store_fs
+
+    captured_temp_names = []
+    real_rename = Path.rename
+
+    def spy_rename(self, target):
+        captured_temp_names.append(self.name)
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", spy_rename)
+
+    target = tmp_path / "probe-series-stem.json"
+    store_fs._atomic_write(target, {"probe": True})
+
+    assert len(captured_temp_names) == 1, (
+        "test setup invariant: _atomic_write must rename exactly one temp "
+        f"file; captured {captured_temp_names}"
+    )
+    real_overhead = len(captured_temp_names[0]) - len(target.stem)
+    assert real_overhead == kpi_store_module._ATOMIC_WRITE_AFFIX_BYTES, (
+        f"a real _atomic_write call adds {real_overhead} bytes of overhead "
+        "beyond the stem, but _ATOMIC_WRITE_AFFIX_BYTES claims "
+        f"{kpi_store_module._ATOMIC_WRITE_AFFIX_BYTES} — the tempfile "
+        "prefix/suffix pattern changed without updating the budget constant"
     )
 
 
