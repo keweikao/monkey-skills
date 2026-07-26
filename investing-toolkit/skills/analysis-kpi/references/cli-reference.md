@@ -587,9 +587,59 @@ uv run scripts/kpi_store.py dump --company AAPL \
   | uv run ../report-kpi-tearsheet/scripts/tearsheet_format.py --as-of 2026-07-26
 ```
 
-| Subcommand | Flag     | Required | Notes                                                    |
-|------------|----------|----------|-----------------------------------------------------------|
-| `derive`   | `--dump` | no       | Path to the `kpi_store.py dump --company` JSON payload (default: read stdin) |
+| Subcommand | Flag        | Required | Notes                                                    |
+|------------|-------------|----------|-----------------------------------------------------------|
+| `derive`   | `--dump`    | no       | Path to the `kpi_store.py dump --company` JSON payload (default: read stdin) |
+| `derive-as-filed` | `--payload` | no | Path to a `pack.py --pack reconstruct` payload (default: read stdin) |
+
+**TWO ENTRY POINTS, TWO INPUTS — `derive-as-filed` is not a replacement.**
+`derive` reads a store dump; `derive-as-filed` reads the as-filed
+reconstruction. They are separate because a store dump carries no
+calculation linkbase, so the reconstruction is not computable from
+`derive`'s input at all. Both ship; the store-backed pipeline above is
+unchanged.
+
+```
+# derive-as-filed: the reconstruction, with every empty cell TYPED
+uv run ../data-markets/scripts/pack.py --market us --pack reconstruct --ticker KO \
+  | uv run scripts/kpi_spine_view.py derive-as-filed
+```
+
+Each cell carries its `state`, which is the point of this subcommand — a
+blank on a trend line is otherwise unreadable:
+
+| state | meaning |
+|---|---|
+| `value` | the filer tagged this figure |
+| `not_presented` | the filer's statement has NO such line (an oil major genuinely files no operating-income line) |
+| `not_tagged` | the line exists but that period carries no undimensioned value |
+| `derived` | computed from the filer's OWN arithmetic, carrying the formula that produced it |
+
+**THE PIPE MUST NOT SWALLOW A DEGRADED RUN.** `reconstruct` degrades
+loudly — a filing whose verification refused folds the section's
+`_status` to `partial` — and an early version of this view dropped that
+on the floor, so a refused run looked identical to a clean one on the far
+side of the pipe recommended just above. The view therefore carries two
+further top-level keys, ABSENT (never empty) when the payload has no
+marker:
+
+| key | meaning |
+|---|---|
+| `status` | the reconstruction section's own `_status` — `"partial"` when something degraded |
+| `verification` | carried verbatim, including `error` / `error_class` when the oracle refused |
+
+They are kept SEPARATE on purpose: a run can be `partial` from an
+acquisition failure while its arithmetic is clean, and collapsing the two
+would re-create exactly the undifferentiated blank this whole subcommand
+exists to remove.
+
+Observed on the committed capture: KO FY2017 `total_liabilities` is
+`derived` 68,919,000,000 with
+`us-gaap:Liabilities = us-gaap:LiabilitiesAndStockholdersEquity −
+us-gaap:StockholdersEquity − mezzanine − us-gaap:MinorityInterest`, while
+IBM FY2025 `operating_income` is `not_presented`. **Money is emitted as
+exact TEXT, not JSON numbers** — a float round-trip is how this module
+family once manufactured a false restatement.
 
 **THE RESOLUTION RULE.** For each spine field and each PERIOD, `derive`
 picks the first concept in that field's ordered chain that has an

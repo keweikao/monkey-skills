@@ -17,6 +17,12 @@ Usage:
   uv run pack.py --tickers AAPL,MSFT --pack screener-batch
   uv run pack.py --pack regime-pack --market us
   uv run pack.py --ticker 005930.KS --pack snapshot --quiet
+  uv run --with edgartools --with requests pack.py --ticker KO --pack reconstruct
+
+The SEC-backed packs need their client dependencies passed on the
+invocation (`--with edgartools --with requests`) — this facade never
+imports them. Omitting them exits 1 with an `_status.message` naming the
+whole set to pass, rather than a bare ModuleNotFoundError.
 
 Market auto-detection (suffix-based; --market overrides detection
 entirely):
@@ -107,7 +113,7 @@ EXIT_USAGE_ERROR = 64
 # "unknown pack" ValueError would misname a market-availability problem as a
 # pack-name typo. `--market us` still overrides ticker detection entirely.
 US_ONLY_PACKS: frozenset[str] = frozenset(
-    {"kpi-quarterly", "kpi-topline-backfill", "statement-backfill"}
+    {"kpi-quarterly", "kpi-topline-backfill", "statement-backfill", "reconstruct"}
 )
 
 # Suffix -> market. Order matters only in that each pattern is disjoint.
@@ -118,6 +124,75 @@ _SUFFIX_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\.T$", re.IGNORECASE), "jp"),
 )
 _BARE_4DIGIT = re.compile(r"^\d{4}$")
+
+
+# The client dependencies the market modules import but this facade never
+# does. Supplied per-invocation (`uv run --with ...`), which is what keeps
+# pack.py itself zero-dependency; see the module docstring.
+#
+# KEYED ON IMPORT NAME, VALUED ON DISTRIBUTION NAME, because the two differ and
+# both are load-bearing here. `import edgar` (sec_edgar_client.py:853) raises
+# `ModuleNotFoundError(name="edgar")`, but the installable package is
+# `edgartools`. A single flat list would therefore get BOTH directions wrong:
+# matched against distribution names it would fail to recognise a genuinely
+# missing edgartools (re-raising it as an opaque traceback), and rendered into
+# the message from import names it would tell the caller to `--with edgar`,
+# which installs the wrong project.
+#
+# `test_client_dependencies_covers_every_third_party_import_of_the_sec_lane`
+# binds this to the real imports by parsing them, so a third client dependency
+# cannot be added without this map learning about it -- the message promises
+# "the whole set", and that promise is only true if something checks it.
+CLIENT_DEPENDENCIES: dict[str, str] = {
+    "edgar": "edgartools",
+    "requests": "requests",
+}
+
+
+def _missing_dependency_message(exc: ModuleNotFoundError) -> str | None:
+    """Turn a bare `ModuleNotFoundError` into an instruction — or `None` when
+    the missing module is not something the caller can supply.
+
+    MEASURED FAILURE (Gotcha trailer, PR #619, 2026-07-26): the as-reported
+    lane's live dogfood died on `ModuleNotFoundError: No module named
+    'requests'` with nothing to act on. The facade is the only layer that
+    knows the invocation contract it is enforcing, so it is the layer that
+    must say what to pass.
+
+    `None` FOR ANYTHING ELSE, and that discrimination is the point. This
+    handler sees every `ModuleNotFoundError` escaping a market module,
+    including OUR OWN modules -- `pack_us.pack_reconstruct` imports
+    `kpi_us_statement_shape` across a skill boundary, so a move or rename there
+    surfaces here too. Answering that with "re-run with `--with ...`" would
+    send the reader to fix, on their command line, a breakage that is not on
+    their command line at all: an internal fault wearing a user-error costume,
+    which is the exact mode this lane exists to remove. Those fall through to a
+    plain traceback instead, with no instruction that cannot work.
+
+    Names the WHOLE dependency set, not just the module that happened to fail
+    first: the imports are sequential, so supplying only the named one moves
+    the failure to the next import -- which is exactly how that dogfood went.
+    Every name it prints is a DISTRIBUTION name, the thing `--with` takes.
+
+    A hand-raised instance with `name` unset is treated as not-a-client-dep
+    (fails closed to a traceback): the import system always populates `name`,
+    so an unset one is not a real import failure, and silence beats guidance
+    that may be wrong.
+    """
+    if exc.name not in CLIENT_DEPENDENCIES:
+        return None
+    missing = CLIENT_DEPENDENCIES[exc.name]
+    supplied = " ".join(
+        f"--with {dist}" for dist in dict.fromkeys(CLIENT_DEPENDENCIES.values())
+    )
+    return (
+        f"missing client dependency {exc.name!r} (installable as {missing!r}). "
+        f"pack.py is a ZERO-DEPENDENCY facade: the market clients' "
+        f"dependencies are supplied on the invocation and are never bundled "
+        f"here. Re-run the same command with `uv run {supplied} pack.py ...`. "
+        f"Pass the whole set — supplying only {missing!r} moves the failure "
+        f"to the next import."
+    )
 
 
 class _UsageError(Exception):
@@ -392,9 +467,14 @@ def main(argv: list[str] | None = None) -> int:
         market, warnings = _resolve_market(args.pack, tickers, args.market)
         if args.pack in US_ONLY_PACKS and market != "us":
             raise _UsageError(
-                f"--pack {args.pack} is US-only (SEC EDGAR dimensional "
-                f"XBRL); ticker(s) resolved to market '{market}', which has "
-                f"no source for this pack"
+                # "SEC EDGAR", not "SEC EDGAR dimensional XBRL": the guard now
+                # covers four packs reading three DIFFERENT EDGAR surfaces
+                # (dimensional XBRL, companyfacts, and the filing's own
+                # presentation/calculation linkbase), so the narrower wording
+                # was false for two of them.
+                f"--pack {args.pack} is US-only (SEC EDGAR); ticker(s) "
+                f"resolved to market '{market}', which has no source for "
+                f"this pack"
             )
     except _UsageError as exc:
         pack_name = args.pack if args is not None else None
@@ -422,6 +502,30 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         return EXIT_USAGE_ERROR
+    except ModuleNotFoundError as exc:
+        # Ordered BEFORE the generic handler below: a missing client dep is the
+        # one crash whose fix the caller can act on, and a bare traceback does
+        # not tell them what it is. The traceback still rides along — the
+        # message adds guidance, it never replaces the cause.
+        #
+        # A non-client module yields `message=None`, so `_status_block` omits
+        # the field and the emitted result is byte-identical to the generic
+        # handler's. Deliberately NOT a bare `raise`: the generic clause below
+        # is a SIBLING of this one, not an enclosing one, so re-raising would
+        # escape `main()` entirely and lose the fail-loud JSON + exit contract.
+        _emit(
+            {
+                "_status": _status_block(
+                    "failed",
+                    market,
+                    args.pack,
+                    message=_missing_dependency_message(exc),
+                    tb=traceback.format_exc(),
+                    warnings=warnings,
+                )
+            }
+        )
+        return EXIT_FAILED
     except Exception:  # noqa: BLE001 — fail-loud: surface the full traceback, never swallow
         tb = traceback.format_exc()
         _emit(
