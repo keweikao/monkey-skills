@@ -1910,3 +1910,217 @@ agreement of the per-task + whole-branch reviewers.
   fetches one 10-K (~3 comparative years). The full ~16-year live history needs fetching + stitching
   multiple filings across eras (the offline era-stitching + declared-break machinery already handles
   the cross-era join; only the multi-filing FETCH is missing). Unlocks the deep live trend.
+
+## Phase Containment Effectiveness — success measure for plan-stage fact grounding (OPEN)
+- Status: OPEN
+- Start: evaluate at the close-out (whole-branch review and/or live dogfood) of each
+  investing-toolkit arc that ships AFTER the plan-stage fact-grounding change
+  (`docs/loom/plans/2026-07-27-plan-stage-fact-grounding.md`) lands. The baseline cannot be
+  computed yet — see the Baseline note below and the reconciliation entry that follows this
+  one.
+- Origin: `docs/loom/specs/2026-07-27-plan-stage-fact-grounding.md` Open Question 1 —
+  "How is success measured? … Without this the change ships unfalsifiable." Plan Task 9
+  (`docs/loom/plans/2026-07-27-plan-stage-fact-grounding.md:452-455`) fixes the measure's
+  cheapest viable form. Evidence: `docs/loom/audits/2026-07-27-investing-arc-defect-provenance-audit.md`
+  §2 (root-cause taxonomy) and §3 (arc-by-arc dossier).
+- What: **Phase Containment Effectiveness (PCE)** — the share of planning-origin defects
+  caught BEFORE close-out (whole-branch review or live dogfood) rather than AT close-out.
+  **Planning-origin defect** (the audit's Category A, "計畫事實錯"), defined inline so a
+  future reader can classify without re-reading the audit: a defect where the PLAN ITSELF
+  asserted a false technical claim — a wrong formula/identity, an instruction to reuse a
+  semantically incompatible helper, a cited measurement that doesn't support its conclusion,
+  a field count that doesn't match the code, or a brief requirement that never made it into a
+  task. This is distinct from the audit's Category B (tests that pass without discriminating
+  power — fixtures that coincidentally mask a bug) and Category C (ordinary
+  implementation-vs-plan mismatches); PCE counts Category A only, because A is the one that
+  survives every downstream conformance check (spec-reviewer checks output against plan, and
+  the plan is the thing that's wrong).
+  - **Cheap classification rule (deliberately narrow)**: for each confirmed Category-A
+    instance, classify only whether it reached close-out or was caught before close-out — a
+    binary call. Do NOT attribute the earlier catches to a specific stage (plan review vs.
+    per-task review vs. implementation-time refusal, etc.) — that per-instance stage
+    attribution requires forensic tracing of each defect's exact catch point across every
+    task, which is not the cheap form this measure is supposed to take. It is also not this
+    measure's job: PCE only needs to answer whether close-out is where the defect surfaced,
+    not which earlier mechanism would have caught it. Do NOT attempt this classification for
+    Category B or C defects either; they are cheap to catch regardless of category, so
+    classifying them buys nothing toward this measure.
+  - **Formula**: PCE = (confirmed planning-origin defects caught before close-out) / (total
+    confirmed planning-origin defects).
+  - **Arcs to evaluate over**: seven already-shipped investing-toolkit arcs — KPI tearsheet
+    (PR #605), TW 背書保證 iXBRL (PR #610), US XBRL→store producer (PR #611), TW store
+    producer (PR #612), 公司總營收兩線 (PR #616), kpi_id injective (PR #618), US as-reported
+    線 (PR #619) — plus one **in-progress** arc, the as-filed reconstruction (branch
+    `feat-sec-submissions-pagination`), whose audit coverage is explicitly incomplete
+    (audit header §Scope, and §1's scoreboard — task-level PASS/PASS_WITH_NOTES counts are unfilled for
+    this arc, only the NEEDS_REVISION count is known, because it hasn't shipped).
+  - **Baseline: cannot be computed from the current audit.** The source document
+    (`docs/loom/audits/2026-07-27-investing-arc-defect-provenance-audit.md`) contains four
+    internally inconsistent claims about the same Category-A instances, so any count or
+    close-out/pre-close-out split drawn from it right now would be unreliable — see the
+    reconciliation entry immediately below for the specific inconsistencies and their
+    citations. Do not compute or assert a PCE number until that entry is resolved.
+
+## investing-toolkit arc defect-provenance audit — internal inconsistencies need reconciliation (OPEN)
+- Status: OPEN
+- Start: before computing the Phase Containment Effectiveness baseline (entry above) — that
+  measure depends on a trustworthy Category-A count and close-out determination from this
+  document.
+- Origin: found while writing the Phase Containment Effectiveness BACKLOG entry (Task 9,
+  `docs/loom/plans/2026-07-27-plan-stage-fact-grounding.md:452-455`), round 3, after a prior
+  round's attempt to compute a baseline from this audit produced a four-bucket per-instance
+  attribution that both reviewers rejected as out of scope. Re-checking the source turned up
+  the inconsistencies below.
+- What: `docs/loom/audits/2026-07-27-investing-arc-defect-provenance-audit.md` makes four
+  internally inconsistent claims about its own Category-A ("計畫事實錯") findings for PR #619
+  and the audit's overall detectability claim:
+  (Citations below use **section anchors**, not line numbers: adding the audit's erratum
+  header pushed every line under it down, which invalidated this entry's original pointers
+  in the same change set that catalogued citation drift. The shift's magnitude is
+  deliberately not stated — a self-referential count is a claim that must be re-measured on
+  every edit, and failing to re-measure it is exactly how the previous remediation round
+  broke this passage. See the "what 0.39.0 does NOT close" entry, item 3.)
+  1. **Scoreboard count vs. dossier count mismatch.** §1's scoreboard reports PR #619 as
+     `A×2`; §3.7 enumerates three A-instances (A-1 the equity-identity probe, A-2 the reused
+     selector, A-3 the retired-numbers doc).
+  2. **"Only detectable at close-out" contradicted by the audit's own dossier.** §5's
+     sentence "A 類的偵測面只有兩個，都在收尾" (grep for it; it is the lead-in to that
+     section's bullet pair, not its closing line) asserts A-class defects are
+     structurally detectable ONLY at close-out; §3.7 (a quality reviewer's
+     spontaneous cross-read at per-task review), §3.8 (an implementer's
+     task-level refusal before any code was written), and §6 (citing that
+     refusal as a positive counterexample) all document earlier catches.
+  3. **"Caught before merge" contradicted by a shipped defect.** §6 states
+     every A-defect was caught before merge; §3.7's A-3 states the wrong text
+     ("GOOGL from 2014, DIS from 2018" — as `analysis-kpi/SKILL.md` read at the time of the
+     audit, 2026-07-27; that text has since been corrected to 2012/2016, so the pointer no
+     longer greps) shipped — i.e. was
+     NOT caught before merge.
+  4. ~~**Self-contradicting count within one sentence.**~~ **WITHDRAWN** — not a
+     contradiction. §3.8's opening reads "A 類三連…implementer 拒絕動工並回報四項量測":
+     three Category-A defects, and four measurements reported by the implementer. Two
+     different quantities in one sentence, not one quantity stated twice. Withdrawn on
+     whole-branch review of `feat-plan-fact-grounding`, which read the line rather than the
+     summary of it — the same failure this branch's own cross-read rule exists to catch,
+     committed while writing the entry that catalogues it. Left visible rather than deleted:
+     the reconciliation task must not re-derive a phantom item, and the miss is the point.
+  - **Why it matters**: the Phase Containment Effectiveness measure (entry above) needs a
+    reliable Category-A count and a reliable close-out/pre-close-out split per confirmed
+    instance. Items 1-3 cannot be trusted as-is. Reconcile by re-reading the
+    underlying session transcripts this audit was extracted from (audit header §Method) and correcting
+    the audit's prose, then recompute the PCE baseline from the corrected document.
+
+## Plan-stage fact grounding — what 0.39.0 does NOT close (OPEN)
+- Status: OPEN
+- Start: next time a planning-origin defect reaches close-out despite 0.39.0's contracts —
+  or when the PCE entry above is first evaluated, whichever comes first. Each item below is
+  independently actionable; do not treat the list as one unit of work.
+- Origin: whole-branch review of `feat-plan-fact-grounding` (loom-code 0.39.0), which held
+  the branch to the standard the branch itself argues for. Findings 1-3 of that review plus
+  the orchestrator's carried close-out list.
+- What:
+  1. **The preventive half of the citation rule is unenforced.**
+     `writing-plans/references/plan-format.md:149` ("Any verifiable technical assertion in a
+     plan carries a `file:line` citation…") requires a citation on every verifiable
+     assertion, but no plan-document-reviewer check verifies compliance — the checks table
+     stays at 16 rows and `loom-code/scripts/test_plan_obligation_sweep.py:68` pins
+     `max(row_numbers) == PRE_EXISTING_MAX_CHECK_NUMBER` (the constant, `= 16`, at
+     `test_plan_obligation_sweep.py:32`). Reviewer item 7 is by design a no-op when no
+     citation is present.
+     Net effect: 0.39.0 catches a **cited** false fact (measured — see the dogfood note's
+     §Re-run) and misses an **uncited** one, which is the cheaper authoring path and the
+     shape of the audit's own §3.8 instance ("15 fields" asserted three times where
+     the code says 14). Fix is either Check 17 plus amending the pin, or an explicit decision
+     to accept the residual. Branch-local evidence that author-side discipline does not
+     self-hold: five citation inaccuracies in this branch's own commits, the fifth inside the
+     section documenting the citation fixes.
+  2. **The acceptance-criteria family is untouched.** Candidate check, append-only numbering:
+     *acceptance criteria must be executable by the actor bound to satisfy them.* Origin:
+     Task 7's GREEN required `check_version_bump.py`, which reads committed blobs, while the
+     implementer is forbidden from committing. It survived all three plan-review rounds — the
+     rounds asked whether the criteria were correct, never whether the bound actor could run
+     them. Two further instances in the audit's §3.8 (a RED naming filers with no data; a RED
+     contradicting the brief on DUK) sit in this family.
+  3. **`file:line` citations drift under parallel edits.** Four measured instances on this
+     branch (`:365`→`:372` from a concurrent insertion, `:41` vs `:40`, `:32-39` vs `:34-39`,
+     a path missing its directory). The T1 rule should prefer an anchor that survives
+     insertion, and date any bare line number it keeps.
+  4. **`Reuse-adequacy` is declarative-only.** Nothing enforces that a task carrying a reuse
+     instruction fills the field.
+  5. **Implementer test counts are not reproducible.** Two implementers reported "437 passed";
+     no scope reproduces it. The reproducible ones, each with the command that yields it:
+     `python3 -m pytest loom-code/scripts/ -q` → 363 at the time of that report, and
+     `python3 -m pytest loom-code/scripts/ loom-pipeline/scripts/ -q` → 581. Both are dated
+     figures, not standing ones — re-run the command rather than citing the number. A count
+     that cannot be reproduced is not a verification claim.
+     Candidate fix: require the dispatch packet's `Resolved test command` to be echoed
+     verbatim in the report beside the count.
+  6. **The drift-boundary clause lands at one tier only.** Measured before/after on the same
+     fixture: sonnet went from silently absorbing a stale pointer (while asserting the source
+     said it at that location) to detecting, classifying and recording it; haiku went from
+     naming the drift to papering it over with an invented `:180-182` range. Verdicts stayed
+     correct in all four cells and no false alarm appeared, so the clause ships — but the two
+     haiku runs contradict each other, so run-to-run variance at that tier exceeds the effect
+     at n=1. Do not describe the clause as working at both tiers.
+     Evidence: `docs/loom/dogfood/2026-07-27-plan-fact-grounding-coldread.md`.
+  7. **Next amendment to reviewer item 7 must split it, not extend it.** Three amendments were
+     concatenated into one ~200-word numbered list item (~6× its sibling contract items).
+     Split into labelled sub-bullets — action / consequence / boundary — before adding a
+     fourth. A long run-on read by the weakest tier is the shape this repo's standing finding
+     says fails.
+  8. **`loom-code/scripts/test_writing_plans_readme_sync.py:51-52` uses `str.index`** — raises
+     `ValueError` on a missing anchor instead of a readable assertion failure. 🟢
+  9. **The two cross-read guard test files are ~45% identical.** Defensible under this repo's
+     SSOT-and-functional-copy convention and the two genuinely different verdict models;
+     next-touch only. 🟢
+  10. **Shipped with a known defect of its own, stated rather than fixed.** The
+      entry titled "investing-toolkit arc defect-provenance audit — internal inconsistencies
+      need reconciliation" still opens by saying the audit "makes four internally
+      inconsistent claims" while its item 4 is struck WITHDRAWN and its own §Why it matters
+      concludes that items 1-3 are the live ones. The audit's erratum says 三處; this
+      entry's header is the stale copy — withdrawing item 4 did not re-measure the tally
+      that counts it.
+      - **Why it is shipped rather than corrected**: this is the self-referential class
+        described in `docs/loom/memory/a-passage-that-describes-itself-decays-on-every-edit.md`,
+        and every close-out round that fixed an instance of it wrote a fresh one into
+        whatever surface the fix touched — a wrong file citation, an invalidated pointer set,
+        a stale shift magnitude, a wrong positional descriptor, a wrong instance tally, a
+        round count sitting between its own abstention and its own prohibition. The
+        terminal-round rule set before that round's verdict was: another instance of this
+        class gets recorded, not rewritten. Round after round of moving one clause is evidence that
+        this prose surface is not driven clean by iteration, and that evidence is worth more
+        shipped than hidden behind a seventh edit.
+      - **Fix when the reconciliation runs**: correcting the audit's three live
+        inconsistencies and re-deriving this entry's header tally is one task, not two. Do
+        not fix the tally alone — that re-creates the same decoupling in the other direction.
+  11. **`writing-plans/SKILL.md` is at its hard word cap.** This change pushed it over
+      CHK-SKL-010's 4,500-word ceiling (CI caught it at 4,571); rationale prose was trimmed
+      to bring it back under, and it now sits a handful of words below the cap. The next
+      addition to that file **cannot be an append** — it must extract an existing section to
+      `references/` and link it, or trade words out. Note the extraction hazards already
+      recorded in this store: `extract-to-reference-load-bearing-rule` and
+      `extraction-severing-cross-ref-needs-weak-model-test` (a strong-model equivalence gate
+      passes while a weak model drops the severed link, so extraction needs a weak-model
+      cold read). The file is also far above the repo's ~3,750-word soft target, which is a
+      standing condition of this skill rather than something this change introduced.
+
+## spec-reviewer Rule R3 forbids the cross-read item 7 now requires (OPEN)
+- Status: OPEN
+- Start: next edit to either reviewer contract's discipline rules, or the next time a
+  reviewer's R3 compliance lets a false reported figure through.
+- Origin: whole-branch review of `feat-plan-fact-grounding`, finding 3. The contradiction was
+  latent before 0.39.0; item 7 makes it adjacent — the two rules now sit ~30 lines apart in
+  the same document.
+- What: `agents/spec-reviewer.md` (same shape in `agents/code-quality-reviewer.md`) newly
+  **requires** a reviewer to independently open a cited source and confirm it says what the
+  claim says (item 7), while Rule R3 in the same contract **forbids** independently confirming
+  a reported test result. Both are the same epistemic act. A weak-tier reader has to reconcile
+  them; on this branch 5 of 7 spec-reviewer dispatches resolved it by violating R3.
+  - **Ruling from that review: the rule is wrong, not the reviewers.** R3 conflates "do not
+    substitute for the verification station" (sound) with "do not independently confirm
+    reported evidence" (unsound, and contradicted by this branch's own thesis).
+  - **Evidence**: an implementer-reported test count of `437` that no reproducible scope
+    yields survived every R3-compliant reviewer on this branch and was caught only by a
+    reviewer that violated R3.
+  - Not fixed here because R3 is outside this branch's diff — changing a discipline rule that
+    governs every reviewer dispatch is its own change with its own review.
