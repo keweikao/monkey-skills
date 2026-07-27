@@ -5,6 +5,99 @@ All notable changes to investing-toolkit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.39.1] — 2026-07-27
+
+### Fixed — a filer's history stopped where SEC's `recent` block did
+
+`sec_edgar_client.fetch_submissions` read only the main submissions document's
+`filings.recent` block, which SEC caps at one year or the 1,000 most recent
+filings (whichever is more). Older filings live in the archive documents named
+by `filings.files[]`, and those were never requested — so a company's returned
+filing history was bounded by its TOTAL filing volume, not by how much history
+it has. The pipeline returned the LEAST history for the most actively-filing
+companies, and returned it as an ordinary success with no truncation signal.
+
+Measured live 2026-07-27 across the 71-filer roster in
+`docs/loom/references/xbrl-verification-universe.md`, asking each for 8 annual
+filings:
+
+| | returned | actually held |
+|---|---|---|
+| JPM | 1 | 27 |
+| BAC | 1 | 32 |
+| C | 1 | 27 |
+| META | 2 | 14 |
+| WMT | 3 | 32 |
+
+29 of 71 filers were truncated; only 37 reached the 10 distinct annual periods
+that a decade of trend analysis needs.
+
+- `fetch_submissions` now follows `filings.files[]` and merges every archive
+  page into `filings.recent` before returning. The merged payload keeps the
+  parallel-array shape every reader already expects, so `list_filings` and
+  every pack are unchanged — this is a transport fix, not an interface change.
+- **A failed archive page returns an error, never a partial history.** A
+  short-but-successful answer is the defect being fixed wearing a different
+  hat: the caller cannot tell "this filer has 3 10-Ks" from "page 2 of 5
+  failed". Page errors are not cached, so one 503 cannot poison a filer for a
+  TTL.
+- **The merged payload uses a new cache key** (`submissions_full_{cik}`). The
+  payload's shape is unchanged but its semantics are not — an entry written by
+  the old code is a truncated history indistinguishable from a complete one,
+  and aliasing the old key would have let a warm cache serve truncation out of
+  fixed code, per company and unpredictably.
+- **Each archive page is cached under its own 7-day key.** The page fan-out is
+  very uneven — 28 of the 33 flagged filers have 0-3 pages, but JPM has 68, C
+  39, BAC 20 — so re-paying it on every 24 h expiry of the main document would
+  roughly double a `reconstruct` run for the sector that needed the fix most.
+  Measured: JPM cold 69.3 s, then 31.5 s once only the main document expires.
+  The TTL is 7 days rather than permanent because SEC re-partitions the
+  newest archive page in place.
+
+- **`--no-cache` clears the submissions caches again.** It unlinked
+  `submissions_{cik}` — the key nothing reads any more — leaving both the
+  merged entry and the 7-day archive pages warm, so the flag reported a bust
+  and then served the cache. The key set now lives in `bust_cik_caches()`,
+  which also globs the filer's archive pages (their names embed the CIK, so
+  the glob cannot reach another company). Measured on JPM: 70 entries removed.
+- **An archive entry with no `name` is an error, not a skip.** SEC states each
+  entry's `filingCount`, so dropping one discards a known, counted block —
+  a probe with a nameless entry declaring 1,138 filings previously returned a
+  clean success over a history missing all of them.
+- **A short column in `filings.recent` no longer mislabels filings.** The join
+  padded columns that were *missing*, never ones that were *short*; a short
+  column let the next page's rows slide forward, so filings after the gap
+  carried an earlier filing's accession number. `list_filings`'s bounds checks
+  turn that into wrong data rather than an error, which would have reached
+  `pack_reconstruct` as the wrong document filed under the wrong year.
+
+- **`--no-cache` reports what it removed**, including zero, on both its
+  branches. A ticker the map cannot resolve busts nothing, and a silent no-op
+  there is indistinguishable from a successful bust — the failure this flag
+  exists to rule out. An unreadable ticker map is reported as its own cause
+  rather than as an unknown ticker, so the operator is pointed at SEC and not
+  at their own input.
+
+Grounding for the four above: three whole-branch review rounds, each with a
+mutation pass. The first found 5 of 9 mutants of the merge surviving the full
+suite — including deleting the padding whose own docstring described behaviour
+the code did not have. **12 of 12 distinct mutants of this change are now
+killed** by `tests/data/test_sec_submissions_pagination.py`, none surviving —
+a claim about that file, not about the whole suite, which is what was
+measured. Live re-verification after the fixes: JPM cold 8/8 filings, 10
+annual periods, and 70 cache entries removed by one `bust_cik_caches` call.
+
+### Known limits
+
+- Two filers on the roster remain short for reasons this change does not
+  address, and both are legitimate: DOW (7 10-Ks, 2019 spin-off) and PLTR (6,
+  2021 IPO).
+- Two more return almost nothing because their ticker resolves to a
+  re-registered holding company whose CIK carries no history — XOM (0 10-Ks
+  under CIK 2115436; the 7 real ones sit under 34088) and BLK (2, oldest
+  2025-02). That is an entity-resolution defect, tracked separately; this
+  change does not stitch across a predecessor CIK.
+
 ## [v2.39.0] — 2026-07-26
 
 ### Added — as-filed three-statement reconstruction, and a typed empty cell

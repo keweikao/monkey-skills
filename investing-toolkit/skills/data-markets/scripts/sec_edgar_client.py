@@ -59,6 +59,9 @@ SEC_COMPANYCONCEPT_URL = (
     "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/us-gaap/{concept}.json"
 )
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
+# Older filings live in the archive documents named by the main submissions
+# document's `filings.files[]`; each entry's `name` is a bare filename.
+SEC_SUBMISSIONS_PAGE_URL = "https://data.sec.gov/submissions/{name}"
 SEC_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_nodash}/{doc}"
 
 # SEC mandates identified User-Agent: "<name> <email>" format.
@@ -67,6 +70,12 @@ USER_AGENT = "kouko investing-toolkit <noreply@anthropic.com>"
 TTL_TICKERS = 7 * 86400       # 7 days
 TTL_FACTS = 86400             # 24 hours
 TTL_SUBMISSIONS = 86400       # 24 hours
+# Archive pages hold history — the page covering 1994-2003 does not change — so
+# they outlive the main document's TTL and are cached per page. NOT permanent:
+# when `recent` overflows, SEC re-partitions, and the NEWEST archive page can
+# gain rows under an unchanged name. A permanent TTL could never expire such an
+# entry (docs/loom/memory/cache-key-collision-across-migration.md).
+TTL_SUBMISSION_PAGES = 7 * 86400  # 7 days
 TTL_NARRATIVE = cache_util.compute_ttl("immutable", None)  # permanent; filings don't change
 TTL_EXHIBIT_RAW = cache_util.compute_ttl("immutable", None)  # permanent; a filed exhibit's bytes never change
 
@@ -401,8 +410,177 @@ def build_companyfacts_pack(cik: int) -> dict:
 # Filings index
 # ---------------------------------------------------------------------------
 
+def _submission_block_rows(block: dict) -> int:
+    """How many filings one parallel-array block holds.
+
+    The block is a dict of equal-length lists (`form`, `filingDate`, ...), so
+    the row count is any column's length — `max` rather than "pick a column"
+    because SEC omits a column entirely when no row in that block uses it.
+    """
+    return max(
+        (len(v) for v in block.values() if isinstance(v, list)),
+        default=0,
+    )
+
+
+def _append_submission_block(merged: dict, merged_rows: int, block: dict) -> int:
+    """Append one parallel-array block onto `merged`, in place.
+
+    `list_filings` indexes these arrays POSITIONALLY (`accn_list[i]` beside
+    `forms_list[i]`), so a column that falls short by even one entry does not
+    fail — it silently re-labels every filing after the gap.
+
+    THE INVARIANT, stated as what the code does rather than as intent: on
+    return, every column in `merged` has exactly `merged_rows + rows` entries.
+    Three shapes reach that, all through the same two pad lines — a column
+    missing from `block`, a column appearing for the first time IN `block`,
+    and a column already in `merged` that is SHORT of `merged_rows`. The third
+    is the one that corrupts rather than truncates, and an earlier revision of
+    this docstring claimed it was handled when it was not; the padding is
+    pinned by mutation now, not by this paragraph.
+    """
+    rows = _submission_block_rows(block)
+    for key in set(merged) | {k for k, v in block.items() if isinstance(v, list)}:
+        # ONE pad rule covers both sides of the join: square the column up to
+        # `merged_rows` before appending. A key seen for the first time in
+        # `block` starts empty and is back-filled by the same line that
+        # squares up a key already in `merged` but short -- which is the case
+        # that mislabels filings, because `list_filings`'s `i < len(...)`
+        # guards turn a short column into another filing's accession number
+        # rather than into an error.
+        column = merged.setdefault(key, [])
+        column.extend([None] * (merged_rows - len(column)))
+        incoming = block.get(key)
+        incoming = list(incoming) if isinstance(incoming, list) else []
+        # No clamp on `incoming`: `rows` is the max column length WITHIN this
+        # same block, so no column of it can be longer.
+        column.extend(incoming)
+        column.extend([None] * (rows - len(incoming)))
+    return merged_rows + rows
+
+
+def bust_cik_caches(cik: int, concept: str | None = None) -> list:
+    """Remove every cache entry `--no-cache` is meant to clear for one filer.
+
+    Exists as a named function rather than an inline loop in `main()` because
+    the set of keys is no longer obvious: a filer's submissions history now
+    lives across a merged entry AND one entry per archive page, and the pages
+    carry a 7-day TTL that outlives the merged entry's 24 h. An operator
+    reaching for `--no-cache` to re-verify a filer against SEC has to clear
+    all of them or the flag reports a bust and then serves the warm cache.
+
+    Archive-page keys are derived from SEC's own page NAMES, which embed the
+    zero-padded CIK (`CIK0001326801-submissions-001.json`), so the glob is
+    filer-scoped and cannot reach another company's pages. `cache_path`
+    rewrites `.` to `_`, hence the trailing wildcard rather than a suffix.
+
+    Returns the paths removed, so a caller can report what it actually did.
+    """
+    removed = []
+    keys = [f"facts_{cik:010d}", f"submissions_full_{cik:010d}"]
+    if concept:
+        keys.append(f"concept_{cik:010d}_{concept}")
+    paths = [cache_util.cache_path("sec_edgar", key) for key in keys]
+    paths.extend(
+        sorted(
+            (cache_util.resolve_cache_dir() / "sec_edgar").glob(
+                f"submissions_page_CIK{cik:010d}-*"
+            )
+        )
+    )
+    for path in paths:
+        if path.exists():
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
+def _fetch_submission_page(name: str) -> dict:
+    """One `filings.files[]` archive document, cached under its OWN key.
+
+    Per-page rather than folded into the merged payload's cache because the
+    page fan-out is wildly uneven: measured 2026-07-27, 28 of 33 flagged
+    filers have 0-3 pages but JPM has 68, C 39, BAC 20. Re-paying 68 requests
+    on every 24 h expiry of the MAIN document is what this separate, longer
+    TTL avoids.
+    """
+    path = cache_util.cache_path("sec_edgar", f"submissions_page_{name}")
+    cached = cache_util.load_cache(path, TTL_SUBMISSION_PAGES)
+    if cached:
+        return cached
+
+    raw = _sec_get(SEC_SUBMISSIONS_PAGE_URL.format(name=name))
+    if isinstance(raw, dict) and "error" in raw:
+        return raw  # never cached — one 503 must not poison the filer for a week
+
+    result = {"name": name, "fetched_at": _now_iso(), "data": raw}
+    cache_util.save_cache(path, result)
+    return result
+
+
+def _merge_submission_pages(raw: dict) -> dict:
+    """Fold every `filings.files[]` archive page into `filings.recent`.
+
+    SEC packs at most one year, or the 1,000 most recent filings (whichever is
+    more), into the main document's `recent` block; the rest is enumerated in
+    `filings.files[]`. Merging INTO `recent` — rather than exposing the pages
+    as a new field — is what keeps this a transport fix: every reader
+    (`list_filings`, `_foreign_private_issuer_no_quarterly_reason`) sees the
+    same shape it always saw, only complete. It is also the shape the shipped
+    `jadchaar/sec-edgar-api` wrapper produces for this endpoint.
+
+    Returns the client's `{"error": ...}` shape if ANY page fails. A partial
+    merge would be the very defect this function exists to remove, wearing a
+    different hat: the caller cannot tell "this filer has 3 10-Ks" from "page
+    2 of 5 failed".
+    """
+    filings = raw.get("filings")
+    if not isinstance(filings, dict):
+        return raw
+    pages = filings.get("files")
+    if not isinstance(pages, list) or not pages:
+        return raw
+
+    recent = filings.get("recent")
+    recent = recent if isinstance(recent, dict) else {}
+    merged = {k: list(v) for k, v in recent.items() if isinstance(v, list)}
+    merged_rows = _submission_block_rows(merged)
+
+    for entry in pages:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not name:
+            # An entry we cannot fetch is an UNREADABLE page, not an absent
+            # one -- SEC states each entry's `filingCount`, so skipping one
+            # drops a known, counted block of filings and still returns a
+            # clean success. That is indistinguishable from a complete
+            # history, which is the defect this whole function removes.
+            return {
+                "error": (
+                    "SEC EDGAR submissions archive entry has no 'name'; "
+                    f"cannot fetch {entry.get('filingCount') if isinstance(entry, dict) else '?'} "
+                    "filings it declares"
+                )
+            }
+        page = _fetch_submission_page(name)
+        if isinstance(page, dict) and "error" in page:
+            return page
+        block = page.get("data")
+        if not isinstance(block, dict):
+            return {"error": f"SEC EDGAR submissions page {name!r} has no filing rows"}
+        merged_rows = _append_submission_block(merged, merged_rows, block)
+
+    filings["recent"] = merged
+    return raw
+
+
 def fetch_submissions(cik: int) -> dict:
-    path = cache_util.cache_path("sec_edgar", f"submissions_{cik:010d}")
+    # A DISTINCT key from the legacy `submissions_{cik}`: the payload SHAPE is
+    # unchanged but its SEMANTICS are not. An entry written before this
+    # function followed `filings.files[]` is a TRUNCATED history that no
+    # reader can distinguish from a complete one, so aliasing the old key
+    # would let a warm cache serve truncation out of fixed code, per company
+    # and unpredictably (docs/loom/memory/cache-key-collision-across-migration.md).
+    path = cache_util.cache_path("sec_edgar", f"submissions_full_{cik:010d}")
     cached = cache_util.load_cache(path, TTL_SUBMISSIONS)
     if cached:
         cached["_cache"] = "hit"
@@ -412,11 +590,15 @@ def fetch_submissions(cik: int) -> dict:
     if isinstance(raw, dict) and "error" in raw:
         return raw
 
+    merged = _merge_submission_pages(raw)
+    if isinstance(merged, dict) and "error" in merged:
+        return merged
+
     result = {
         "cik": cik,
         "fetched_at": _now_iso(),
         "_cache": "miss",
-        "data": raw,
+        "data": merged,
     }
     cache_util.save_cache(path, result)
     return result
@@ -456,6 +638,17 @@ def list_filings(
 
     `limit` alone (`min_filing_date=None`) preserves the original count-based
     behavior unchanged for other callers (e.g. ad hoc CLI browsing).
+
+    THE ROWS THIS SCANS ARE NOW THE FILER'S WHOLE HISTORY. The paragraph above
+    describes the window this function applies; until 2026-07-27 it was applied
+    to a set that had ALREADY been truncated upstream, because
+    `fetch_submissions` read only the main submissions document's `recent`
+    block and never followed `filings.files[]`. That was the SAME
+    crowding-out, one layer down in the transport: JPM returned 1 of its 27
+    10-Ks, BAC 1 of 32, META 2 of 14. A `min_filing_date` reaching deeper than
+    the `recent` block could not be satisfied no matter how it was scanned.
+    `fetch_submissions` now merges every archive page before returning, so
+    both windows finally act on the complete set.
     """
     sub = fetch_submissions(cik)
     if "error" in sub:
@@ -4420,7 +4613,8 @@ def extract_dimensional_revenue(
     docs/loom/plans/2026-07-16-operational-kpi-quarterly.md — implementation
     recon found no cache write/read path here; the only caches in this
     module are schema-independent raw-source keys: tickers/facts_{cik}/
-    concept_{cik}_{concept}/submissions_{cik}/narrative_sections_{accession}).
+    concept_{cik}_{concept}/submissions_full_{cik}/submissions_page_{name}/
+    narrative_sections_{accession}/exhibit_raw_{accession}_{document}).
     Any FUTURE cache of this labeled-fact payload MUST use a
     schema-versioned distinct key, never a legacy key — see spec
     constraint (d), docs/loom/2026-07-16-operational-kpi-quarterly/specs/
@@ -5638,22 +5832,28 @@ def main():
 
     # Optional cache bust
     if args.no_cache:
-        # Only blow away the file that's about to be written
+        # Clears this filer's companyfacts entry, its merged submissions entry,
+        # the optional concept entry, AND every archive page cached for it --
+        # an unbounded, filer-scoped set, 70 files for JPM. The count is
+        # REPORTED rather than assumed: a ticker the map cannot resolve busts
+        # nothing, and a silent no-op here is indistinguishable from a
+        # successful bust, which is the failure this flag exists to rule out.
         if args.ticker:
             t = args.ticker.upper()
             tmap = load_ticker_map()
             entry = tmap.get("tickers", {}).get(t) if "error" not in tmap else None
             if entry:
-                cik = entry["cik"]
-                for key in (
-                    f"facts_{cik:010d}",
-                    f"submissions_{cik:010d}",
-                    f"concept_{cik:010d}_{args.concept}" if args.concept else "",
-                ):
-                    if key:
-                        p = cache_util.cache_path("sec_edgar", key)
-                        if p.exists():
-                            p.unlink()
+                removed = bust_cik_caches(entry["cik"], args.concept)
+                _log("cache bust", f"{t}: {len(removed)} entries removed")
+            elif "error" in tmap:
+                # NOT the same as an unknown ticker: the map itself could not
+                # be read, so nothing is known about `t` either way. Saying
+                # "not resolved" here would point the operator at their ticker
+                # instead of at SEC.
+                _log("cache bust",
+                     f"{t}: 0 entries removed (ticker map unavailable: {tmap['error']})")
+            else:
+                _log("cache bust", f"{t}: 0 entries removed (ticker not resolved)")
         if args.accession:
             # The edgartools narrative cache key (Task 12) is
             # narrative_sections_{accession} — DISTINCT from the retired regex
@@ -5662,8 +5862,16 @@ def main():
             p = cache_util.cache_path(
                 "sec_edgar", f"narrative_sections_{args.accession}"
             )
+            removed_accession = 0
             if p.exists():
                 p.unlink()
+                removed_accession = 1
+            # Reported for the same reason the ticker branch above is: the
+            # block comment legislates "the count is REPORTED rather than
+            # assumed" for this whole `if args.no_cache:` block, and silence
+            # here would exempt the branch its own governing comment covers.
+            _log("cache bust",
+                 f"{args.accession}: {removed_accession} entries removed")
 
     if args.action == "cik":
         if not args.ticker:
