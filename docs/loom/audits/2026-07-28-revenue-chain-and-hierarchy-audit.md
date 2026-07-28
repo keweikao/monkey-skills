@@ -151,11 +151,17 @@ store dump carries no calculation linkbase" — the sentence wraps, the word is 
 598) plus the SEC API's own response shape. Harder grounding would have to come
 from SEC's documentation, not from this repo.
 
-**The sharpest finding.** 13 of the 14 spine fields pick their concept from a
-hardcoded name chain (`kpi_spine_view._chain_concept`, `:1108-1124`) **even on
-the as-filed path where the tree is present**. Only `revenue` uses the structural
-rule. The module's own header (`:244-252`) states this openly as an evidence
-limit. The capability is proven on one field and simply not extended.
+**The sharpest finding, and the correction it later needed.** 13 of the 14 spine
+fields pick their concept from a hardcoded name chain
+(`kpi_spine_view._chain_concept`, `:1108-1124`) **even on the as-filed path where
+the tree is present**. Only `revenue` uses the structural rule. The module's own
+header (`:244-252`) states this openly as an evidence limit.
+
+> **This is a statement about MECHANISM, not about OUTCOMES, and §8 measures the
+> difference.** Read §8 before treating it as a defect: converting those 13
+> fields was measured across 14 filings and is NOT justified — the name chain
+> produces the correct answer almost everywhere the two methods can be compared,
+> and the structural analogue is systematically wrong on one field.
 
 **Dead machinery found in the same trace** (both independently re-verified):
 
@@ -258,3 +264,64 @@ case) and
 - Whether every filer's components sum to its total in the years NOT sampled.
 - Whether a 10-Q's presentation roles classify (§5) — no sample exists in-repo.
 - Concept-spelling parity between the two lanes (§5) — inferred, not measured.
+
+## §8 Converting the other 13 fields to structure-driven selection — measured and rejected
+
+**Question**: §4 records that 13 of 14 spine fields select their concept by a
+hardcoded name chain rather than by the filing's declared structure. Does that
+mechanism difference produce WRONG ANSWERS?
+
+**Method**: for each spine field, on each filing, compare the name chain's pick
+(first-present in chain order) against a structural filter analogous to
+`kpi_us_statement_check.revenue_totals` — drop any candidate whose
+`calculation_parent` is itself another candidate for the same field. Classify
+per (filing, field): AGREE / DIVERGE / NO-CANDIDATE / STRUCTURE-UNDECIDABLE.
+
+**Evidence**: measured twice. First at **n=2** (the only filings this repo held
+row-level `calculation_parent` for: KO FY2017, IBM FY2025). Then, after a live
+capture authorised for this purpose, at **n=14** — adding JPM, WFC, GE, UNH,
+MSFT, AMZN, MRK, PFE, WMT, VZ, TSLA, BRK-B, each on its most recent 10-K. The
+12 filers were chosen to MAXIMISE multi-candidate cases (banks tagging two
+revenue concepts, filers with non-controlling interests, goods+services
+splits) — a filing with one candidate per field cannot discriminate between the
+two methods at all.
+
+**Result: converting is NOT justified.**
+
+1. **The n=2 reasoning was wrong and the larger sample refuted it.** At n=2, 11
+   of 14 fields had only ONE candidate in every filing, which suggested the two
+   methods were equivalent by construction. At n=14 that set collapses to **6 of
+   14** — multi-candidate cases are common, not rare. The "equivalent by
+   construction" argument does not hold.
+2. **But the two methods still AGREE wherever both resolve** — except on one
+   field, where the structural rule is wrong.
+3. **`total_equity`: the structural rule is systematically wrong, 8 of 8.**
+   Whenever a filer tags both `StockholdersEquity` and
+   `StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest`, the
+   former's `calculation_parent` is ALWAYS the latter — a structural certainty,
+   not filer-specific ambiguity. So the structural filter always promotes the
+   including-NCI figure. The name chain's parent-only-first order is the correct
+   and deliberate choice (`kpi_equity_terms.py` records 17 of 32 filers resolving
+   to parent-only), and this measurement reconfirms it at higher n.
+4. **Three new STRUCTURE-UNDECIDABLE cases** — fields the name chain answers
+   correctly today and a structural rule would leave unresolved: WFC `revenue`
+   (both candidates unparented; the ASC 606 sub-concept has no calculation arc),
+   WMT `net_income` (`ProfitLoss` vs `NetIncomeLoss`, both unparented), KO
+   `eps_basic` (headline EPS vs continuing-operations-only). Converting turns an
+   answered cell into an unanswered one in each.
+5. **The inverse opportunity did not grow.** "Name chain finds nothing, structure
+   could" is still only KO's `revenue` — the case that motivated the existing
+   `revenue_totals`. **Measurement gap, stated because it is the one thing that
+   could still justify structural work**: production has an unrestricted
+   structural finder for `revenue` ONLY, so for the other 13 fields this check
+   could not run. Absence of new opportunities there is unmeasured, not proven.
+
+**Consequence for planning**: the rung that proposed this conversion was
+withdrawn on this evidence. Do not re-propose it from §4's mechanism observation
+alone — §4 says the tree is unused, §8 says using it would make the answers
+worse.
+
+**Where the raw output lives**: the per-(filing, field) detail was session-scoped
+and is gone, as was the enlarged capture (12 filings, ~5.9 MB of verbatim rows).
+Re-deriving requires re-running the capture. The classifications above are
+recorded observations.
