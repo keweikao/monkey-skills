@@ -1,0 +1,2799 @@
+{
+ "_capture": {
+  "what": "Live capture pinning plan Task I's oldest-filing measurement: the genuinely oldest 10-Q assemble_quarterly_filing_span yields for KO (CIK 21344), plus the earliest 10-Q that actually parses. docs/loom/plans/2026-07-28-us-quarterly-statement-series.md.",
+  "captured_at": "2026-07-30",
+  "sdk": "edgartools==5.42.0",
+  "ticker": "KO",
+  "cik": 21344,
+  "span_size": 127,
+  "tenq_count": 97,
+  "regenerate": "investing-toolkit/tests/data/fixtures/capture_us_oldest_filing.py",
+  "live_verdict_informational_only": {
+   "kinds": [
+    "balance_sheet",
+    "cash_flow",
+    "income"
+   ],
+   "n_lines_total": 93,
+   "n_lines_with_calculation_parent": 74
+  },
+  "isxbrl_index_scan": {
+   "what": "Exhaustive scan of every row in KO's EDGAR submissions index for the isXBRL flag the index already ships per row. Reported as carried; this scan does not interpret what the flag means.",
+   "floor_date": "2009-07-30",
+   "index_rows_scanned_all_forms": 3287,
+   "rows_with_isxbrl_1": 180,
+   "earliest_isxbrl_1": {
+    "accession": "0001047469-09-007013",
+    "form": "10-Q",
+    "filing_date": "2009-07-30",
+    "report_date": "2009-07-03",
+    "isXBRL": 1
+   },
+   "isxbrl_1_rows_on_that_date": 1,
+   "rows_filed_before_that_date": 900,
+   "rows_filed_before_that_date_with_isxbrl_1": 0,
+   "tenq_filed_before_that_date": 46,
+   "tenq_filed_before_that_date_with_isxbrl_1": 0,
+   "flag_semantics_counterexample": [
+    {
+     "accession": "0001047469-09-009286",
+     "form": "10-Q",
+     "filing_date": "2009-10-29",
+     "report_date": "2009-10-02",
+     "isXBRL": 0
+    },
+    {
+     "accession": "0001047469-09-009321",
+     "form": "10-Q/A",
+     "filing_date": "2009-10-29",
+     "report_date": "2009-10-02",
+     "isXBRL": 1
+    }
+   ],
+   "sampled": [
+    {
+     "accession": "0000021344-94-000012",
+     "form": "10-Q",
+     "filing_date": "1994-05-06",
+     "report_date": "1994-03-31",
+     "isXBRL": 0,
+     "outcome": "acquisition_failed",
+     "xbrl_is_none": null
+    },
+    {
+     "accession": "0000021344-98-000007",
+     "form": "10-Q",
+     "filing_date": "1998-05-12",
+     "report_date": "1998-03-31",
+     "isXBRL": 0,
+     "outcome": "resolved",
+     "xbrl_is_none": true
+    },
+    {
+     "accession": "0000021344-00-000014",
+     "form": "10-Q",
+     "filing_date": "2000-05-11",
+     "report_date": "2000-03-31",
+     "isXBRL": 0,
+     "outcome": "resolved",
+     "xbrl_is_none": true
+    },
+    {
+     "accession": "0001047469-08-005195",
+     "form": "10-Q",
+     "filing_date": "2008-04-25",
+     "report_date": "2008-03-28",
+     "isXBRL": 0,
+     "outcome": "resolved",
+     "xbrl_is_none": true
+    },
+    {
+     "accession": "0001047469-09-004778",
+     "form": "10-Q",
+     "filing_date": "2009-04-30",
+     "report_date": "2009-03-31",
+     "isXBRL": 0,
+     "outcome": "resolved",
+     "xbrl_is_none": true
+    }
+   ]
+  }
+ },
+ "ticker": "KO",
+ "cik": 21344,
+ "oldest_available": {
+  "accession": "0000021344-94-000012",
+  "filing_date": "1994-05-06",
+  "report_date": "1994-03-31",
+  "outcome": "acquisition_failed",
+  "error": {
+   "error": "SEC EDGAR filing acquisition failed: accession '0000021344-94-000012' did not resolve to a filing",
+   "error_class": "resolution",
+   "identifier": "0000021344-94-000012"
+  }
+ },
+ "earliest_parsing": {
+  "accession": "0001047469-09-007013",
+  "filing_date": "2009-07-30",
+  "period_of_report": "2009-07-03",
+  "form": "10-Q",
+  "presentation_roles": [
+   "http://cocacola.com/role/ConsolidatedBalanceSheetsParenthetical",
+   "http://cocacola.com/role/DocumentAndEntityInformation",
+   "http://cocacola.com/role/DisclosureSummaryOfSignificantAccountingPolicies",
+   "http://cocacola.com/role/DisclosureInventories",
+   "http://cocacola.com/role/DisclosureCommitmentsAndContingencies",
+   "http://cocacola.com/role/DisclosureComprehensiveIncome",
+   "http://cocacola.com/role/DisclosureChangesInEquity",
+   "http://cocacola.com/role/DisclosureHedgingTransactionsAndDerivativeFinancialInstruments",
+   "http://cocacola.com/role/DisclosureFairValueMeasurements",
+   "http://cocacola.com/role/DisclosureLong-TermDebt",
+   "http://cocacola.com/role/DisclosurePensionAndOtherPostretirementBenefitPlans",
+   "http://cocacola.com/role/DisclosureOperatingSegments",
+   "http://cocacola.com/role/DisclosureAcquisitionsAndInvestments",
+   "http://cocacola.com/role/DisclosureRestructuringCosts",
+   "http://cocacola.com/role/DisclosureIncomeTaxes",
+   "http://cocacola.com/role/DisclosureSignificantOperatingAndNonoperatingItems",
+   "http://cocacola.com/role/DisclosureFinancialInstruments",
+   "http://cocacola.com/role/ConsolidatedStatementsOfIncome",
+   "http://cocacola.com/role/ConsolidatedStatementsOfCashFlows",
+   "http://cocacola.com/role/ConsolidatedBalanceSheets"
+  ],
+  "roles_captured": [
+   {
+    "role": "http://cocacola.com/role/ConsolidatedStatementsOfIncome",
+    "rows": [
+     {
+      "concept": "us-gaap_IncomeStatementAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_IncomeStatementAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": null,
+      "calculation_parent": null,
+      "level": 0,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "us-gaap_SalesRevenueGoodsNet",
+       "us-gaap_CostOfGoodsSold",
+       "us-gaap_GrossProfit",
+       "us-gaap_SellingGeneralAndAdministrativeExpense",
+       "us-gaap_OtherCostAndExpenseOperating",
+       "us-gaap_OperatingIncomeLoss",
+       "us-gaap_InvestmentIncomeInterest",
+       "us-gaap_InterestExpense",
+       "us-gaap_IncomeLossFromEquityMethodInvestments",
+       "us-gaap_OtherNonoperatingIncomeExpense",
+       "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+       "us-gaap_IncomeTaxExpenseBenefit",
+       "us-gaap_ProfitLoss",
+       "us-gaap_NetIncomeLossAttributableToNoncontrollingInterest",
+       "us-gaap_NetIncomeLoss",
+       "us-gaap_EarningsPerShareBasic",
+       "us-gaap_EarningsPerShareDiluted",
+       "us-gaap_CommonStockDividendsPerShareDeclared",
+       "us-gaap_WeightedAverageNumberOfSharesOutstandingBasic",
+       "us-gaap_WeightedAverageNumberDilutedSharesOutstandingAdjustment",
+       "us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_SalesRevenueGoodsNet",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Revenue",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_GrossProfit",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CostOfGoodsSold",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Cost of Revenue",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_GrossProfit",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_GrossProfit",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Gross Profit",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_OperatingIncomeLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_SellingGeneralAndAdministrativeExpense",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Selling, General and Administrative Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_OperatingIncomeLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_OtherCostAndExpenseOperating",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Other Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_OperatingIncomeLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_OperatingIncomeLoss",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Operating Income",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_InvestmentIncomeInterest",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Interest and Dividend Income (Non-Bank)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_InterestExpense",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Interest Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_IncomeLossFromEquityMethodInvestments",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Income from Equity Method Investments",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_OtherNonoperatingIncomeExpense",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Non-Operating Income (Expense)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "name": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "all_names": [
+       "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax"
+      ],
+      "label": "ko_IncomeLossFromContinuingOperationsBeforeIncomeTax",
+      "values": {
+       "duration_2008-03-29_2008-06-27": 1917000000.0,
+       "duration_2008-01-01_2008-06-27": 3876000000.0,
+       "duration_2009-04-04_2009-07-03": 2728000000.0,
+       "duration_2009-01-01_2009-07-03": 4543000000.0
+      },
+      "decimals": {
+       "duration_2008-03-29_2008-06-27": -6,
+       "duration_2008-01-01_2008-06-27": -6,
+       "duration_2009-04-04_2009-07-03": -6,
+       "duration_2009-01-01_2009-07-03": -6
+      },
+      "units": {
+       "duration_2008-03-29_2008-06-27": "U-Monetary",
+       "duration_2008-01-01_2008-06-27": "U-Monetary",
+       "duration_2009-04-04_2009-07-03": "U-Monetary",
+       "duration_2009-01-01_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "duration_2008-03-29_2008-06-27": "duration",
+       "duration_2008-01-01_2008-06-27": "duration",
+       "duration_2009-04-04_2009-07-03": "duration",
+       "duration_2009-01-01_2009-07-03": "duration"
+      },
+      "preferred_signs": {
+       "duration_2008-03-29_2008-06-27": 1,
+       "duration_2008-01-01_2008-06-27": 1,
+       "duration_2009-04-04_2009-07-03": 1,
+       "duration_2009-01-01_2009-07-03": 1
+      },
+      "balance": "credit",
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_ProfitLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_IncomeTaxExpenseBenefit",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Income Tax Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_ProfitLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_ProfitLoss",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Profit or Loss",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_NetIncomeLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetIncomeLossAttributableToNoncontrollingInterest",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Income Attributable to Noncontrolling Interest",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_NetIncomeLoss",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetIncomeLoss",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Income",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_EarningsPerShareBasic",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Earnings Per Share (Basic)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_EarningsPerShareDiluted",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Earnings Per Share (Diluted)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CommonStockDividendsPerShareDeclared",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Dividends Per Share",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_WeightedAverageNumberOfSharesOutstandingBasic",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Weighted Average Shares Outstanding",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_WeightedAverageNumberDilutedSharesOutstandingAdjustment",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Dilution Adjustment",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": "us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Weighted Average Shares Outstanding, Diluted",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_IncomeStatementAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     }
+    ]
+   },
+   {
+    "role": "http://cocacola.com/role/ConsolidatedStatementsOfCashFlows",
+    "rows": [
+     {
+      "concept": "us-gaap_StatementOfCashFlowsAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_StatementOfCashFlowsAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": null,
+      "calculation_parent": null,
+      "level": 0,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+       "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+       "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+       "us-gaap_EffectOfExchangeRateOnCashAndCashEquivalents",
+       "ko_CashAndCashEquivalentsAbstract"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementOfCashFlowsAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "us-gaap_ProfitLoss",
+       "us-gaap_DepreciationDepletionAndAmortization",
+       "us-gaap_ShareBasedCompensation",
+       "us-gaap_DeferredIncomeTaxExpenseBenefit",
+       "us-gaap_IncomeLossFromEquityMethodInvestmentsNetOfDividendsOrDistributions",
+       "us-gaap_ForeignCurrencyTransactionGainLossUnrealized",
+       "us-gaap_GainLossOnSaleOfPreviouslyUnissuedStockBySubsidiaryOrEquityInvesteeNonoperatingIncome",
+       "us-gaap_GainLossOnSaleOfOtherAssets",
+       "us-gaap_OtherNoncashExpense",
+       "us-gaap_AdjustmentsNoncashItemsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesOther",
+       "us-gaap_IncreaseDecreaseInOperatingCapital",
+       "us-gaap_NetCashProvidedByUsedInOperatingActivities"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_ProfitLoss",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Profit or Loss",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_DepreciationDepletionAndAmortization",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Depreciation Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_ShareBasedCompensation",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Stock-Based Compensation Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_DeferredIncomeTaxExpenseBenefit",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Income Tax Expense",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_IncomeLossFromEquityMethodInvestmentsNetOfDividendsOrDistributions",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Non-Operating Income (Expense)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_ForeignCurrencyTransactionGainLossUnrealized",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Non-Operating Income (Expense)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_GainLossOnSaleOfPreviouslyUnissuedStockBySubsidiaryOrEquityInvesteeNonoperatingIncome",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Non-Operating Income (Expense)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_GainLossOnSaleOfOtherAssets",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Non-Operating Income (Expense)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_OtherNoncashExpense",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Costs and Expenses",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AdjustmentsNoncashItemsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesOther",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_AdjustmentsNoncashItemsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesOther",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_IncreaseDecreaseInOperatingCapital",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Change in Other Working Capital",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Cash from Operating Activities",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInOperatingActivitiesAbstract",
+      "calculation_parent": "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementOfCashFlowsAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "ko_AcquisitionsAndInvestmentsPrincipallyBeverageAndBottlingCompaniesAndTrademarks",
+       "us-gaap_PaymentsToAcquireInvestments",
+       "ko_ProceedsFromDisposalsOfBottlingCompaniesAndOtherInvestments",
+       "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment",
+       "us-gaap_ProceedsFromSaleOfPropertyPlantAndEquipment",
+       "us-gaap_PaymentsForProceedsFromOtherInvestingActivities",
+       "us-gaap_NetCashProvidedByUsedInInvestingActivities"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_AcquisitionsAndInvestmentsPrincipallyBeverageAndBottlingCompaniesAndTrademarks",
+      "name": "ko_AcquisitionsAndInvestmentsPrincipallyBeverageAndBottlingCompaniesAndTrademarks",
+      "all_names": [
+       "ko_AcquisitionsAndInvestmentsPrincipallyBeverageAndBottlingCompaniesAndTrademarks"
+      ],
+      "label": "ko_AcquisitionsAndInvestmentsPrincipallyBeverageAndBottlingCompaniesAndTrademarks",
+      "values": {
+       "duration_2008-01-01_2008-06-27": 621000000.0,
+       "duration_2009-01-01_2009-07-03": 248000000.0
+      },
+      "decimals": {
+       "duration_2008-01-01_2008-06-27": -6,
+       "duration_2009-01-01_2009-07-03": -6
+      },
+      "units": {
+       "duration_2008-01-01_2008-06-27": "U-Monetary",
+       "duration_2009-01-01_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "duration_2008-01-01_2008-06-27": "duration",
+       "duration_2009-01-01_2009-07-03": "duration"
+      },
+      "preferred_signs": {
+       "duration_2008-01-01_2008-06-27": 1,
+       "duration_2009-01-01_2009-07-03": 1
+      },
+      "balance": "credit",
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_PaymentsToAcquireInvestments",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Purchases of Investments",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_ProceedsFromDisposalsOfBottlingCompaniesAndOtherInvestments",
+      "name": "ko_ProceedsFromDisposalsOfBottlingCompaniesAndOtherInvestments",
+      "all_names": [
+       "ko_ProceedsFromDisposalsOfBottlingCompaniesAndOtherInvestments"
+      ],
+      "label": "ko_ProceedsFromDisposalsOfBottlingCompaniesAndOtherInvestments",
+      "values": {
+       "duration_2008-01-01_2008-06-27": 387000000.0,
+       "duration_2009-01-01_2009-07-03": 45000000.0
+      },
+      "decimals": {
+       "duration_2008-01-01_2008-06-27": -6,
+       "duration_2009-01-01_2009-07-03": -6
+      },
+      "units": {
+       "duration_2008-01-01_2008-06-27": "U-Monetary",
+       "duration_2009-01-01_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "duration_2008-01-01_2008-06-27": "duration",
+       "duration_2009-01-01_2009-07-03": "duration"
+      },
+      "preferred_signs": {},
+      "balance": "debit",
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "level": 3,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Capital Expenditures",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_ProceedsFromSaleOfPropertyPlantAndEquipment",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Proceeds from Sale of PP&E",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_PaymentsForProceedsFromOtherInvestingActivities",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Cash from Investing Activities",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetCashProvidedByUsedInInvestingActivities",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Cash from Investing Activities",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInInvestingActivitiesAbstract",
+      "calculation_parent": "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementOfCashFlowsAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "ko_ProceedsFromIssuanceOfDebt",
+       "ko_RepaymentsOfDebt",
+       "us-gaap_RepaymentsOfLongTermDebtAndCapitalSecurities",
+       "us-gaap_ProceedsFromIssuanceOfCommonStock",
+       "us-gaap_PaymentsForRepurchaseOfCommonStock",
+       "us-gaap_PaymentsOfDividends",
+       "us-gaap_NetCashProvidedByUsedInFinancingActivities"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_ProceedsFromIssuanceOfDebt",
+      "name": "ko_ProceedsFromIssuanceOfDebt",
+      "all_names": [
+       "ko_ProceedsFromIssuanceOfDebt"
+      ],
+      "label": "ko_ProceedsFromIssuanceOfDebt",
+      "values": {
+       "duration_2008-01-01_2008-06-27": 4317000000.0,
+       "duration_2009-01-01_2009-07-03": 8058000000.0
+      },
+      "decimals": {
+       "duration_2008-01-01_2008-06-27": -6,
+       "duration_2009-01-01_2009-07-03": -6
+      },
+      "units": {
+       "duration_2008-01-01_2008-06-27": "U-Monetary",
+       "duration_2009-01-01_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "duration_2008-01-01_2008-06-27": "duration",
+       "duration_2009-01-01_2009-07-03": "duration"
+      },
+      "preferred_signs": {
+       "duration_2008-01-01_2008-06-27": 1,
+       "duration_2009-01-01_2009-07-03": 1
+      },
+      "balance": "debit",
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_RepaymentsOfDebt",
+      "name": "ko_RepaymentsOfDebt",
+      "all_names": [
+       "ko_RepaymentsOfDebt"
+      ],
+      "label": "ko_RepaymentsOfDebt",
+      "values": {
+       "duration_2008-01-01_2008-06-27": 2478000000.0,
+       "duration_2009-01-01_2009-07-03": 6087000000.0
+      },
+      "decimals": {
+       "duration_2008-01-01_2008-06-27": -6,
+       "duration_2009-01-01_2009-07-03": -6
+      },
+      "units": {
+       "duration_2008-01-01_2008-06-27": "U-Monetary",
+       "duration_2009-01-01_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "duration_2008-01-01_2008-06-27": "duration",
+       "duration_2009-01-01_2009-07-03": "duration"
+      },
+      "preferred_signs": {
+       "duration_2008-01-01_2008-06-27": 1,
+       "duration_2009-01-01_2009-07-03": 1
+      },
+      "balance": "credit",
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_RepaymentsOfLongTermDebtAndCapitalSecurities",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Repayments of Debt",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_ProceedsFromIssuanceOfCommonStock",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Stock Repurchases (Issuances)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_PaymentsForRepurchaseOfCommonStock",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Stock Repurchases (Issuances)",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_PaymentsOfDividends",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Distributions to Minority Interests",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "level": 3,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_NetCashProvidedByUsedInFinancingActivities",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Cash from Financing Activities",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_NetCashProvidedByUsedInFinancingActivitiesAbstract",
+      "calculation_parent": "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_EffectOfExchangeRateOnCashAndCashEquivalents",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Effect of Exchange Rate on Cash",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StatementOfCashFlowsAbstract",
+      "calculation_parent": "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_CashAndCashEquivalentsAbstract",
+      "name": "ko_CashAndCashEquivalentsAbstract",
+      "all_names": [
+       "ko_CashAndCashEquivalentsAbstract"
+      ],
+      "label": "ko_CashAndCashEquivalentsAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementOfCashFlowsAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": true,
+      "children": [
+       "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease",
+       "us-gaap_CashAndCashEquivalentsAtCarryingValue",
+       "us-gaap_CashAndCashEquivalentsAtCarryingValue"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Net Change in Cash",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "ko_CashAndCashEquivalentsAbstract",
+      "calculation_parent": null,
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CashAndCashEquivalentsAtCarryingValue",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Cash and Cash Equivalents",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "ko_CashAndCashEquivalentsAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/periodStartLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CashAndCashEquivalentsAtCarryingValue",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Cash and Cash Equivalents",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "ko_CashAndCashEquivalentsAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 2,
+      "preferred_label": "http://www.xbrl.org/2003/role/periodEndLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     }
+    ]
+   },
+   {
+    "role": "http://cocacola.com/role/ConsolidatedBalanceSheets",
+    "rows": [
+     {
+      "concept": "us-gaap_StatementOfFinancialPositionAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_StatementOfFinancialPositionAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": null,
+      "calculation_parent": null,
+      "level": 0,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "us-gaap_StatementTable"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_StatementTable",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_StatementTable",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementOfFinancialPositionAbstract",
+      "calculation_parent": null,
+      "level": 1,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "dei_LegalEntityAxis",
+       "us-gaap_StatementLineItems"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "dei_LegalEntityAxis",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "dei_LegalEntityAxis",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementTable",
+      "calculation_parent": null,
+      "level": 2,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "dei_EntityDomain"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "dei_EntityDomain",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "dei_EntityDomain",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "dei_LegalEntityAxis",
+      "calculation_parent": null,
+      "level": 3,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "ko_CocaColaHellenicBottlingCompanySaMember",
+       "ko_CocaColaFemsaSabDeCvMember",
+       "ko_CocaColaAmatilLimitedMember",
+       "ko_CocaColaEnterprisesIncMember",
+       "ko_OtherEquityMethodInvestmentsMember"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_CocaColaHellenicBottlingCompanySaMember",
+      "name": "ko_CocaColaHellenicBottlingCompanySaMember",
+      "all_names": [
+       "ko_CocaColaHellenicBottlingCompanySaMember"
+      ],
+      "label": "ko_CocaColaHellenicBottlingCompanySaMember",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "dei_EntityDomain",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_CocaColaFemsaSabDeCvMember",
+      "name": "ko_CocaColaFemsaSabDeCvMember",
+      "all_names": [
+       "ko_CocaColaFemsaSabDeCvMember"
+      ],
+      "label": "ko_CocaColaFemsaSabDeCvMember",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "dei_EntityDomain",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_CocaColaAmatilLimitedMember",
+      "name": "ko_CocaColaAmatilLimitedMember",
+      "all_names": [
+       "ko_CocaColaAmatilLimitedMember"
+      ],
+      "label": "ko_CocaColaAmatilLimitedMember",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "dei_EntityDomain",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_CocaColaEnterprisesIncMember",
+      "name": "ko_CocaColaEnterprisesIncMember",
+      "all_names": [
+       "ko_CocaColaEnterprisesIncMember"
+      ],
+      "label": "ko_CocaColaEnterprisesIncMember",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "dei_EntityDomain",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_OtherEquityMethodInvestmentsMember",
+      "name": "ko_OtherEquityMethodInvestmentsMember",
+      "all_names": [
+       "ko_OtherEquityMethodInvestmentsMember"
+      ],
+      "label": "ko_OtherEquityMethodInvestmentsMember",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "dei_EntityDomain",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_StatementLineItems",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_StatementLineItems",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementTable",
+      "calculation_parent": null,
+      "level": 2,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [
+       "us-gaap_AssetsAbstract",
+       "us-gaap_LiabilitiesAndStockholdersEquityAbstract"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AssetsAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_AssetsAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementLineItems",
+      "calculation_parent": null,
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "us-gaap_AssetsCurrentAbstract",
+       "us-gaap_EquityMethodInvestments",
+       "us-gaap_CostMethodInvestments",
+       "us-gaap_OtherAssetsNoncurrent",
+       "us-gaap_PropertyPlantAndEquipmentNet",
+       "us-gaap_IndefiniteLivedTrademarks",
+       "us-gaap_Goodwill",
+       "ko_OtherIndefiniteLivedAndFiniteLivedIntangibleAssets",
+       "us-gaap_Assets"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AssetsCurrentAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_AssetsCurrentAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "us-gaap_CashAndCashEquivalentsAtCarryingValue",
+       "us-gaap_MarketableSecurities",
+       "us-gaap_AccountsReceivableNetCurrent",
+       "us-gaap_InventoryNet",
+       "ko_PrepaidExpenseAndOtherAssetsCurrent",
+       "us-gaap_AssetsCurrent"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CashAndCashEquivalentsAtCarryingValue",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Cash and Cash Equivalents",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsCurrentAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_MarketableSecurities",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Cash and Cash Equivalents",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsCurrentAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AccountsReceivableNetCurrent",
+      "name": "us-gaap_AccountsReceivableNetCurrent",
+      "all_names": [
+       "us-gaap_AccountsReceivableNetCurrent"
+      ],
+      "label": "Trade accounts receivable, less allowances of $58 and $51, respectively",
+      "values": {
+       "instant_2008-12-31": 3090000000.0,
+       "instant_2009-07-03": 3746000000.0
+      },
+      "decimals": {
+       "instant_2008-12-31": -6,
+       "instant_2009-07-03": -6
+      },
+      "units": {
+       "instant_2008-12-31": "U-Monetary",
+       "instant_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "instant_2008-12-31": "instant",
+       "instant_2009-07-03": "instant"
+      },
+      "preferred_signs": {
+       "instant_2008-12-31": 1,
+       "instant_2009-07-03": 1
+      },
+      "balance": "debit",
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsCurrentAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": true
+     },
+     {
+      "concept": "us-gaap_InventoryNet",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Inventory",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsCurrentAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_PrepaidExpenseAndOtherAssetsCurrent",
+      "name": "ko_PrepaidExpenseAndOtherAssetsCurrent",
+      "all_names": [
+       "ko_PrepaidExpenseAndOtherAssetsCurrent"
+      ],
+      "label": "ko_PrepaidExpenseAndOtherAssetsCurrent",
+      "values": {
+       "instant_2008-12-31": 1920000000.0,
+       "instant_2009-07-03": 2198000000.0
+      },
+      "decimals": {
+       "instant_2008-12-31": -6,
+       "instant_2009-07-03": -6
+      },
+      "units": {
+       "instant_2008-12-31": "U-Monetary",
+       "instant_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "instant_2008-12-31": "instant",
+       "instant_2009-07-03": "instant"
+      },
+      "preferred_signs": {
+       "instant_2008-12-31": 1,
+       "instant_2009-07-03": 1
+      },
+      "balance": "debit",
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsCurrentAbstract",
+      "calculation_parent": "us-gaap_AssetsCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AssetsCurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Current Assets",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsCurrentAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_EquityMethodInvestments",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Equity Method Investments",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CostMethodInvestments",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Long-Term Investments",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_OtherAssetsNoncurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Other Non-Operating Non-Current Assets",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_PropertyPlantAndEquipmentNet",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Property, Plant and Equipment",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_IndefiniteLivedTrademarks",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Goodwill",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_Goodwill",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Goodwill",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_OtherIndefiniteLivedAndFiniteLivedIntangibleAssets",
+      "name": "ko_OtherIndefiniteLivedAndFiniteLivedIntangibleAssets",
+      "all_names": [
+       "ko_OtherIndefiniteLivedAndFiniteLivedIntangibleAssets"
+      ],
+      "label": "ko_OtherIndefiniteLivedAndFiniteLivedIntangibleAssets",
+      "values": {
+       "instant_2008-12-31": 2417000000.0,
+       "instant_2009-07-03": 2392000000.0
+      },
+      "decimals": {
+       "instant_2008-12-31": -6,
+       "instant_2009-07-03": -6
+      },
+      "units": {
+       "instant_2008-12-31": "U-Monetary",
+       "instant_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "instant_2008-12-31": "instant",
+       "instant_2009-07-03": "instant"
+      },
+      "preferred_signs": {
+       "instant_2008-12-31": 1,
+       "instant_2009-07-03": 1
+      },
+      "balance": "debit",
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": "us-gaap_Assets",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_Assets",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Assets",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_AssetsAbstract",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_StatementLineItems",
+      "calculation_parent": null,
+      "level": 3,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "us-gaap_LiabilitiesCurrentAbstract",
+       "us-gaap_LongTermDebtNoncurrent",
+       "us-gaap_OtherLiabilitiesNoncurrent",
+       "us-gaap_DeferredTaxLiabilitiesNoncurrent",
+       "us-gaap_StockholdersEquityAbstract",
+       "us-gaap_LiabilitiesAndStockholdersEquity"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_LiabilitiesCurrentAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_LiabilitiesCurrentAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "us-gaap_AccountsPayableAndAccruedLiabilitiesCurrent",
+       "ko_LoansAndNotesPayable",
+       "us-gaap_LongTermDebtCurrent",
+       "us-gaap_AccruedIncomeTaxesCurrent",
+       "us-gaap_LiabilitiesCurrent"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AccountsPayableAndAccruedLiabilitiesCurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Accounts Payable",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesCurrentAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "ko_LoansAndNotesPayable",
+      "name": "ko_LoansAndNotesPayable",
+      "all_names": [
+       "ko_LoansAndNotesPayable"
+      ],
+      "label": "ko_LoansAndNotesPayable",
+      "values": {
+       "instant_2008-12-31": 6066000000.0,
+       "instant_2009-07-03": 6382000000.0
+      },
+      "decimals": {
+       "instant_2008-12-31": -6,
+       "instant_2009-07-03": -6
+      },
+      "units": {
+       "instant_2008-12-31": "U-Monetary",
+       "instant_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "instant_2008-12-31": "instant",
+       "instant_2009-07-03": "instant"
+      },
+      "preferred_signs": {},
+      "balance": "credit",
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesCurrentAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesCurrent",
+      "level": 6,
+      "preferred_label": null,
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_LongTermDebtCurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Current Portion of Long-Term Debt",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesCurrentAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AccruedIncomeTaxesCurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Accrued Income Taxes",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesCurrentAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesCurrent",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_LiabilitiesCurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Current Liabilities",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesCurrentAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesAndStockholdersEquity",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_LongTermDebtNoncurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Long-Term Debt",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesAndStockholdersEquity",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_OtherLiabilitiesNoncurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Other Non-Operating Non-Current Liabilities",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesAndStockholdersEquity",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_DeferredTaxLiabilitiesNoncurrent",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Deferred Tax Liabilities, Non-Current",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesAndStockholdersEquity",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_StockholdersEquityAbstract",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "us-gaap_StockholdersEquityAbstract",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": null,
+      "parent": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": "http://www.xbrl.org/2003/role/label",
+      "is_abstract": false,
+      "children": [
+       "us-gaap_CommonStockValue",
+       "us-gaap_AdditionalPaidInCapital",
+       "us-gaap_RetainedEarningsAccumulatedDeficit",
+       "us-gaap_AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+       "us-gaap_TreasuryStockValue",
+       "us-gaap_StockholdersEquity",
+       "us-gaap_MinorityInterest",
+       "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"
+      ],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_CommonStockValue",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Stockholders' Equity",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquity",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AdditionalPaidInCapital",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Additional Paid-In Capital",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquity",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_RetainedEarningsAccumulatedDeficit",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Retained Earnings",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquity",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+      "name": "us-gaap_AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+      "all_names": [
+       "us-gaap_AccumulatedOtherComprehensiveIncomeLossNetOfTax"
+      ],
+      "label": "Accumulated Other Comprehensive Income",
+      "values": {
+       "instant_2008-12-31": -2674000000.0,
+       "instant_2009-07-03": -1740000000.0
+      },
+      "decimals": {
+       "instant_2008-12-31": -6,
+       "instant_2009-07-03": -6
+      },
+      "units": {
+       "instant_2008-12-31": "U-Monetary",
+       "instant_2009-07-03": "U-Monetary"
+      },
+      "period_types": {
+       "instant_2008-12-31": "instant",
+       "instant_2009-07-03": "instant"
+      },
+      "preferred_signs": {
+       "instant_2008-12-31": 1,
+       "instant_2009-07-03": 1
+      },
+      "balance": "credit",
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquity",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": true,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_TreasuryStockValue",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Treasury Stock",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": -1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquity",
+      "level": 6,
+      "preferred_label": "http://xbrl.us/us-gaap/role/label/negated",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_StockholdersEquity",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Equity",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_MinorityInterest",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Noncontrolling Interest",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      "level": 6,
+      "preferred_label": "http://www.xbrl.org/2003/role/terseLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Equity Including Noncontrolling Interest",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_StockholdersEquityAbstract",
+      "calculation_parent": "us-gaap_LiabilitiesAndStockholdersEquity",
+      "level": 5,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     },
+     {
+      "concept": "us-gaap_LiabilitiesAndStockholdersEquity",
+      "name": null,
+      "all_names": [
+       null
+      ],
+      "label": "Total Liabilities and Equity",
+      "values": {},
+      "decimals": {},
+      "units": {},
+      "period_types": {},
+      "preferred_signs": {},
+      "balance": null,
+      "weight": 1.0,
+      "parent": "us-gaap_LiabilitiesAndStockholdersEquityAbstract",
+      "calculation_parent": null,
+      "level": 4,
+      "preferred_label": "http://www.xbrl.org/2003/role/totalLabel",
+      "is_abstract": false,
+      "children": [],
+      "has_values": false,
+      "is_company_preferred_label": false
+     }
+    ]
+   }
+  ]
+ }
+}
