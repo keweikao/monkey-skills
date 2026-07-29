@@ -2,9 +2,9 @@
 
 - **Date**: 2026-07-28
 - **Stage**: brainstorming output. Feeds `writing-plans`.
-- **Branch**: `feat-as-filed-hierarchy-selection` (name predates this brief; the
-  hierarchy-selection work it was named for was withdrawn on measurement — see
-  §What Becomes Obsolete).
+- **Branch**: `feat-us-quarterly-statement-series` (renamed from
+  `feat-as-filed-hierarchy-selection` once the hierarchy-selection work that
+  named it was withdrawn on measurement — see §What Becomes Obsolete).
 - **Evidence**: `docs/loom/audits/2026-07-28-revenue-chain-and-hierarchy-audit.md`
   §4, §5, §8, plus the live probes recorded in §Current State Evidence below.
 
@@ -35,11 +35,18 @@ artefact of one good year.*
 
 ## Smallest End State
 
-A verb that, given a ticker and a span, returns the three statements as a
-discrete-quarter series over ≥10 years, where **every period states what it is**.
+A verb that, given a ticker, returns the three statements as a discrete-quarter
+series over **ALL available history**, where **every period states what it is**.
 
-1. Assemble the filing list — 10-Qs and 10-Ks across the span (~40 filings for
-   10 years: 3 × 10-Q per year plus 1 × 10-K).
+**Clarified by the user 2026-07-29: ten years is a FLOOR, not a target — "as much
+as is available".** So the span parameter inverts from the earlier draft: the
+default is everything, and `--years N` becomes an optional UPPER bound for a
+quick look. This changes three things — the filing count (~77, not ~40), the cold
+cost (20-37 min, not 11-19), and the parse-depth risk, which now reaches back to
+the start of XBRL mandate (~2009-2011) where only 2014+ has been verified.
+
+1. Assemble the filing list — every 10-Q and 10-K available, oldest first
+   (~77 filings for a filer with full XBRL history), optionally capped.
 2. **Cache the raw filings on disk.** They are immutable, so the cache needs no
    invalidation policy beyond existence.
 3. Stitch them with `edgartools`' `XBRLS.from_filings()`, requesting
@@ -80,8 +87,10 @@ requirement and not a nicety.
 
 **Boundary** — `_acquire_raw_filing` (`sec_edgar_client.py:1121`) has **no cache
 wrapper**; measured cold cost 15.9-29.1 s per filing, and a fresh process
-re-pays it in full (~16.2 s), so a 40-filing build costs **11-19 minutes every
-run**. `cache_util`'s TTLs (`cache_util.py:66-92`) cover only the
+re-pays it in full (~16.2 s). The per-filing figure is the durable measurement;
+the total follows the span. At the ~40 filings of the original ten-year framing
+that was 11-19 minutes; at the ~77 of the clarified all-available-history
+requirement it is **20-37 minutes every run**. `cache_util`'s TTLs (`cache_util.py:66-92`) cover only the
 submissions/facts layer. edgartools' own disk cache holds SEC quarterly index
 files, not filing documents.
 
@@ -122,10 +131,15 @@ The pivotal measurements:
 - **Balance sheet needs nothing**: instant-based, and the stitched span returned
   every quarter-end with no gaps.
 
+**Caching is now load-bearing, not merely convenient.** At ~77 filings and
+20-37 minutes cold, a run without cache is unusable for iterative analysis. It
+was already in v1 by user decision; the span clarification removes the option of
+deferring it.
+
 **Caching is in v1 by explicit user decision**, overriding a recommendation to
-defer it. The measured 11-19 minutes is per run, not one-off, because nothing
-caches filing documents. Filings are immutable, so this is the cheapest safe
-cache in the system.
+defer it. The measured cost is per run, not one-off, because nothing caches
+filing documents — 20-37 minutes at the clarified span. Filings are immutable, so
+this is the cheapest safe cache in the system.
 
 ## Alternatives Considered
 
@@ -156,10 +170,14 @@ the hard part, not fetching.
 
 ## Open Questions
 
-1. **Output shape.** Does the series render through the existing
+1. ~~**Output shape.** Does the series render through the existing
    `derive-as-filed` view (14 canonical fields × periods), or does a
-   quarterly series want its own projection? The existing view has no period-type
-   concept, which step 5 requires.
+   quarterly series want its own projection?~~ **RESOLVED 2026-07-28 by the
+   user: its own projection.** The existing view has no period-type concept,
+   which step 5 requires; and the quarterly period semantics (discrete / YTD /
+   derived) do not exist in an annual view, so folding them in would show
+   annual readers markings that mean nothing to them. `derive-as-filed` is left
+   byte-unchanged.
 2. **Span parameterisation.** Years back, or explicit start/end? A span in years
    is simpler; explicit dates compose better with a later store lane.
 3. **Cache granularity.** Cache the raw filing document, or the parsed XBRL
@@ -168,3 +186,22 @@ the hard part, not fetching.
    `pack_us.py:1465-1472` makes against persisting reconstructions.
 4. **Fiscal-year-end handling.** MSFT (June) and WMT (January) were probed and
    worked, but no filer with a 52/53-week calendar was tested in this arc.
+
+## Next arc — operational KPIs (user-confirmed 2026-07-29)
+
+Operational / management KPIs remain a stated goal; the user deferred them to the
+arc AFTER this one rather than dropping them. Recorded here so the deferral is a
+decision, not an omission.
+
+**The seam to know about before that arc starts.** The existing operational-KPI
+machinery (`kpi_prose_candidates`, `kpi_8k_candidates`) writes into `kpi_store`;
+this arc's quarterly series deliberately does NOT touch the store. So combining
+the two for analysis has no single place to read from, and that join is unbuilt.
+No design work for it belongs in THIS arc — that would be paying for a speculative
+requirement — but the next arc should start from the knowledge that the seam
+exists rather than discovering it.
+
+That arc also remains blocked on its own prerequisite (the surface-version marker
+and the anchor gate on the commit path), which is unchanged by this work. When the
+backlog branch carrying the ratified order is resolved, this note belongs there as
+a proper entry.
