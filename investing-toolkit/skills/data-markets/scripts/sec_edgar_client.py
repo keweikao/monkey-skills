@@ -696,6 +696,85 @@ def list_filings(
     return rows
 
 
+def assemble_quarterly_filing_span(cik: int, years: int | None = None) -> list[dict]:
+    """Return every 10-Q and 10-K filing for `cik`, oldest first.
+
+    `years=None` (the default) returns the filer's ENTIRE 10-Q/10-K history --
+    ten years is a FLOOR for this feature, not a target, so "all available
+    history" has to actually mean all of it. `years`, when given, caps the
+    span to the most recent `years` years.
+
+    Both paths reuse `list_filings`, which already merges the paginated
+    submissions archive (`fetch_submissions`). The two branches below use
+    `list_filings`'s TWO independent stop conditions deliberately:
+
+    - `years` given: pass a `min_filing_date` cutoff, same pattern as
+      `action_filings`'s `since_days` above. `list_filings` documents that
+      `min_filing_date` OVERRIDES `limit` as the stop condition -- the
+      `limit` argument passed alongside it is inert (see its docstring),
+      so it is not a truncation risk.
+    - `years=None`: no date cutoff exists, so `limit` becomes the real stop
+      condition. Passing a constant here (however generous) is the exact
+      defect `narrative_filings_window_days`'s docstring documents for a
+      sibling parameter: a fixed guess looks sufficient until a filer's
+      real history exceeds it, then silently truncates. Instead `limit` is
+      derived from the filer's own submissions payload -- the TOTAL row
+      count across every form, which strictly upper-bounds the 10-Q/10-K
+      subset -- so it can never be smaller than the true count for THIS
+      filer, no matter how large that filer's own history is.
+    """
+    forms = ["10-Q", "10-K"]
+
+    if years is not None:
+        min_filing_date = (
+            date.today() - timedelta(days=years * _DAYS_PER_YEAR)
+        ).isoformat()
+        # `limit` is inert here -- `min_filing_date` overrides it as the stop
+        # condition (see `list_filings`'s docstring); this mirrors
+        # `action_filings`'s `since_days` branch above. `1` is a deliberate
+        # LOW canary, not a placeholder: if `min_filing_date`'s override ever
+        # regressed, `limit` would become the real stop condition again and
+        # this branch would return at most 1 row -- failing its test loudly
+        # -- whereas a "safe-looking" large constant here would mask that
+        # exact regression by coincidentally returning enough rows anyway.
+        rows = list_filings(cik, forms, 1, min_filing_date=min_filing_date)
+    else:
+        sub = fetch_submissions(cik)
+        if "error" in sub:
+            return []
+        recent = sub.get("data", {}).get("filings", {}).get("recent", {})
+        total_rows = len(recent.get("form", []))
+        rows = list_filings(cik, forms, total_rows)
+
+    # `_append_submission_block` deliberately pads short columns with `None`
+    # (a real shape for this module, not a hypothetical), and `list_filings`
+    # keeps those rows rather than dropping them. A bare `r.get("filingDate")
+    # or ""` key would sort a `None`-dated row FIRST (empty string sorts
+    # before any real date), i.e. claim the OLDEST slot in this oldest-first
+    # contract for a row with no date at all. The tuple key below sorts by
+    # "dateless" first (dated rows before undated), so undated rows sort LAST.
+    #
+    # WHY THE DIRECTION IS SAFE, without appealing to a precedent that does not
+    # exist: an earlier version of this comment cited `_latest_filing` as the
+    # house idiom, and that citation was WRONG -- `_latest_filing` (:813-817)
+    # FILTERS undated rows out and takes a plain `max`, it carries no `or ""`.
+    # The repo's actual `or ""` idiom is `select_narrative_filings` (:876), and
+    # there it pairs with `max`, where a falsy key sorts LAST for free. This
+    # function sorts ASCENDING, which inverts that safety -- hence the explicit
+    # first tuple element. The direction is defensible on its own terms and
+    # needs no precedent: a row with no date cannot truthfully occupy the
+    # OLDEST slot of an oldest-first contract.
+    #
+    # The predicate is `not ...`, not `is None`: `_append_submission_block`
+    # pads short columns with None today, but an empty-string date would slip
+    # into the dated half under an `is None` test and reclaim the oldest slot --
+    # the exact outcome this key exists to prevent.
+    return sorted(
+        rows,
+        key=lambda r: (not r.get("filingDate"), r.get("filingDate") or ""),
+    )
+
+
 # ---------------------------------------------------------------------------
 # select_narrative_filings — quarter-anchored filing-selection policy (pure
 # function, no I/O) over already-fetched `list_filings` rows. Decides WHICH
