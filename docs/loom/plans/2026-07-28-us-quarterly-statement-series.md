@@ -197,3 +197,40 @@
 - **Dependencies**: Task A completes first
 - **Independent**: true
 - **Brief item covered**: "the parse-depth risk, which now reaches back to the start of XBRL mandate (~2009-2011) where only 2014+ has been verified"
+
+---
+
+## Decision Log
+
+Added after the plan-document-reviewer PASS, per the kickoff-briefing protocol
+(one-way doors brief to the user; two-way doors log here). Not a re-review
+trigger — no task's Description, Acceptance, Dependencies, or scope changed.
+
+### One-way doors — briefed and approved by the user 2026-07-29
+
+1. **Period-kind vocabulary**: `discrete_quarter | ytd | annual | instant | unknown`,
+   with `derived: true|false` as a SEPARATE flag rather than a sixth kind. Rationale:
+   a derived Q4 is both a discrete quarter AND derived — orthogonal axes, and
+   collapsing them makes "every discrete quarter regardless of provenance"
+   unaskable. `unknown` exists so an out-of-window span is VISIBLE rather than
+   forced into the nearest bucket.
+2. **Projection envelope**: reuse the existing pack envelope
+   (`pack` / `ticker` / `fetched_at` / `_status`) with
+   `statements.<kind>.{lines, periods}`, each period carrying
+   `{key, kind, derived, start, end}`. No new top-level shape — existing consumers
+   and tooling already read this envelope.
+3. **Cache on-disk format**: a thin envelope `{accession, fetched_at, sec_url,
+   document}`, not the bare document. A few extra bytes buy provenance; adding it
+   later would invalidate every cached filing on every user's machine, at 20-37
+   minutes per filer to rebuild.
+
+### Two-way doors — decided without escalation
+
+- Classifier day-span windows align with the dependency's own boundaries
+  (quarter 80-100, YTD 175-190 / 260-285, annual 350-380) rather than inventing
+  new ones. Task G measures whether the 52/53-week calendar requires widening.
+- Task A's function signature and internal data structures.
+- MSFT as the stitched fixture subject — its derived Q4 figure is already
+  cross-verified by two independent implementations in the dependency.
+- Task I's oldest-filing subject follows from whatever Task A's list yields; not
+  pinned in advance.
