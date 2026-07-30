@@ -37,6 +37,34 @@ not shaped like `duration_<start>_<end>` or `instant_<date>` at all, or whose
 dates do not parse, returns `unknown` exactly the same as an out-of-window
 span: both mean "do not read a span from this key."
 
+THE DAY-SPAN WINDOWS ARE READ BY A SIBLING, so they are exposed through
+`span_windows()` rather than left as underscore-private constants (added
+2026-07-30 for plan Task E; `period_kind`'s behaviour is unchanged).
+`kpi_us_quarterly_series.derive_discrete_quarters` (plan Task E) resolves the
+four CUMULATIVE ROLES of a fiscal year — Q1, six-month YTD, nine-month YTD,
+annual — by matching each column's day span against these same windows, so
+that a widening here (plan Task G, the 52/53-week calendar) reaches the
+subtraction instead of needing a second, separately-maintained copy of the
+numbers. That is the ONLY declared reader. Two consequences worth knowing
+before editing the constants:
+
+  - **The windows must stay DISJOINT and ascending.** Task E resolves a role
+    only when exactly ONE column matches its window, so overlapping windows
+    let one column match two roles. Task E now CHECKS this and raises on a
+    non-disjoint set, so a widening that breaks it fails loudly on the first
+    call rather than quietly changing what gets derived. That check exists
+    because the failure was silent before it: measured 2026-07-30, widening
+    the nine-month window to `(260, 380)` so it also covers a 364-day fiscal
+    year made Task E derive NOTHING at all for every affected year — and an
+    empty answer is indistinguishable from an ordinary one, since no filer is
+    entitled to a derived quarter. Overlap did not corrupt the arithmetic; it
+    deleted it. Widen these windows as far as a 52/53-week calendar needs,
+    but keep each one clear of the next.
+  - **Adding a THIRD `_YTD_SPANS` window is a breaking change**, not a
+    widening. Task E maps the two YTD windows onto its two YTD roles by
+    their own low bounds and refuses loudly on any other count, because a
+    third window names no third role. Widening the existing two is safe.
+
 No `@req` tags: this dispatch carries no registered loom-spec REQ-ids (the
 work is tracked by named plan Task C), so `@req` is omitted per the
 implementer contract.
@@ -53,6 +81,34 @@ _INSTANT_PREFIX = "instant_"
 _DISCRETE_QUARTER_SPAN = (80, 100)
 _YTD_SPANS = ((175, 190), (260, 285))
 _ANNUAL_SPAN = (350, 380)
+
+
+def span_windows() -> dict[str, tuple[tuple[int, int], ...]]:
+    """`{kind: ((low, high), ...)}` — the inclusive day-span windows this
+    module buckets by, for the three DURATION kinds it recognises.
+
+    The declared read of what were otherwise private constants; see the module
+    docstring for who reads it, why, and what must stay true of the numbers
+    (the windows must stay disjoint, and a third `ytd` window is a breaking
+    change rather than a widening).
+
+    Every kind answers in the SAME shape — a tuple of windows — even where
+    there is only one, so a caller never has to branch on the shape to read the
+    data. `instant` and `unknown` are absent by design: neither is a day-span
+    window. `instant` is decided by the key's prefix and carries no span at
+    all, and `unknown` is the answer for spans that match NO window, so
+    neither has bounds to report.
+
+    Built fresh from the constants on every call, so this is always a
+    description of what `period_kind` actually implements rather than a second
+    copy of the numbers, and so a caller cannot reach back through the returned
+    dict and re-bucket every key in the process.
+    """
+    return {
+        "discrete_quarter": (_DISCRETE_QUARTER_SPAN,),
+        "ytd": tuple(_YTD_SPANS),
+        "annual": (_ANNUAL_SPAN,),
+    }
 
 
 def period_kind(period_key: str) -> str:

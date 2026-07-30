@@ -176,3 +176,122 @@ def test_period_key_classifies_window_edges(periods, period_key, expected_kind, 
     assert periods.period_kind(period_key) == expected_kind, (
         f"{edge_description}: {period_key!r} expected {expected_kind!r}"
     )
+
+
+# ==========================================================================
+# `span_windows()` — the PUBLIC read of the day-span windows
+# ==========================================================================
+#
+# Added 2026-07-30 for plan Task E (Files touched), whose subtraction resolves
+# its four cumulative roles by day span and must read these windows rather
+# than restate them. Before this accessor existed Task E reached into
+# `_DISCRETE_QUARTER_SPAN` / `_YTD_SPANS` / `_ANNUAL_SPAN` directly, which is
+# private state; the accessor is what makes that read a declared surface.
+# `period_kind`'s own behaviour is unchanged and is still pinned by every test
+# above — this section only adds a second, read-only way to see the same
+# constants.
+
+
+def _iso_day(offset: int) -> str:
+    """A `duration_` key of exactly `offset` days, from the same fixed start
+    date the CONSTRUCTED edge table above uses."""
+    from datetime import date, timedelta
+
+    start = date(2024, 1, 1)
+    return f"duration_{start.isoformat()}_{(start + timedelta(days=offset)).isoformat()}"
+
+
+def test_span_windows_reports_every_kind_as_a_tuple_of_windows(periods):
+    """The accessor answers for the three DURATION kinds, and answers each one
+    in the SAME shape — a tuple of `(low, high)` windows, even where there is
+    only one.
+
+    A uniform shape is the point: `ytd` has two windows and the other two have
+    one each, and a caller that had to branch on "is this one window or a tuple
+    of them" would be reading the shape rather than the data. `instant` and
+    `unknown` are deliberately absent — neither is a day-span window, and
+    inventing an entry for them would imply a span they do not have.
+    """
+    windows = periods.span_windows()
+
+    assert set(windows) == {"discrete_quarter", "ytd", "annual"}, (
+        f"span_windows must answer for exactly the three duration kinds, got "
+        f"{sorted(windows)}"
+    )
+    for kind, kind_windows in windows.items():
+        assert isinstance(kind_windows, tuple), f"{kind}: {kind_windows!r} is not a tuple"
+        assert kind_windows, f"{kind}: no windows at all"
+        for window in kind_windows:
+            assert isinstance(window, tuple) and len(window) == 2, (
+                f"{kind}: {window!r} is not a (low, high) pair"
+            )
+            low, high = window
+            assert isinstance(low, int) and isinstance(high, int), (
+                f"{kind}: {window!r} bounds are not ints"
+            )
+            assert low <= high, f"{kind}: {window!r} is inverted"
+
+
+def test_span_windows_agrees_with_period_kind_at_every_bound(periods):
+    """The accessor must DESCRIBE the classifier, not duplicate it.
+
+    This is the whole reason the accessor may exist at all: a second statement
+    of the same eight numbers is a drift surface, and the only thing that stops
+    it drifting is an executable check that the two agree. So every bound the
+    accessor reports is fed back through `period_kind` — the bound itself must
+    classify as its own kind, and the day just outside must not. If someone
+    edits a window constant, this stays green; if someone edits the accessor to
+    report a window the classifier does not implement, this fails.
+    """
+    windows = periods.span_windows()
+
+    for kind, kind_windows in windows.items():
+        for low, high in kind_windows:
+            assert periods.period_kind(_iso_day(low)) == kind, (
+                f"{kind}: span {low} is reported as this kind's low bound but "
+                f"period_kind calls it {periods.period_kind(_iso_day(low))!r}"
+            )
+            assert periods.period_kind(_iso_day(high)) == kind, (
+                f"{kind}: span {high} is reported as this kind's high bound but "
+                f"period_kind calls it {periods.period_kind(_iso_day(high))!r}"
+            )
+            # One day outside must not still be this kind. It may be `unknown`
+            # or another kind (the windows are adjacent, not isolated), but it
+            # may not be THIS one -- that would mean the reported bound is not
+            # where the classifier's boundary actually is.
+            assert periods.period_kind(_iso_day(low - 1)) != kind, (
+                f"{kind}: span {low - 1} is one day below the reported low "
+                f"bound {low} and still classifies as {kind!r}, so the real "
+                "boundary is lower than the accessor says"
+            )
+            assert periods.period_kind(_iso_day(high + 1)) != kind, (
+                f"{kind}: span {high + 1} is one day above the reported high "
+                f"bound {high} and still classifies as {kind!r}, so the real "
+                "boundary is higher than the accessor says"
+            )
+
+
+def test_span_windows_cannot_be_mutated_through_its_return_value(periods):
+    """A caller must not be able to reach back and change the classifier.
+
+    The accessor exists so a sibling module can READ these windows; if the dict
+    it returns were the module's own, a caller assigning into it would silently
+    re-bucket every period key in the process. Two calls must therefore return
+    equal but distinct dicts, and `period_kind` must be unaffected by a write
+    to either.
+    """
+    first = periods.span_windows()
+    second = periods.span_windows()
+    assert first == second
+    assert first is not second, (
+        "span_windows returned the same dict object twice, so a caller's write "
+        "reaches the module's own state"
+    )
+
+    first["annual"] = ((0, 1),)
+    first["ytd"] = ()
+    assert periods.span_windows() == second, (
+        "writing into the returned dict changed what the next call reports"
+    )
+    # And the classifier itself still answers as it did.
+    assert periods.period_kind(_iso_day(364)) == "annual"

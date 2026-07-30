@@ -1,7 +1,15 @@
 """Tests for analysis-kpi/scripts/kpi_us_quarterly_series.py — stitch a
 filer's own ALREADY-ACQUIRED filing list into the three statements via
-`edgartools`' own multi-filing stitcher (plan Task D,
-docs/loom/plans/2026-07-28-us-quarterly-statement-series.md).
+`edgartools`' own multi-filing stitcher (plan Task D), then subtract the
+discrete quarters the filings never state (plan Task E), both in
+docs/loom/plans/2026-07-28-us-quarterly-statement-series.md.
+
+TWO FUNCTIONS, TWO HALVES OF ONE PIPELINE. `stitch_quarterly_statements`
+takes the cumulative columns as filed; `derive_discrete_quarters` differences
+them. The second exists because a US filer's filings do not contain four
+discrete quarters: Q4 appears in no filing at all (there is no Q4 10-Q, only
+the 10-K), and a 10-Q's cash-flow statement may carry only cumulative
+figures. See "WHAT TASK E'S TESTS PIN" below.
 
 `stitch_quarterly_statements(filings)` is pass-through only (no
 derivation): it takes an already-acquired filing list, builds
@@ -53,22 +61,66 @@ value is quoted for contrast it is recorded as a comment, not asserted; it
 came from a one-off `discrete_quarters=True` capture over the same filings,
 which is not committed because nothing should run against it.
 
+WHAT TASK E'S TESTS PIN, and where each expected number comes from. The
+invariant the whole arc rests on is that A PERIOD KEY'S SPAN ALWAYS
+DESCRIBES THE SPAN OF ITS VALUE, so a derived quarter is only correct if
+BOTH its number and its key are. Every Task E test therefore checks the
+key as well as the figure, and one of them checks the key through the
+committed span classifier (`kpi_us_quarterly_periods.period_kind`) — because
+a derived Q4 mis-keyed onto either of its own inputs would classify as
+`annual` or `ytd` and pass every value-only assertion in this file.
+
+Three grades of oracle are used, and they are NOT interchangeable:
+
+  1. CONFIRMED THREE WAYS, its independence RECORDED BUT NOT REPRODUCIBLE:
+     derived FY2025 Q4 revenue `76,441,000,000`. The FIGURE is solid — the
+     plan, this file's constant, and the fixture's own
+     `281,724,000,000 − 205,283,000,000` all agree, and the third of those is
+     re-read from the input by the test itself. Its INDEPENDENCE is a weaker
+     claim than earlier drafts of this file made: it rests on a session-scoped
+     probe of `edgar/ttm/calculator.py:665` (`_derive_q4_from_fy`) that the
+     brief itself records as not re-derivable, and NO artifact in this repo
+     shows the two implementations agreeing. So this file does not call it a
+     verified-independent oracle (plan Task E, Acceptance, "Bound on the word
+     independent"). Recorded, never called at test time.
+  2. NOT INDEPENDENT, and this file must not pretend otherwise: the FY2025
+     operating-cash-flow quarters `34,180 / 22,291 / 37,044 / 42,647`
+     (x10^6). The dependency's own `_unaccumulate_cashflow_ytd` applies the
+     SAME formula to the SAME stitched inputs, so agreeing with it is a
+     differential test of implementation and cannot catch a wrong formula
+     or a wrong period pairing. What redeems the pair is the third grade.
+  3. READ BACK FROM THE INPUT: the filer's OWN filed discrete cash-flow
+     columns. MSFT files three-month cash-flow columns for Q1-Q3, so
+     deleting them from an in-test copy and re-deriving them reproduces
+     numbers the filer stated independently of any subtraction. That is the
+     assertion a wrong formula or a wrong pairing cannot survive, and it is
+     the reason grade 2 alone was not left to carry the cash-flow lane.
+
+Grade 3 also removes the "expected value written as a literal" trap: the
+expectation is read out of the input the test itself mutated, so no constant
+can satisfy it.
+
 No `@req` tags: this dispatch carries no registered loom-spec REQ-ids (the
-work is tracked by named plan Task D), so `@req` is omitted per the
+work is tracked by named plan Tasks D and E), so `@req` is omitted per the
 implementer contract.
 """
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pytest
 from conftest import SKILLS
 
 SERIES_SCRIPT = SKILLS / "analysis-kpi" / "scripts" / "kpi_us_quarterly_series.py"
+# Task C's committed span classifier, loaded so Task E's tests can check a
+# DERIVED key through the same reader every downstream consumer uses.
+PERIODS_SCRIPT = SKILLS / "analysis-kpi" / "scripts" / "kpi_us_quarterly_periods.py"
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
     / "data" / "fixtures" / "us_quarterly_stitched_msft.json"
@@ -127,6 +179,60 @@ _EXPECTED_PERIOD_COUNTS = {"income": 17, "balance_sheet": 11, "cash_flow": 17}
 
 _MAX_PERIODS_LIBRARY_DEFAULT = 8
 
+# --- Task E: the periods the subtraction reads and the ones it writes -----
+#
+# MSFT's fiscal year starts July 1. The four CUMULATIVE columns of FY2025 are
+# `_FY2025_CASHFLOW_CUMULATIVE` above; these are the two the Q4 subtraction
+# consumes, and the key it must produce.
+_FY2025_FY = "duration_2024-07-01_2025-06-30"          # 364d, FY
+_FY2025_YTD9 = "duration_2024-07-01_2025-03-31"        # 273d, nine months
+# 2025-04-01 is the day after YTD9 ends; 2025-06-30 is the day FY ends. This
+# key is in NEITHER input -- reusing either input's key is the defect the
+# whole arc exists to remove, so the key is asserted, not assumed.
+_FY2025_DERIVED_Q4 = "duration_2025-04-01_2025-06-30"  # 90d, fiscal Q4
+
+# The previous fiscal year, present in the same fixture with a complete
+# cumulative set -- so "derives Q4" is pinned on TWO years, not one, and a
+# hard-coded single answer cannot satisfy it.
+_FY2024_DERIVED_Q4 = "duration_2024-04-01_2024-06-30"  # 90d, fiscal Q4
+
+# The fiscal year the fixture DELIBERATELY leaves incomplete: it carries
+# Q1 / YTD6 / YTD9 but NO FY column, because `years=3` is a window relative
+# to the capture's run date and that year had not closed. It is the offline
+# refusal case for Q4 (plan Task E, GREEN, as reworded 2026-07-30).
+_OPEN_YEAR_START = "2025-07-01"
+_OPEN_YEAR_YTD9 = "duration_2025-07-01_2026-03-31"     # 273d, its last column
+# The key a Q4 for that year would have to carry. Nothing may emit it.
+_OPEN_YEAR_WOULD_BE_Q4 = "duration_2026-04-01_2026-06-30"
+
+# GRADE 1 ORACLE. The FIGURE is confirmed three ways; its INDEPENDENCE is
+# recorded but not reproducible in this repo -- see the module docstring's
+# grade 1 note. The name says `RECORDED`, not `INDEPENDENT`, so a reader
+# reaching this constant first does not inherit the stronger claim.
+_RECORDED_FY2025_Q4_REVENUE = 76_441_000_000
+
+# GRADE 2 ORACLE (NOT independent -- same formula, same inputs as the
+# dependency's `_unaccumulate_cashflow_ytd`). FY2025 operating cash flow, the
+# four DISCRETE quarters. Q1-Q3 are filed by MSFT itself; only Q4 is derived.
+_FY2025_CASHFLOW_DISCRETE = {
+    "duration_2024-07-01_2024-09-30": 34_180_000_000,  # Q1: filed (= its own YTD)
+    "duration_2024-10-01_2024-12-31": 22_291_000_000,  # Q2: filed by MSFT
+    "duration_2025-01-01_2025-03-31": 37_044_000_000,  # Q3: filed by MSFT
+    _FY2025_DERIVED_Q4: 42_647_000_000,                # Q4: DERIVED, in no filing
+}
+
+# The line whose subtraction is float-HOSTILE on this very fixture, so the
+# `Decimal` requirement is pinned by real data rather than a constructed
+# value: 13.64 - 9.99 is 3.6500000000000004 in binary float and exactly 3.65
+# in decimal. Every other income line here is whole dollars, where float
+# happens to be exact and would prove nothing.
+_EPS_DILUTED_CONCEPT = "us-gaap_EarningsPerShareDiluted"
+_EPS_DILUTED_FY2025_Q4 = Decimal("3.65")
+
+# A line with no fractional cent anywhere, used where the point is the figure
+# rather than its representation.
+_CFO_FY2025_Q4 = 42_647_000_000
+
 
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -142,11 +248,15 @@ def _span_days(period_id: str) -> int:
     return (date.fromisoformat(end_s) - date.fromisoformat(start_s)).days
 
 
-def _values_of(statement: dict, concept: str) -> dict:
+def _row_of(statement: dict, concept: str) -> dict:
     for row in statement["statement_data"]:
         if row.get("concept") == concept:
-            return row["values"]
+            return row
     raise AssertionError(f"concept {concept!r} absent from the statement")
+
+
+def _values_of(statement: dict, concept: str) -> dict:
+    return _row_of(statement, concept)["values"]
 
 
 @pytest.fixture(scope="module")
@@ -534,3 +644,1231 @@ def test_max_periods_is_derived_from_the_filing_count_not_any_constant(
             "count means the derivation was replaced by a constant, which is "
             "the silent-truncation defect this module exists to prevent"
         )
+
+
+# ==========================================================================
+# Plan Task E — derive the discrete quarters the filings do not state
+# ==========================================================================
+
+
+@pytest.fixture(scope="module")
+def period_kind():
+    """Task C's COMMITTED span classifier — the reader every downstream
+    consumer will use on a derived key. Loaded here rather than reimplemented
+    so a test cannot agree with a derived key that the real classifier would
+    label `annual`."""
+    return _load("kpi_us_quarterly_periods_for_task_e", PERIODS_SCRIPT).period_kind
+
+
+@pytest.fixture
+def statements(fixture_doc):
+    """A DEEP COPY of the captured statements, so a test may delete a period
+    to construct a case the run-date-relative capture does not contain
+    (plan Task E, GREEN: construct it in an in-test copy, never re-capture)."""
+    return copy.deepcopy(fixture_doc["statements"])
+
+
+def _derived_by_key(derived: dict, kind: str) -> dict:
+    """`{period_key: entry}` for one statement kind, failing loudly on a
+    duplicate key — two derived entries for one period would make every
+    lookup below silently pick one of them."""
+    entries = derived[kind]
+    by_key = {entry["key"]: entry for entry in entries}
+    assert len(by_key) == len(entries), (
+        f"{kind}: two derived entries share a period key: "
+        f"{[e['key'] for e in entries]}"
+    )
+    return by_key
+
+
+def _drop_period(statements: dict, kind: str, period_key: str) -> dict:
+    """Remove one period column from an in-test copy — from the statement's
+    own `periods` list AND from every line's `values`, which is how a capture
+    that never had the column would look. Returns `{concept: value}` for the
+    values removed, so a test can assert a re-derived figure against what was
+    taken away rather than against a literal."""
+    statement = statements[kind]
+    before = len(statement["periods"])
+    statement["periods"] = [
+        entry for entry in statement["periods"] if entry[0] != period_key
+    ]
+    assert len(statement["periods"]) == before - 1, (
+        f"{period_key} was not a period of the {kind} statement, so dropping "
+        "it proves nothing -- the test's premise is wrong"
+    )
+    removed = {}
+    for row in statement["statement_data"]:
+        values = row.get("values") or {}
+        if period_key in values:
+            removed[row["concept"]] = values.pop(period_key)
+    assert removed, f"no {kind} line carried a value for {period_key}"
+    return removed
+
+
+def _declared_precision(row: dict, period_key: str) -> Decimal:
+    """The worth of the last digit the FILER VOUCHED FOR in `row` at
+    `period_key`, read from XBRL's own `decimals` attribute as the capture
+    carries it: `decimals: -6` says the figure is stated to the nearest
+    million, so `10 ** 6` is what its last vouched digit is worth. Never a
+    literal -- the number comes out of the row, per period key, so a re-capture
+    that changes a filer's stated precision changes this with it.
+
+    Returns `Decimal(0)` -- i.e. DEMAND AN EXACT MATCH -- when the row declares
+    no usable precision for that key: the key is absent from `decimals`, or its
+    value is not an integer (`None`, a stringified number, or XBRL's `INF`,
+    which means "exact" and for which exact is the right answer anyway). An
+    absent declaration is NOT licence for an unbounded tolerance, so the
+    undeclared case is held to the STRICTEST standard rather than the loosest:
+    it can make this test fail loudly, never pass quietly. `bool` is excluded
+    explicitly because it is an `int` subclass in Python and `True` is not a
+    precision.
+    """
+    declared = (row.get("decimals") or {}).get(period_key)
+    if isinstance(declared, bool) or not isinstance(declared, int):
+        return Decimal(0)
+    return Decimal(10) ** -declared
+
+
+def test_derived_q4_revenue_matches_the_recorded_cross_implementation_figure(
+    series, fixture_doc, period_kind
+):
+    """Plan Task E's first RED. Its oracle, 76,441,000,000, is the closest this
+    file has to an independent one -- and the claim is bounded, because an
+    earlier draft of this docstring called it "genuinely INDEPENDENT" and that
+    was more than the evidence supports (plan Task E, Acceptance, "Bound on the
+    word independent").
+
+    THE NAME NO LONGER SAYS `independent`, and the divergence from the plan is
+    deliberate: plan Task E's RED names this
+    `test_derived_q4_revenue_matches_the_independent_implementation`, while the
+    same Acceptance clause states the figure's independence rests on a
+    session-scoped probe that is not re-derivable. A test name is read as an
+    assertion, so it may only claim what holds -- the figure is RECORDED from a
+    second implementation, not shown to agree with one here. Reported back for
+    the plan's RED to be amended to this name (round 3).
+
+    What IS established: the figure agrees three ways -- the plan, this file's
+    constant, and the fixture's own `281,724,000,000 - 205,283,000,000`, which
+    part 1 below re-reads out of the input rather than trusting the constant.
+    What is NOT: that a second implementation was ever seen to produce it. That
+    rests on a session-scoped probe of `edgar/ttm/calculator.py:665`
+    (`_derive_q4_from_fy`) which the brief itself records as not re-derivable,
+    and no artifact in this repo shows the two agreeing. Recorded, not called.
+
+    THE STRONGEST EXTERNAL SUPPORT IS FOR THE KEY RULE, NOT THE FIGURE, and it
+    is reproducible. The dependency computes a derived quarter's start as the
+    day after its subtrahend's period ends -- exactly this module's rule -- at
+    four independent sites in `edgar/ttm/calculator.py` (edgartools==5.42.0,
+    opened and read 2026-07-30): `:620` (`q2_start = q1.period_end +
+    timedelta(days=1)`), `:655` (`q3_start = ytd6.period_end + ...`), `:703`
+    (`q4_start = ytd9.period_end + ...`) and `:772`. That function also refuses
+    on ambiguity rather than guessing -- `:756`, `if len(distinct) != 3:`, whose
+    own comment reads "gaps, overlaps, stub periods ... skip rather than emit a
+    wrong value" -- which is the same discipline as this module's two-candidate
+    refusal, arrived at separately.
+
+    Fed by the real `stitch_quarterly_statements` output rather than the
+    fixture dict, so this also pins that the two functions COMPOSE -- the
+    seam the projection task will call through.
+
+    Three things are asserted, and the KEY is the one a value-only test
+    would miss. A Q4 written back onto its own FY input's key would hold the
+    right number under a 364-day key, which is precisely the defect
+    direction 乙 was chosen to remove; the classifier assertion is what makes
+    that mis-keying loud instead of silent, since the real classifier reads
+    day spans and would answer `annual`.
+    """
+    stitched = series.stitch_quarterly_statements(_fake_filings(fixture_doc))
+    derived = series.derive_discrete_quarters(stitched)
+
+    income = _derived_by_key(derived, "income")
+    assert _FY2025_DERIVED_Q4 in income, (
+        f"no derived income period keyed {_FY2025_DERIVED_Q4}; got "
+        f"{sorted(income)}"
+    )
+    entry = income[_FY2025_DERIVED_Q4]
+
+    # 1. The figure, against the independent oracle -- AND against the same
+    # subtraction read back out of the input, so neither a stale literal nor
+    # a constant can satisfy this on its own.
+    filed = _values_of(stitched["income"], _INCOME_CONCEPT)
+    read_back = Decimal(str(filed[_FY2025_FY])) - Decimal(str(filed[_FY2025_YTD9]))
+    assert read_back == _RECORDED_FY2025_Q4_REVENUE, (
+        f"the fixture's own FY minus Q3-YTD is {read_back}, but the "
+        f"independent implementation's recorded answer is "
+        f"{_RECORDED_FY2025_Q4_REVENUE} -- the fixture moved; re-measure "
+        "rather than loosening this"
+    )
+    assert entry["values"][_INCOME_CONCEPT] == _RECORDED_FY2025_Q4_REVENUE
+
+    # 2. The key describes the value's span, and is NEITHER input's key.
+    assert entry["key"] not in (_FY2025_FY, _FY2025_YTD9), (
+        "the derived quarter reuses one of its own inputs' period keys, so a "
+        "key's span no longer describes the span of its value"
+    )
+    assert (entry["start"], entry["end"]) == ("2025-04-01", "2025-06-30")
+    assert _span_days(entry["key"]) == 90
+
+    # 3. The committed classifier agrees it is a discrete quarter.
+    assert period_kind(entry["key"]) == "discrete_quarter", (
+        f"{entry['key']} classifies as {period_kind(entry['key'])!r}; a "
+        "derived quarter that does not read as a discrete quarter is exactly "
+        "the silent mis-keying this assertion exists to catch"
+    )
+
+    # The provenance of the subtraction, so a reader can re-check it.
+    assert entry["minuend"] == _FY2025_FY
+    assert entry["subtrahend"] == _FY2025_YTD9
+
+
+def test_derived_cashflow_quarters_match_the_dependencys_own_arithmetic(
+    series, fixture_doc, statements, period_kind
+):
+    """Plan Task E's second RED. Its named oracle is NOT independent -- the
+    dependency's `_unaccumulate_cashflow_ytd` applies the same formula to the
+    same inputs (module docstring, grade 2) -- so this test does not stop
+    there. Part 3 re-derives columns MSFT itself filed, after deleting them,
+    which is an oracle no wrong formula and no wrong period pairing survives.
+
+    Part 3's re-derived figures are compared to the filer's DECLARED PRECISION
+    rather than to the dollar, because a difference of two columns stated to the
+    nearest million is itself only good to the nearest million or two. That
+    bound is computed per line from the row's own XBRL `decimals`
+    (`_declared_precision`), never a literal, and a line that declares NO
+    precision is compared EXACTLY. Parts 1 and 2 remain exact.
+
+    The dependency is NOT called here. Its figures are recorded constants.
+    """
+    derived = series.derive_discrete_quarters(fixture_doc["statements"])
+    cash_flow = _derived_by_key(derived, "cash_flow")
+
+    # --- PART 1: the one quarter no filing contains ------------------------
+    # Q4 exists in no filing at all (there is no Q4 10-Q), so it is the only
+    # FY2025 cash-flow quarter this derivation has to supply.
+    assert _FY2025_DERIVED_Q4 in cash_flow, (
+        f"no derived cash-flow period keyed {_FY2025_DERIVED_Q4}; got "
+        f"{sorted(cash_flow)}"
+    )
+    q4 = cash_flow[_FY2025_DERIVED_Q4]
+    assert q4["values"][_CFO_CONCEPT] == _CFO_FY2025_Q4
+    assert period_kind(q4["key"]) == "discrete_quarter"
+
+    # --- PART 2: all four discrete quarters, and their sum -----------------
+    # Three are filed by MSFT, the fourth is derived. Their sum must be the
+    # fixture's OWN fiscal-year figure -- read back, not written in -- which
+    # is what proves the four are a partition of the year rather than four
+    # numbers that individually look plausible.
+    filed = _values_of(fixture_doc["statements"]["cash_flow"], _CFO_CONCEPT)
+    quarters = {}
+    for key, expected in _FY2025_CASHFLOW_DISCRETE.items():
+        value = (
+            cash_flow[key]["values"][_CFO_CONCEPT]
+            if key in cash_flow
+            else Decimal(str(filed[key]))
+        )
+        assert value == expected, (
+            f"FY2025 operating cash flow at {key} is {value}, expected "
+            f"{expected}"
+        )
+        quarters[key] = value
+    assert sum(quarters.values()) == Decimal(str(filed[_FY2025_FY])), (
+        f"the four discrete quarters sum to {sum(quarters.values())}, but the "
+        f"fiscal year they partition is {filed[_FY2025_FY]} -- so they are "
+        "not the four quarters of that year"
+    )
+
+    # --- PART 3: re-derive what the filer stated, after deleting it --------
+    # MSFT files three-month cash-flow columns, so Q2 and Q3 are normally
+    # taken as filed and never derived. Dropping them makes the Q2 = YTD6 - Q1
+    # and Q3 = YTD9 - YTD6 subtractions fire, and the expected values are the
+    # ones just removed -- the filer's own numbers, arrived at without any
+    # subtraction. A wrong formula, or a pairing off by one period, cannot
+    # reproduce them.
+    #
+    # THE COMPARISON IS TO THE FILER'S OWN DECLARED PRECISION, NOT TO THE
+    # DOLLAR -- and the bound is READ FROM THE DATA, never written in. Every
+    # cash-flow column in this capture carries `decimals: -6`, MSFT's own
+    # statement that the figure is accurate to the nearest million and no
+    # further. Two such columns differenced therefore cannot be expected to
+    # land on a third such column exactly: each of the three carries up to half
+    # a million of rounding, so a CORRECT subtraction can miss the filed
+    # quarter by up to 1.5M. `_declared_precision` sums the whole last-digit
+    # worth of the two INPUT columns -- 1M + 1M here -- which covers that 1.5M
+    # without this test having to reason in halves. It is 2M only because the
+    # filer said `-6`: a filer stating whole dollars collapses it to zero and
+    # this comparison is exact again. Exactly 2 of the 32 Q3 lines actually need
+    # it, each by exactly 1M (`IncreaseDecreaseInOtherCurrentAssets`,
+    # `...OtherCurrentLiabilities`); the other 30, and all 32 of Q2's, still
+    # match to the dollar. PARTS 1 AND 2 STAY EXACT -- Part 2 sums four columns
+    # against a fifth the filer stated, where a rounding residue would be a
+    # finding rather than expected noise.
+    #
+    # THIS IS NOT A LICENCE TO BE APPROXIMATELY RIGHT, and that was measured,
+    # not assumed: four mutations of the module under test, each run on a
+    # scratchpad copy against this comparison (2026-07-30).
+    #   - Q3 re-paired as YTD9 - Q1 in `_SUBTRACTIONS`: the derived KEY moves to
+    #     duration_2024-10-01_2025-03-31, so Q3 is never derived and the
+    #     key-presence assertion above fires first.
+    #   - the same mis-pairing applied to the VALUES ONLY, key left correct, so
+    #     that only this comparison can catch it: 29 of 32 lines exceed
+    #     tolerance, the smallest excess being 16M (8x the 2M bound) and the
+    #     largest 24.108e9.
+    #   - subtraction replaced by addition: 31 of 32 lines exceed tolerance in
+    #     each quarter, smallest excess 66M (Q2) / 84M (Q3), largest 112.942e9.
+    #   - derived key's start shifted one day: every derived key moves, so
+    #     neither quarter is found at all.
+    # The smallest over-tolerance deviation any of them produced was 16M, eight
+    # times this bound; the largest, 112.942e9, was 56,471 times it.
+    q2_key = "duration_2024-10-01_2024-12-31"
+    q3_key = "duration_2025-01-01_2025-03-31"
+    # The two cumulative columns each derivation must pair, named here rather
+    # than taken from the derived entry's own `minuend`/`subtrahend`: a
+    # tolerance computed from the thing under test is a tolerance the thing
+    # under test can widen.
+    q1_key = "duration_2024-07-01_2024-09-30"
+    ytd6_key = "duration_2024-07-01_2024-12-31"
+    ytd9_key = "duration_2024-07-01_2025-03-31"
+    removed_q2 = _drop_period(statements, "cash_flow", q2_key)
+    removed_q3 = _drop_period(statements, "cash_flow", q3_key)
+
+    re_derived = _derived_by_key(series.derive_discrete_quarters(statements),
+                                "cash_flow")
+    cases = (
+        (q2_key, removed_q2, ytd6_key, q1_key),
+        (q3_key, removed_q3, ytd9_key, ytd6_key),
+    )
+    for key, removed, minuend_key, subtrahend_key in cases:
+        assert key in re_derived, (
+            f"{key} was deleted from the input and NOT re-derived; the "
+            f"subtraction that produces it never fired. Got {sorted(re_derived)}"
+        )
+        assert period_kind(key) == "discrete_quarter"
+        values = re_derived[key]["values"]
+        mismatched = {}
+        for concept, was_filed in removed.items():
+            row = _row_of(statements["cash_flow"], concept)
+            tolerance = (
+                _declared_precision(row, minuend_key)
+                + _declared_precision(row, subtrahend_key)
+            )
+            got = values.get(concept)
+            if got is None or abs(got - Decimal(str(was_filed))) > tolerance:
+                mismatched[concept] = (got, was_filed, tolerance)
+        assert not mismatched, (
+            f"{key}: {len(mismatched)} line(s) re-derived to something other "
+            f"than the value MSFT itself filed for that quarter, by MORE than "
+            f"the precision the filer declared for the two inputs "
+            f"({minuend_key} minus {subtrahend_key}); each entry is "
+            f"(re-derived, filed, tolerance): {list(mismatched.items())[:5]}"
+        )
+
+
+def test_a_year_missing_the_input_period_yields_no_derived_period(
+    series, fixture_doc, statements
+):
+    """Plan Task E, GREEN: a fiscal year missing any input the subtraction
+    needs produces NO derived period -- never a partial subtraction and never
+    a fabricated figure.
+
+    Two cases, and the second is the one that bites. Refusing when a year is
+    absent entirely is easy; refusing when a year is PRESENT but its middle
+    cumulative column is missing is where a consecutive-difference rule
+    would happily emit a six-month remainder under a six-month key. That
+    remainder would be arithmetically true and honestly keyed -- and still
+    wrong, because nothing asked for it and a reader scanning for quarters
+    would count it as one.
+    """
+    derived = series.derive_discrete_quarters(fixture_doc["statements"])
+
+    # --- CASE 1: the fixture's own open year (no FY column captured) -------
+    # Non-vacuous: the year IS in the fixture, with three of its four
+    # cumulative columns, so nothing but the absent FY can be refusing Q4.
+    for kind in ("income", "cash_flow"):
+        period_ids = {entry[0] for entry in fixture_doc["statements"][kind]["periods"]}
+        assert _OPEN_YEAR_YTD9 in period_ids, (
+            f"the {kind} statement no longer carries {_OPEN_YEAR_YTD9}, so "
+            "this test's premise about the open fiscal year is stale"
+        )
+        assert not any(
+            pid.startswith(f"duration_{_OPEN_YEAR_START}_") and _span_days(pid) > 300
+            for pid in period_ids
+        ), (
+            f"the {kind} statement now HAS an annual column for the fiscal "
+            f"year starting {_OPEN_YEAR_START}; the fixture was re-captured "
+            "and this refusal case no longer exists"
+        )
+        keys = set(_derived_by_key(derived, kind))
+        assert _OPEN_YEAR_WOULD_BE_Q4 not in keys, (
+            f"{kind}: a Q4 was derived for the fiscal year starting "
+            f"{_OPEN_YEAR_START}, whose FY column is absent -- so it was "
+            "computed from something other than FY minus nine months"
+        )
+        assert not any(key.startswith("duration_2026-04-01_") for key in keys), (
+            f"{kind}: something was derived starting 2026-04-01, where that "
+            f"year's only inputs end at {_OPEN_YEAR_YTD9}"
+        )
+
+    # --- CASE 2: a year present, with a MIDDLE cumulative column removed ---
+    q2_key = "duration_2024-10-01_2024-12-31"
+    q3_key = "duration_2025-01-01_2025-03-31"
+    ytd6_key = "duration_2024-07-01_2024-12-31"
+    _drop_period(statements, "cash_flow", q2_key)
+    _drop_period(statements, "cash_flow", q3_key)
+    _drop_period(statements, "cash_flow", ytd6_key)
+
+    keys = set(_derived_by_key(series.derive_discrete_quarters(statements),
+                               "cash_flow"))
+    assert q2_key not in keys, (
+        "Q2 was derived although its YTD6 input is gone -- the only inputs "
+        "left for it are Q1 and YTD9"
+    )
+    assert q3_key not in keys, "Q3 was derived although its YTD6 input is gone"
+    # The specific fabrication a naive consecutive-difference rule commits:
+    # YTD9 - Q1 spans two quarters, so it is neither Q2 nor Q3.
+    bridge = "duration_2024-10-01_2025-03-31"
+    assert bridge not in keys, (
+        f"{bridge} ({_span_days(bridge)}d) was emitted in place of the two "
+        "quarters whose shared input is missing -- a true subtraction of the "
+        "wrong pair, which a reader scanning for quarters would miscount"
+    )
+    # And the refusal is TARGETED, not a blanket give-up: Q4's own inputs
+    # (FY and YTD9) are untouched, so Q4 must still be derived.
+    assert _FY2025_DERIVED_Q4 in keys, (
+        "dropping YTD6 also suppressed Q4, whose inputs are FY and YTD9 -- "
+        "the refusal is too broad"
+    )
+
+
+def test_no_derived_period_ever_overwrites_a_column_the_filer_stated(
+    series, fixture_doc
+):
+    """A derived figure is a subtraction; a filed figure is a primary source.
+    This function fills the gaps the filings leave and never writes over a
+    column the filer stated -- so a filed number can never be replaced by a
+    computed one, which is the shape of the defect this arc removed from the
+    cash-flow lane.
+
+    Pinned as a rule over every kind, and then by the exact consequence for
+    this filer: MSFT files three-month cash-flow columns for Q1-Q3, so the
+    ONLY cash-flow quarters left to derive are the two Q4s. If a future
+    change starts emitting Q2/Q3 alongside the filer's own, this fails.
+    """
+    stitched = series.stitch_quarterly_statements(_fake_filings(fixture_doc))
+    derived = series.derive_discrete_quarters(stitched)
+
+    for kind in ("income", "balance_sheet", "cash_flow"):
+        filed_keys = {entry[0] for entry in stitched[kind]["periods"]}
+        overlap = sorted(set(_derived_by_key(derived, kind)) & filed_keys)
+        assert overlap == [], (
+            f"{kind}: {len(overlap)} derived period(s) reuse a key the filer "
+            f"already states: {overlap}"
+        )
+
+    assert sorted(_derived_by_key(derived, "cash_flow")) == [
+        _FY2024_DERIVED_Q4, _FY2025_DERIVED_Q4,
+    ]
+    assert sorted(_derived_by_key(derived, "income")) == [
+        _FY2024_DERIVED_Q4, _FY2025_DERIVED_Q4,
+    ]
+
+
+def test_every_derived_period_is_marked_derived_and_keyed_as_a_quarter(
+    series, fixture_doc, period_kind
+):
+    """Plan Task E, GREEN: every derived period is marked derived, so a
+    consumer can tell a subtraction from a filed figure.
+
+    `derived` is a SEPARATE BOOLEAN, never a period-kind value (plan Decision
+    Log, one-way door #1) -- a derived Q4 is both a discrete quarter AND
+    derived, and collapsing the two axes would make "every discrete quarter
+    regardless of provenance" unanswerable. Both halves are asserted here:
+    the flag is exactly `True`, and the same period still classifies as
+    `discrete_quarter` through Task C's untouched classifier.
+
+    The balance sheet is included deliberately: it is instant-based, so it
+    has no duration column to difference and must come back with nothing
+    rather than with something invented.
+    """
+    derived = series.derive_discrete_quarters(fixture_doc["statements"])
+
+    assert set(derived) == {"income", "balance_sheet", "cash_flow"}, (
+        f"every statement kind must be answered, got {sorted(derived)}"
+    )
+    assert derived["balance_sheet"] == [], (
+        "the balance sheet is instant-based -- it carries no duration column "
+        f"to difference, so nothing may be derived for it: "
+        f"{derived['balance_sheet']}"
+    )
+
+    total = 0
+    for kind in ("income", "cash_flow"):
+        for entry in derived[kind]:
+            total += 1
+            assert entry["derived"] is True, (
+                f"{kind} {entry['key']}: derived is {entry['derived']!r}, "
+                "must be exactly True -- a consumer cannot otherwise tell a "
+                "subtraction from a figure the filer stated"
+            )
+            assert period_kind(entry["key"]) == "discrete_quarter", (
+                f"{kind} {entry['key']} classifies as "
+                f"{period_kind(entry['key'])!r}, not discrete_quarter"
+            )
+            assert entry["values"], (
+                f"{kind} {entry['key']} carries no values -- an empty column "
+                "is not a derivation"
+            )
+    assert total == 4, (
+        f"expected 4 derived quarters (a Q4 for each of the fixture's two "
+        f"complete fiscal years, in each of the two duration statements), "
+        f"got {total}"
+    )
+
+
+def test_derived_values_are_exact_decimals_not_binary_floats(
+    series, fixture_doc
+):
+    """Cross-period arithmetic on money goes through `Decimal`, never binary
+    float (docs/loom/memory/construction-guaranteed-invariant-proves-nothing.md,
+    whose closing section records this same class manufacturing a false
+    restatement flag in this module family).
+
+    The value here is float-hostile on the REAL fixture rather than
+    constructed: MSFT's FY2025 diluted EPS is 13.64 and its nine-month figure
+    is 9.99, and `13.64 - 9.99` in binary float is 3.6500000000000004. Every
+    other income line on this fiscal year is whole dollars, where float is
+    exact and a green assertion would prove nothing -- so this one line is
+    the whole test.
+    """
+    derived = series.derive_discrete_quarters(fixture_doc["statements"])
+    entry = _derived_by_key(derived, "income")[_FY2025_DERIVED_Q4]
+    value = entry["values"][_EPS_DILUTED_CONCEPT]
+
+    filed = _values_of(fixture_doc["statements"]["income"], _EPS_DILUTED_CONCEPT)
+    float_answer = filed[_FY2025_FY] - filed[_FY2025_YTD9]
+    assert repr(float_answer) != str(_EPS_DILUTED_FY2025_Q4), (
+        "this fixture's diluted-EPS subtraction is no longer float-hostile "
+        f"({float_answer!r}), so this test can no longer fail -- find a line "
+        "that is, or the Decimal requirement is unpinned"
+    )
+
+    assert isinstance(value, Decimal), (
+        f"derived values must be Decimal, got {type(value).__name__} -- "
+        "binary float is what manufactured a false restatement in this "
+        "module family"
+    )
+    assert value == _EPS_DILUTED_FY2025_Q4
+    assert str(value) == "3.65", (
+        f"the derived diluted-EPS quarter is {value}, not the exact 3.65; "
+        f"{float_answer!r} means the subtraction ran in binary float"
+    )
+
+
+def test_a_line_missing_one_input_value_is_omitted_never_zeroed(
+    series, statements
+):
+    """Plan Task E: never a partial subtraction, never a fabricated zero --
+    at LINE granularity, not only at period granularity.
+
+    A line present in one of the two input columns and absent from the other
+    has no derivable quarter. Treating the absent side as zero would emit the
+    whole cumulative figure as if it were one quarter, which is the largest
+    single error this function could make and the hardest to notice, since
+    the number is real and the key is honest.
+    """
+    row = next(
+        r for r in statements["income"]["statement_data"]
+        if r.get("concept") == _INCOME_CONCEPT
+    )
+    dropped = row["values"].pop(_FY2025_YTD9)
+    assert dropped, "the premise is stale: this line had no nine-month value"
+
+    values = _derived_by_key(
+        series.derive_discrete_quarters(statements), "income"
+    )[_FY2025_DERIVED_Q4]["values"]
+
+    assert _INCOME_CONCEPT not in values, (
+        f"{_INCOME_CONCEPT} was derived from one input alone: it holds "
+        f"{values.get(_INCOME_CONCEPT)}, where the fiscal-year figure is "
+        f"{row['values'][_FY2025_FY]} and the nine-month figure it must be "
+        "reduced by is absent"
+    )
+    # Other lines on the same period are unaffected -- one missing cell must
+    # not take the whole column down.
+    assert _CFO_CONCEPT not in values  # income statement, different concept
+    assert len(values) >= 10, (
+        f"only {len(values)} income lines derived; one line's missing input "
+        "suppressed the rest of the column"
+    )
+
+
+# ==========================================================================
+# Plan Task E, round 2 — the machinery the round-1 tests did not reach
+# ==========================================================================
+#
+# EVERY TEST IN THIS SECTION WAS WRITTEN AGAINST A MEASURED MUTATION, not
+# against a reading of the code. Round 1 shipped 14 green tests over this
+# function while five separate pieces of its machinery could be deleted or
+# inverted without turning any of them red — including the two-candidate
+# refusal, which carries the strongest safety claim in the module. Per
+# docs/loom/memory/a-test-can-be-correct-and-still-unable-to-fail.md, a test
+# written to close a known gap is only worth what its mutation run proves, so
+# each test below names the mutation it kills and that mutation was run.
+#
+# The mutation runs are recorded in this branch's task report rather than
+# inline, with one exception: where a test needs an input shape no capture
+# contains, the reason is stated at the test.
+
+
+@pytest.fixture
+def periods_module(series):
+    """The very `kpi_us_quarterly_periods` module object the series module
+    imports at runtime — NOT the one this file's `period_kind` fixture loads.
+
+    Task E reads Task C's day-span windows through `span_windows()` at call
+    time, so patching an attribute on THIS object is what a real edit to Task C
+    would do. The two module objects are deliberately distinct: a test that
+    reorders Task C's windows must not also change what `period_kind` answers
+    for the assertions in the same test.
+    """
+    series._role_windows()  # force the lazy sibling import
+    return sys.modules[series._PERIODS_MODULE]
+
+
+def _synthetic_statement(start, spans_by_role, values_by_concept):
+    """A statement built from day SPANS rather than from captured dates, for
+    the input shapes no real capture contains.
+
+    Returns `(key_of, statement)`, where `key_of[role]` is the period key that
+    role landed on — so a test never writes a `duration_...` literal it would
+    have to recompute by hand when a window moves.
+
+    CONSTRUCTED, and labelled as such wherever it is used: these are not
+    filings. Two of the tests below need a column whose span sits EXACTLY on a
+    window bound, and one needs a fiscal year with a column missing in a way
+    this filer never exhibits; neither shape can be captured, and the module's
+    behaviour at exactly those points is the whole question.
+    """
+    key_of = {
+        role: (
+            f"duration_{start.isoformat()}_"
+            f"{(start + timedelta(days=span)).isoformat()}"
+        )
+        for role, span in spans_by_role.items()
+    }
+    statement = {
+        "periods": [[key_of[role], role] for role in spans_by_role],
+        "statement_data": [
+            {
+                "concept": concept,
+                "values": {
+                    key_of[role]: value for role, value in per_role.items()
+                },
+            }
+            for concept, per_role in values_by_concept.items()
+        ],
+    }
+    return key_of, statement
+
+
+def _role_windows_from_task_c(periods_mod):
+    """`{role: (low, high)}` built from Task C's PUBLIC accessor by this test
+    file's own mapping, independently of the module under test.
+
+    Deliberately not `series._role_windows()`: several tests below feed inputs
+    positioned relative to these bounds, and taking the bounds from the code
+    under test would let a mutant move both the input and the expectation
+    together and stay green.
+    """
+    windows = periods_mod.span_windows()
+    ytd6, ytd9 = sorted(windows["ytd"], key=lambda span: span[0])
+    return {
+        "q1": windows["discrete_quarter"][0],
+        "ytd6": ytd6,
+        "ytd9": ytd9,
+        "fy": windows["annual"][0],
+    }
+
+
+def test_role_windows_are_read_through_task_cs_public_accessor(
+    series, periods_module, monkeypatch
+):
+    """Task E must reach Task C's day-span windows through `span_windows()` —
+    Task C's declared public surface — not through its underscore-private
+    constants.
+
+    Round 1 read `_DISCRETE_QUARTER_SPAN` / `_YTD_SPANS` / `_ANNUAL_SPAN`
+    directly. The precedents cited for that (`kpi_8k_candidates.py:359`,
+    `kpi_prose_candidates.py:745`) are real, and both call a sibling's PUBLIC
+    function; neither is precedent for reading private state.
+
+    Patching the ACCESSOR is what makes the difference observable: a module
+    still reading the constants would ignore this patch entirely and report the
+    real windows.
+    """
+    monkeypatch.setattr(
+        periods_module,
+        "span_windows",
+        lambda: {
+            "discrete_quarter": ((10, 20),),
+            "ytd": ((30, 40), (50, 60)),
+            "annual": ((70, 80),),
+        },
+    )
+
+    assert series._role_windows() == {
+        "q1": (10, 20), "ytd6": (30, 40), "ytd9": (50, 60), "fy": (70, 80),
+    }, (
+        "the role windows did not follow Task C's public accessor, so this "
+        "module is still reading Task C's private constants"
+    )
+
+
+def test_reordering_task_cs_ytd_windows_cannot_swap_the_six_and_nine_month_roles(
+    series, periods_module, fixture_doc, monkeypatch
+):
+    """KILLS: `sorted(windows["ytd"], key=...)` → `tuple(windows["ytd"])`.
+
+    Which YTD window is the six-month column is decided by its own low bound,
+    never by its position in Task C's tuple — so a reordering there (a
+    plausible edit while widening for a 52/53-week calendar) cannot silently
+    swap the two roles. With the sort removed and the tuple reversed, `ytd6`
+    becomes the nine-month window and `Q3 = YTD9 - YTD6` subtracts a longer
+    column from a shorter one.
+
+    The whole derivation is compared, not just one figure, so the pin does not
+    depend on which line happens to move.
+    """
+    expected = series.derive_discrete_quarters(fixture_doc["statements"])
+
+    real = periods_module.span_windows()
+    assert len(real["ytd"]) == 2, "the premise is stale: Task C no longer has two YTD windows"
+    reordered = {**real, "ytd": tuple(reversed(real["ytd"]))}
+    monkeypatch.setattr(periods_module, "span_windows", lambda: reordered)
+    assert periods_module.span_windows()["ytd"] == tuple(reversed(real["ytd"])), (
+        "the premise is broken: the reordered windows were not installed"
+    )
+
+    assert series.derive_discrete_quarters(fixture_doc["statements"]) == expected, (
+        "reversing the order of Task C's two YTD windows changed the "
+        "derivation, so which window is treated as the six-month column "
+        "depends on tuple position rather than on the window itself"
+    )
+
+
+def test_a_third_year_to_date_window_is_refused_loudly(
+    series, periods_module, monkeypatch
+):
+    """This module's three subtractions name exactly TWO year-to-date roles — a
+    six-month and a nine-month cumulative column — so a third YTD window in
+    Task C names no role here.
+
+    That coupling is deliberate and is stated rather than removed: a third
+    window is a question about which quarter it bounds, and answering it by
+    quietly ignoring the extra window would drop a quarter with no signal. What
+    round 1 had was the same coupling expressed as a bare two-name unpack,
+    which raised `ValueError: too many values to unpack` — true, but it names
+    neither the module, the constant, nor what to do about it. Plan Task G
+    carries this as a finding precisely because it is scheduled to widen these
+    windows.
+    """
+    monkeypatch.setattr(
+        periods_module,
+        "span_windows",
+        lambda: {
+            "discrete_quarter": ((80, 100),),
+            "ytd": ((175, 190), (260, 285), (300, 320)),
+            "annual": ((350, 380),),
+        },
+    )
+
+    with pytest.raises(ValueError) as raised:
+        series._role_windows()
+
+    message = str(raised.value)
+    assert "span_windows" in message, (
+        f"the refusal does not name where the windows came from: {message}"
+    )
+    assert "3" in message, (
+        f"the refusal does not say how many windows it found: {message}"
+    )
+    assert "two" in message.lower(), (
+        f"the refusal does not say how many it needs: {message}"
+    )
+
+
+_TASK_G_WIDENING = ((175, 190), (260, 380))
+
+
+def test_widening_a_window_until_it_overlaps_the_next_is_refused_loudly(
+    series, periods_module, statements, monkeypatch
+):
+    """The role resolution is correct only while Task C's four windows stay
+    DISJOINT, and this is that precondition checked rather than assumed.
+
+    The widening used here is the one plan Task G's own GREEN authorises: Task G
+    exists to make a 52/53-week filer's periods classify, and its GREEN says
+    that if a row does not match, "widening them is part of this task". Setting
+    the nine-month YTD window to (260, 380) so it also covers a 364-day fiscal
+    year is exactly such a widening, and it makes that window overlap the annual
+    one.
+
+    MEASURED on this fixture 2026-07-30, which is why the refusal has to be
+    loud rather than a skip. Both outcomes of the overlap are silent:
+
+      - with both the 273-day and the 364-day column present, the nine-month
+        role has two candidates, is refused as ambiguous, and NOTHING is
+        derived for that fiscal year -- indistinguishable from a filer who
+        simply had no derivable quarter;
+      - with the 273-day column absent (the case constructed below), the
+        364-day column is the only match for BOTH the nine-month and the
+        annual role, and the Q4 subtraction differences that column from
+        itself.
+
+    A configuration that turns every Q4 into either silence or nonsense must
+    stop the run it is introduced on.
+    """
+    widened = {**periods_module.span_windows(), "ytd": _TASK_G_WIDENING}
+    monkeypatch.setattr(periods_module, "span_windows", lambda: widened)
+    # The second, sharper case: no nine-month column, so one column is the only
+    # candidate for two roles.
+    _drop_period(statements, "cash_flow", _FY2025_YTD9)
+
+    with pytest.raises(ValueError) as raised:
+        series.derive_discrete_quarters(statements)
+
+    message = str(raised.value)
+    assert "ytd9" in message and "fy" in message, (
+        f"the refusal does not name the two roles whose windows collide: {message}"
+    )
+    assert str(_TASK_G_WIDENING[1]) in message, (
+        f"the refusal does not quote the widened window a reader has to fix: "
+        f"{message}"
+    )
+    assert "disjoint" in message.lower(), (
+        f"the refusal does not say what the windows must be: {message}"
+    )
+
+
+def test_a_role_pair_resolving_to_one_column_never_emits_a_backwards_period(
+    series, monkeypatch
+):
+    """The emit-time backstop: a period may never be emitted whose start is
+    after its end, nor one whose minuend and subtrahend are the same column.
+
+    Reached here by patching `_role_windows` directly, because the disjointness
+    check above is what stops these windows arriving through Task C -- and a
+    guard that can only be shown to work by disabling another guard has to be
+    exercised that way or it is an untested claim
+    (docs/loom/memory/construction-guaranteed-invariant-proves-nothing.md: an
+    invariant nothing can execute is a bookkeeping check, not protection).
+
+    So this is a deliberate belt-and-braces: with disjoint windows the
+    degenerate pair is unreachable, and the point of pinning it is that
+    "unreachable" is a property of the CURRENT constants, which plan Task G is
+    scheduled to change.
+    """
+    # ytd9 and fy resolve to the same 364-day column: overlapping windows, and
+    # a fiscal year carrying no nine-month column to separate them.
+    monkeypatch.setattr(
+        series,
+        "_role_windows",
+        lambda: {"q1": (80, 100), "ytd6": (175, 190), "ytd9": (260, 380),
+                 "fy": (350, 380)},
+    )
+    key_of, statement = _synthetic_statement(
+        date(2024, 7, 1),
+        {"q1": 91, "ytd6": 183, "fy": 364},  # CONSTRUCTED: no 273-day column
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": 30, "fy": 100}},
+    )
+
+    with pytest.raises(ValueError) as raised:
+        series.derive_discrete_quarters({"income": statement})
+
+    message = str(raised.value)
+    assert key_of["fy"] in message, (
+        f"the refusal does not name the column it was asked to difference from "
+        f"itself: {message}"
+    )
+    assert "q4" in message.lower(), (
+        f"the refusal does not name which quarter was being derived: {message}"
+    )
+
+
+def _derived_key(start, subtrahend_span: int, minuend_span: int) -> str:
+    """The period key a subtraction of two spans from `start` must produce: the
+    day after the subtrahend ends, through the day the minuend ends. Computed,
+    never written as a literal, so these tests keep working when a window moves.
+    """
+    return (
+        f"duration_{(start + timedelta(days=subtrahend_span + 1)).isoformat()}"
+        f"_{(start + timedelta(days=minuend_span)).isoformat()}"
+    )
+
+
+def test_a_role_with_two_candidate_columns_derives_nothing_from_that_role(series):
+    """KILLS: `len(candidates) == 1` → `len(candidates) >= 1` in
+    `_roles_for_year`, i.e. "take the first candidate".
+
+    This carries the strongest safety claim in the module -- picking one of two
+    candidates makes the subtraction depend on WHICH, and the resulting figure is
+    indistinguishable from a correct one -- and round 1 left it unpinned. The
+    mutation survived 14 green tests because the committed fixture has no
+    ambiguous role: every fiscal year in it has exactly one column per window,
+    so `== 1` and `>= 1` cannot differ on it. Measured 2026-07-30: with the
+    mutation applied and the fixture unchanged, the derivation is byte-identical.
+
+    So the input is CONSTRUCTED -- two columns sharing a fiscal-year start whose
+    spans both fall in the discrete-quarter window. That is not exotic: a
+    restated or re-filed quarter, or one 91-day and one 85-day column from a
+    transition year, produce exactly this.
+
+    The refusal must also be TARGETED. Q1 is ambiguous, so Q2 (which needs it)
+    is refused -- but Q3 and Q4, whose own inputs are unambiguous, must still be
+    derived. A blanket give-up would pass a keys-absent assertion while being
+    wrong in the other direction.
+    """
+    start = date(2020, 7, 1)
+    key_of, statement = _synthetic_statement(
+        start,
+        # CONSTRUCTED: q1_short and q1_long BOTH land in the 80-100 window.
+        {"q1_short": 85, "q1_long": 91, "ytd6": 183, "ytd9": 273, "fy": 364},
+        {"us-gaap_Revenue": {
+            "q1_short": 10, "q1_long": 10, "ytd6": 30, "ytd9": 60, "fy": 100,
+        }},
+    )
+
+    derived = series.derive_discrete_quarters({"income": statement})
+    by_key = _derived_by_key(derived, "income")
+
+    q3_key = _derived_key(start, 183, 273)
+    q4_key = _derived_key(start, 273, 364)
+    assert sorted(by_key) == sorted([q3_key, q4_key]), (
+        "with TWO columns matching the Q1 window, the Q1 role must be left "
+        "unresolved and Q2 refused -- while Q3 and Q4, whose inputs are "
+        f"unambiguous, are still derived. Got {sorted(by_key)}"
+    )
+    # The two that did derive are right, so the refusal above is not being
+    # satisfied by a derivation that fails for some other reason.
+    assert by_key[q3_key]["values"]["us-gaap_Revenue"] == 30
+    assert by_key[q4_key]["values"]["us-gaap_Revenue"] == 40
+
+
+def test_a_period_no_line_can_supply_is_not_emitted_as_an_empty_column(series):
+    """KILLS: removing the `if not values: continue` guard.
+
+    Both roles can resolve from the `periods` list while NO line carries both
+    columns -- the roles are read from the period list, the values from the rows,
+    and nothing makes the two agree. Emitting that as a derived period would
+    announce a quarter that exists and happens to be blank, which is a different
+    and worse claim than not deriving it.
+
+    CONSTRUCTED, because the committed fixture has no such column: every period
+    in it is carried by at least one line, which is why the mutation survived.
+    Here Q2's inputs are both populated and Q2 must appear; Q3 and Q4 need the
+    nine-month and annual columns, which are declared in `periods` and empty in
+    every row.
+    """
+    start = date(2021, 7, 1)
+    key_of, statement = _synthetic_statement(
+        start,
+        {"q1": 91, "ytd6": 183, "ytd9": 273, "fy": 364},
+        # CONSTRUCTED: no line carries ytd9 or fy.
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": 30},
+         "us-gaap_CostOfRevenue": {"q1": 4, "ytd6": 9}},
+    )
+    period_ids = {entry[0] for entry in statement["periods"]}
+    assert {key_of["ytd9"], key_of["fy"]} <= period_ids, (
+        "the premise is broken: the two empty columns must still be declared "
+        "periods, or the roles never resolve and the guard is not reached"
+    )
+
+    by_key = _derived_by_key(series.derive_discrete_quarters({"income": statement}),
+                            "income")
+
+    assert sorted(by_key) == [_derived_key(start, 91, 183)], (
+        "only Q2 has any line carrying both of its inputs; the periods whose "
+        f"inputs no line supplies must not be emitted at all. Got {sorted(by_key)}"
+    )
+    assert by_key[_derived_key(start, 91, 183)]["values"] == {
+        "us-gaap_Revenue": Decimal(20), "us-gaap_CostOfRevenue": Decimal(5),
+    }
+
+
+@pytest.mark.parametrize("bound_name,bound_index", [("low", 0), ("high", 1)])
+def test_a_column_exactly_on_a_role_windows_bound_resolves_that_role(
+    series, periods_module, bound_name, bound_index
+):
+    """KILLS: `low <= span <= high` → `low < span < high` in `_roles_for_year`
+    (either comparison).
+
+    The windows are INCLUSIVE, and round 1 could not tell: the committed
+    fixture's spans are 91 / 183 / 273 / 364, every one of them strictly inside
+    its window, so both comparisons agree on all of them. Task C's own suite
+    pins its eight bounds exhaustively, but this is a SECOND copy of the same
+    comparison in a different module, and the two are not connected by anything
+    executable.
+
+    CONSTRUCTED by necessity: a column whose span is exactly a window bound is
+    what the test needs, and the bounds are read from Task C's accessor so this
+    stays exact after plan Task G widens them.
+    """
+    windows = _role_windows_from_task_c(periods_module)
+    spans = {role: window[bound_index] for role, window in windows.items()}
+    assert len(set(spans.values())) == 4, (
+        f"the four role windows share a {bound_name} bound, so this test cannot "
+        f"tell them apart: {spans}"
+    )
+
+    start = date(2019, 7, 1)
+    _key_of, statement = _synthetic_statement(
+        start, spans,
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": 30, "ytd9": 60, "fy": 100}},
+    )
+
+    by_key = _derived_by_key(series.derive_discrete_quarters({"income": statement}),
+                            "income")
+    expected = {
+        _derived_key(start, spans["q1"], spans["ytd6"]): 20,
+        _derived_key(start, spans["ytd6"], spans["ytd9"]): 30,
+        _derived_key(start, spans["ytd9"], spans["fy"]): 40,
+    }
+    assert sorted(by_key) == sorted(expected), (
+        f"with every column sitting exactly on its window's {bound_name} bound, "
+        f"all three subtractions must still fire -- the windows are inclusive. "
+        f"Got {sorted(by_key)}, expected {sorted(expected)}"
+    )
+    for key, value in expected.items():
+        assert by_key[key]["values"]["us-gaap_Revenue"] == value
+
+
+@pytest.mark.parametrize("reverse_input", [False, True])
+def test_derived_periods_come_back_in_ascending_key_order(
+    series, statements, reverse_input
+):
+    """KILLS: removing the final `sorted(derived, key=...)`.
+
+    The contract is oldest key first, and it must hold whatever order the input
+    period list arrives in -- so BOTH orders are run. This capture's own period
+    list is NEWEST-first (`duration_2026-01-01_2026-03-31` is its first entry),
+    which is what makes the sort load-bearing: the fiscal-year groups are walked
+    in the order they appear, so without the sort the answer comes back
+    newest-first, following the input.
+
+    Getting this wrong is instructive and is recorded rather than quietly fixed:
+    the first version of this test REVERSED the input, on the assumption the
+    capture was oldest-first. That turned the input into ascending order, which
+    is exactly the order that survives with no sort at all, and the mutation
+    survived a green test. The parametrisation is the fix -- one of the two rows
+    must always be the discriminating one, whichever way a future re-capture
+    happens to order its periods.
+    """
+    if reverse_input:
+        for kind in ("income", "cash_flow"):
+            statements[kind]["periods"].reverse()
+
+    derived = series.derive_discrete_quarters(statements)
+    for kind in ("income", "cash_flow"):
+        keys = [entry["key"] for entry in derived[kind]]
+        assert len(keys) >= 2, (
+            f"{kind}: {len(keys)} derived period(s) -- an order assertion over "
+            "fewer than two proves nothing"
+        )
+        assert keys == sorted(keys), (
+            f"{kind}: derived periods came back {keys}, which is not ascending "
+            f"by key (input period list reversed: {reverse_input}); the output "
+            "followed the input's order instead of the contract's"
+        )
+
+
+def _one_line_statement(bad_value):
+    """A four-column fiscal year whose six-month cell holds `bad_value`."""
+    return _synthetic_statement(
+        date(2022, 7, 1),
+        {"q1": 91, "ytd6": 183, "ytd9": 273, "fy": 364},
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": bad_value, "ytd9": 60, "fy": 100}},
+    )
+
+
+@pytest.mark.parametrize(
+    "bad_value,description",
+    [
+        (None, "an explicit null"),
+        ("1,234", "a thousands-separated string Decimal cannot parse"),
+        ("n/a", "a not-applicable marker"),
+        ("", "an empty string"),
+        (float("nan"), "a NaN, which Decimal accepts SILENTLY as Decimal('NaN')"),
+        (float("inf"), "an infinity"),
+    ],
+)
+def test_a_cell_that_is_not_a_finite_number_fails_loudly(
+    series, bad_value, description
+):
+    """A cell that is PRESENT and is not a finite number aborts the call, naming
+    the line and the column.
+
+    This is the one asymmetry with Task C's must-not-raise contract that this
+    module keeps, so it is pinned rather than left as a docstring claim. An
+    ABSENT cell is ordinary and has a correct answer -- no quarter for that line,
+    pinned by `test_a_line_missing_one_input_value_is_omitted_never_zeroed`. A
+    cell that is present and uninterpretable has no correct answer, and skipping
+    it would drop a line from a column that otherwise looks complete.
+
+    THE NaN ROW IS THE ONE THAT WAS NOT OBVIOUS, and it is why this is a
+    finiteness check rather than a parse check. `Decimal(str(float("nan")))`
+    succeeds and yields `Decimal("NaN")`, which then propagates through the
+    subtraction into a derived value that compares unequal to everything
+    including itself -- a corrupt figure in the output with nothing raised and
+    nothing logged. Measured 2026-07-30.
+
+    A stringified NUMBER is deliberately NOT here: `Decimal(str("30"))` parses to
+    30, so a numeric string passes through harmlessly and is pinned as accepted
+    by the test below rather than rejected here.
+
+    CONSTRUCTED: all 794 values in the committed fixture are numeric and finite,
+    so nothing captured exercises any of these rows.
+    """
+    _key_of, statement = _one_line_statement(bad_value)
+
+    with pytest.raises(ValueError) as raised:
+        series.derive_discrete_quarters({"income": statement})
+
+    message = str(raised.value)
+    assert "us-gaap_Revenue" in message, (
+        f"{description}: the refusal does not name the line it choked on: {message}"
+    )
+    assert "duration_2022-07-01_2022-12-31" in message, (
+        f"{description}: the refusal does not name the column: {message}"
+    )
+
+
+def test_a_numerically_valid_string_cell_is_accepted_not_refused(series):
+    """The flip side of the refusal above, so that check cannot quietly widen
+    into "reject anything that is not already a number".
+
+    A stitched capture may carry a figure as a string; `Decimal("30")` is exactly
+    30, so there is nothing to refuse and the subtraction is still exact. This is
+    also what stops the finiteness check being written as an `isinstance` test on
+    the raw cell, which would reject this.
+    """
+    _key_of, statement = _one_line_statement("30")
+
+    by_key = _derived_by_key(series.derive_discrete_quarters({"income": statement}),
+                            "income")
+    assert by_key[_derived_key(date(2022, 7, 1), 91, 183)]["values"][
+        "us-gaap_Revenue"
+    ] == Decimal(20)
+
+
+@pytest.mark.parametrize(
+    "period_key,description",
+    [
+        # Stopped by `_duration_bounds`' prefix guard and its part-count guard;
+        # these three never reach a date parse at all.
+        ("instant_2025-06-30", "an instant key, which has no span to difference"),
+        ("duration_2024-07-01", "a duration key carrying only one date"),
+        ("duration_2024-07-01_2025-06-30_restated", "a third underscore part"),
+        # THE TWO DISCRIMINATING ROWS: well-formed shape, unparseable dates, so
+        # these reach `date.fromisoformat` and are stopped by its `except`.
+        ("duration_not-a-date_2025-06-30", "a start that is not a date at all"),
+        ("duration_2024-07-01_2025-06-31", "a June 31st -- shaped right, no such day"),
+    ],
+)
+def test_a_period_key_carrying_no_readable_span_is_skipped_never_refused(
+    series, period_key, description
+):
+    """A period key this module cannot read as a day span is SKIPPED, and the
+    rest of the statement still derives. This is the one place the module aligns
+    with Task C's must-not-raise contract for a malformed period key rather than
+    departing from it, and it was unpinned: making `_duration_bounds` re-raise
+    instead of returning `None` left the whole suite green.
+
+    The asymmetry with the finiteness table above is the point, not an
+    inconsistency. A bad CELL is refused loudly because skipping it would drop a
+    line from a column that otherwise looks complete -- the reader cannot see the
+    hole. A bad KEY costs only the column it names: one filer's stray period among
+    many, and every other column of that statement is still derivable. So the key
+    is skipped and the cell is refused, and both halves are now pinned.
+
+    Two of the five rows are the ones that can fail: `duration_not-a-date_...` and
+    the June 31st reach `date.fromisoformat` inside `_duration_bounds`, so
+    removing its `except ValueError` makes them raise out of the whole call. The
+    first three are stopped by the prefix and part-count guards before any parse,
+    and are here as a table of what "no readable span" covers -- they hold against
+    a narrower mutation, not against this one.
+
+    CONSTRUCTED: every period key in the committed capture is a well-formed
+    `duration_` or `instant_` key, so nothing captured exercises rows 2-5. The bad
+    key is added to the `periods` list, which is where `_duration_bounds` reads
+    keys from (`_periods_by_year_and_span`); a stray cell under the same key in a
+    row would be inert, since only a resolved minuend and subtrahend are ever read
+    out of a row.
+    """
+    start = date(2023, 7, 1)
+    _key_of, statement = _synthetic_statement(
+        start,
+        {"q1": 91, "ytd6": 183, "ytd9": 273, "fy": 364},
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": 30, "ytd9": 60, "fy": 100}},
+    )
+    statement["periods"].append([period_key, "unreadable"])
+
+    # The helper's own documented answer, asserted directly: `None`, not a raise.
+    assert series._duration_bounds(period_key) is None, (
+        f"{description}: _duration_bounds must answer None for a key it cannot "
+        "read as a day span"
+    )
+
+    by_key = _derived_by_key(series.derive_discrete_quarters({"income": statement}),
+                            "income")
+    expected = {
+        _derived_key(start, 91, 183): 20,
+        _derived_key(start, 183, 273): 30,
+        _derived_key(start, 273, 364): 40,
+    }
+    assert sorted(by_key) == sorted(expected), (
+        f"{description}: the unreadable period key {period_key!r} cost this "
+        f"statement its derivable quarters. Got {sorted(by_key)}, expected "
+        f"{sorted(expected)}"
+    )
+    for key, value in expected.items():
+        assert by_key[key]["values"]["us-gaap_Revenue"] == value
+
+
+def test_derivation_does_not_mutate_the_statements_it_is_given(series):
+    """The stitched statements are the caller's, and in this suite they are a
+    module-scoped fixture shared by every test above -- so a derivation that
+    wrote its results back into the input would both corrupt the caller's
+    data and make this file's test order load-bearing.
+
+    Writing derived quarters back over the columns they came from is also,
+    exactly, the upstream defect this arc replaced (plan §RESOLVED FINDING):
+    the dependency's own unaccumulation is correct arithmetic filed IN PLACE.
+
+    THE INPUT IS READ FRESH FROM THE FIXTURE FILE, and that is the whole
+    difference between this test working and this test being decorative. An
+    earlier version took `before = copy.deepcopy(fixture_doc["statements"])`,
+    and `fixture_doc` is MODULE-SCOPED: SEVEN tests above have already called
+    `derive_discrete_quarters` over that same dict's rows (counted 2026-07-30 --
+    five hand it in directly, two reach the same rows through
+    `stitch_quarterly_statements`, whose fake returns `statement_data` BY
+    REFERENCE), so an in-place write-back would already be present in anything
+    copied from it. The baseline would contain the defect and the comparison
+    would hold. MEASURED 2026-07-30 on a
+    copy of this file carrying the old baseline: a mutant writing each derived
+    value back into its own input row under the derived key passed the WHOLE FILE
+    (37 passed) and failed only when this test was selected alone (1 failed, 36
+    deselected) -- i.e. the assertion's outcome depended on execution order,
+    which is precisely the hazard the paragraph above names. With the baseline
+    below, the same mutant fails the whole-file run, and it is the only test in
+    the file that fails.
+
+    The function-scoped `statements` fixture is NOT the fix either, for the same
+    reason: it deep-copies `fixture_doc`, so it inherits any pollution and an
+    idempotent write-back stays invisible through it. Only an input the module
+    has provably never seen makes the baseline trustworthy.
+    """
+    pristine = json.loads(FIXTURE_PATH.read_text())["statements"]
+    before = copy.deepcopy(pristine)
+    series.derive_discrete_quarters(pristine)
+    assert pristine == before, (
+        "derive_discrete_quarters mutated the statements it was handed"
+    )
