@@ -1,7 +1,11 @@
 ---
 name: daily-news-digest
 description: |
-  Compile one day's vault notes into a two-tier daily digest — clustered time-sensitive stories + evergreen knowledge links — at news/daily-news/YYYY-MM-DD Daily News.md. Use for '整理今天的新聞', '每日新聞', 'daily news digest', rounding up a day's content, or summarizing what you consumed/read today. Also use for managing long-story arc books in news/store-arcs/ — open/pause/close a tracking book（開一本追蹤 X／暫停追蹤／不用追了）.
+  Compile one day's vault notes into a two-tier daily digest — clustered
+  time-sensitive stories + evergreen knowledge links — at
+  news/daily-news/YYYY-MM-DD Daily News.md. Use for '整理今天的新聞' / '每日新聞' /
+  'daily news digest' / summarizing what you read today. Also manages
+  long-story arc books in news/store-arcs/（開一本追蹤 X／暫停追蹤／不用追了）.
 ---
 
 # Daily News Digest（每日新聞彙整）
