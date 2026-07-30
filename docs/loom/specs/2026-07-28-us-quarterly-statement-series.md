@@ -50,7 +50,13 @@ the start of XBRL mandate (~2009-2011) where only 2014+ has been verified.
 2. **Cache the raw filings on disk.** They are immutable, so the cache needs no
    invalidation policy beyond existence.
 3. Stitch them with `edgartools`' `XBRLS.from_filings()`, requesting
-   `discrete_quarters=True, include_quarterly=True`.
+   **`discrete_quarters=False, include_quarterly=True`**. **Amended 2026-07-30**:
+   this step said `discrete_quarters=True` until measurement showed that setting
+   makes the cash-flow statement file discrete quarters under CUMULATIVE period
+   keys — a 364-day key holding one quarter, and two keys holding the same
+   quarter's value. The dependency's arithmetic is right; its output keys
+   misdescribe it. Full measurement and the user's direction decision are recorded
+   in the plan's §RESOLVED FINDING 2026-07-30.
 4. Derive the Q4 income column the library does not emit: `FY − Q3-YTD`, over
    periods it already returns.
 5. **Label every period explicitly** — discrete quarter / year-to-date / annual /
@@ -85,7 +91,9 @@ shape already decided).
 type field anywhere in the row schema**, which is why step 5 above is a
 requirement and not a nicety.
 
-**Boundary** — `_acquire_raw_filing` (`sec_edgar_client.py:1121`) has **no cache
+**Boundary** — `_acquire_raw_filing` (`sec_edgar_client.py:1200`; was `:1121`
+when this brief was written — Task A's `assemble_quarterly_filing_span` landed
+above it and shifted it ~79 lines, verified 2026-07-30) has **no cache
 wrapper**; measured cold cost 15.9-29.1 s per filing, and a fresh process
 re-pays it in full (~16.2 s). The per-filing figure is the durable measurement;
 the total follows the span. At the ~40 filings of the original ten-year framing
@@ -104,8 +112,19 @@ from the repo.
 ## Decision
 
 Adopt `edgartools`' stitching rather than building the series machinery, and
-build only the three things it does not do: the filing-list assembly, a cache,
-and one subtraction.
+build only the things it does not do: the filing-list assembly, a cache, and
+**four subtractions across two statements** — one for the income statement's Q4,
+three for the cash-flow statement's Q2/Q3/Q4.
+
+**Amended 2026-07-30**: this said "one subtraction" on the belief that the
+dependency's cash-flow unaccumulation was usable as shipped. Its arithmetic is
+correct and its output keys are not — it writes discrete quarters into the
+cumulative period keys they were derived from, so a full-fiscal-year key holds one
+quarter. We therefore ask it for the cumulative columns as filed and do the
+subtraction ourselves, which keeps one invariant true everywhere: **a period key's
+span always describes the span of its value.** Measurement, the two rejected
+alternatives, and the user's decision are in the plan's §RESOLVED FINDING
+2026-07-30.
 
 The pivotal measurements:
 
@@ -160,8 +179,15 @@ the hard part, not fetching.
 
 ## What Becomes Obsolete
 
-- **The planned YTD-differencing and Q4-derivation work** — superseded by the
-  dependency. Remove from planning; do not build.
+- ~~**The planned YTD-differencing and Q4-derivation work** — superseded by the
+  dependency. Remove from planning; do not build.~~ **REVERSED 2026-07-30. BUILD
+  IT.** This directive rested on the dependency producing usable discrete
+  quarters. It produces correct NUMBERS under keys that misdescribe them (see
+  §Smallest End State step 3 and the plan's §RESOLVED FINDING), so the work is
+  back in scope: four subtractions across two statements, owned by plan Task E.
+  Anyone reading this bullet as still operative would delete Task E's cash-flow
+  work as scope creep — which is why it is reversed here rather than only in the
+  plan.
 - **Rung A (convert 13 spine fields to structure-driven selection)** — already
   withdrawn on measurement (audit §8); this brief does not revive it.
 - **`RECONSTRUCT_ANNUAL_FILINGS = 8` as a fixed constant** and the inline
