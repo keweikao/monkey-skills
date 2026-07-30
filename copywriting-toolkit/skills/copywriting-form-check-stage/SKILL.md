@@ -121,10 +121,12 @@ See `rubrics/form-appropriate-gate.md §copywriting-toolkit additional dimension
 
 The evaluator agent reads the rubric directly — these dimensions fire automatically without cross-reference. Prior to v1.1.0 these lived in this SKILL.md section because the rubric was Tier 1 unmodifiable; v1.1.0 Provenance & Divergence principle allows Tier 2 additive modification, so they migrated to their natural home. See `../../CLAUDE.md §Provenance & Divergence Principle`.
 
-Gate 8b runs in **flag mode**: it surfaces weaknesses but does not
-block on a single 🟡. Verdict rules are per the rubric
-(`rubrics/form-appropriate-gate.md`): 1 🔴 → `NEEDS_REVISION`;
-2+ 🟡 → `NEEDS_REVISION`; 1 🟡 → `PASS_WITH_NOTES`; all 🟢 → `PASS`.
+Gate 8b runs in **flag mode**: it surfaces weaknesses but a craft-class
+🟡 never blocks, alone or in accumulation. Verdict rules follow
+contract-class aggregation per `../../CLAUDE.md §Gate Convergence Vocabulary`
+(canonical; this passage does not restate it) — the rubric's dimension
+rows (`rubrics/form-appropriate-gate.md`) are annotated `contract` /
+`craft` per that vocabulary.
 
 ## Evaluator Launch — Pass 8a (MUST)
 
@@ -231,8 +233,10 @@ On `NEEDS_REVISION`: envelope returned to Phase 4 drafter with
   abstract Evidence, generic catchcopy) are the whole point of a
   separate SHOULD gate.
 - Do NOT paraphrase `checklists/persuasion-framework-adherence-checklist.md`
-  or `rubrics/form-appropriate-gate.md` — byte-identical copies from
-  `domain-teams/skills/copywriting-team/`. <!-- CHK-SKL-011-exempt: provenance citation -->
+  (byte-identical copy from `domain-teams/skills/copywriting-team/`) <!-- CHK-SKL-011-exempt: provenance citation -->
+  or `rubrics/form-appropriate-gate.md` (Tier-2 DIVERGED since v1.15.0 —
+  its header logs the sanctioned divergences; do NOT "restore" it to the
+  upstream bytes).
 - Do NOT run this skill before `ethics_verdict == "PASS"`.
 - Do NOT exceed 2 revise rounds silently — escalate to the user on
   round 3.

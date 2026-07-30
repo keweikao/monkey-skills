@@ -168,7 +168,7 @@ The evaluator returns one of three verdicts (see
 | Verdict | Meaning | Action |
 |---|---|---|
 | `PASS` | All items `PASS` or `N/A` | Update envelope: `phase → phase-8-form`, `next_stage → copywriting-form-check-stage`. Hand off. |
-| `PASS_WITH_NOTES` | Only `FAIL_FIXABLE` items, no FATALs | Apply evaluator's deterministic notes (formatting / disclosure-wording polish) via a brief auto-revise turn, re-run this gate ONCE, then hand off on re-`PASS`. Never forward-run Phase 8 while a FIXABLE is outstanding. |
+| `PASS_WITH_NOTES` | Only `FAIL_FIXABLE` items, no FATALs | Dispatch the `copywriter` agent (`../../agents/copywriter.md`) to apply the evaluator's deterministic notes (formatting / disclosure-wording polish) as an auto-revise turn — never apply the fix directly from this orchestrating context (same nested-dispatch constraint as the evaluator dispatch: if the `Agent` tool is unavailable, STOP and surface to the parent orchestrator instead). Re-run the evaluator gate ONCE afterward: the gate re-verifies the affected checklist items against the revised draft, and the evaluator's re-check — not the copywriter's revision claim — closes the finding. Hand off only on re-`PASS`. Never forward-run Phase 8 while a FIXABLE is outstanding. |
 | `NEEDS_REVISION` | Any `FAIL_FATAL` | **Stop.** Present the evaluator's per-item findings to the user verbatim. Do NOT auto-rewrite. Do NOT launch Phase 8. Default re-entry: `copywriting-<form>` (Phase 4 drafter) with `ethics_findings` attached to the envelope. User may override to any of the three options below. |
 
 ### Stop rule on `NEEDS_REVISION`
@@ -231,10 +231,11 @@ unchanged envelope plus the findings block to the user, then stop.
 ## Do NOT
 
 - Do NOT modify the draft beyond applying literal FIXABLE notes.
-- Do NOT paraphrase `checklists/ethics-checklist.md` or
-  `standards/persuasion-ethics.md` — they are byte-identical copies
-  from `domain-teams/skills/copywriting-team/`. <!-- CHK-SKL-011-exempt: provenance citation -->
-  Drift is a CLAUDE.md violation.
+- Do NOT paraphrase `standards/persuasion-ethics.md` (byte-identical
+  copy from `domain-teams/skills/copywriting-team/`; <!-- CHK-SKL-011-exempt: provenance citation -->
+  drift is a CLAUDE.md violation) or `checklists/ethics-checklist.md`
+  (Tier-2 DIVERGED since v1.1.0 — its header logs the sanctioned
+  divergences; do NOT "restore" it to the upstream bytes).
 - Do NOT launch `copywriting-form-check-stage` until this gate
   returns `PASS`.
 - Do NOT merge this skill's evaluator logic into Phase 8 to save a

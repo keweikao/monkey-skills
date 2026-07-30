@@ -233,6 +233,9 @@ Formal schema used by `using-copywriting-toolkit` router for bounce-back routing
       "injected_text": "..."
     }
   ],
+  "express_mode_used": true,
+  "audit_trail": ["... prior entries unchanged, see CLAUDE.md §Audit Trail (router appends skill-exited after return) ..."],
+  "retries": { "bounce_round": 0, "revise_round_count": 0, "total_retries": 0 },
   "next_stage": "copywriting-voice-quadrant-stage"
 }
 ```
@@ -319,9 +322,12 @@ Neta Safety gate before advancing.** The gate is evaluator-only.
   2. 景品表示法 ステマ (undisclosed endorsement / stealth marketing
      failing to label sponsored references)
 
-Verdict enum: `PASS` | `NEEDS_REVISION`. On `NEEDS_REVISION`, worker
-addresses specific dimension feedback and re-runs Phase C-D (not A-B —
-candidate catalog stays stable).
+Verdict enum: `PASS` | `PASS_WITH_NOTES` | `NEEDS_REVISION`. On
+`NEEDS_REVISION`, worker addresses specific dimension feedback and
+re-runs Phase C-D (not A-B — candidate catalog stays stable). On
+`PASS_WITH_NOTES`, the verdict's notes (the triggering contract-class
+🟡 detail plus any craft-class observations) travel with the envelope
+as recorded observations — no re-run duty.
 
 ## Handoff
 

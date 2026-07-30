@@ -61,6 +61,8 @@ Files in this tier MAY be modified to adopt plugin-specific execution mechanics.
 3. Mark plugin-specific additions clearly with `<!-- v1.x.y addition: <topic> -->` blocks
 4. Log every divergence in `CHANGELOG.md` per version bump
 
+**Exception — plugin-owned gate verdict rules (v1.15.0, convergence-modernization arc):** a rubric's verdict-aggregation block (`## Verdict Rules` and equivalents) is plugin-owned enforcement mechanics — this plugin's gates execute it — not upstream editorial prose, so the raise-upstream duty does not fit it. When a user-ratified brief/plan retires its semantics (the 2026-07-30 contract-class port obsoleted the count-based verdict rules toolkit-wide), the block MAY be replaced in place, provided the file's DIVERGED header names exactly what was replaced and cites this exception plus the plan, and the CHANGELOG logs it. This is the only sanctioned non-additive edit class; all other original prose keeps the additive-only rule and the raise-upstream discipline.
+
 Covers:
 - `skills/*/protocols/*.md` — execution SOPs; plugin-specific mechanics are legitimate divergence
 - `skills/*/checklists/*.md` — gate items; plugin-specific hint subitems OK
@@ -157,6 +159,64 @@ If a skill must transform a field (e.g., edit `draft` at Phase 6), it creates a 
 
 **Enforcement**: router bounces any envelope with a dropped immutable field back to the skill that last wrote it, per §2.4. This is cheap (presence check, not semantic) and makes drops auditable.
 
+## Envelope Validation
+
+`scripts/validate_envelope.py` (stdlib-only, `loom_gate_markers`-style) is
+the file-borne enforcement medium for the handoff envelope.
+At EVERY stage boundary, the orchestrator serializes the current
+envelope to the run's work file and runs:
+
+```
+python3 <plugin-root>/scripts/validate_envelope.py <file> [--prev <file>]
+```
+
+Proceed ONLY on exit 0. Any non-zero exit is STOP and surface to the
+operator — never hand-repair the envelope silently. This mirrors the
+manual-PASS ban (§External Caller Guide → What NOT to do, below): a human patching the JSON so the
+next call passes is the same failure as a manual `gate_verdict: PASS`.
+
+### Work-file convention
+
+One `run_id` is minted at intake for the run's lifetime. Every
+stage-boundary envelope is written under:
+
+```
+${TMPDIR:-/tmp}/copywriting-run-<run_id>/envelope-<seq>.json
+```
+
+`<seq>` increments once per stage boundary (`envelope-1.json`,
+`envelope-2.json`, ...).
+
+### `--prev` is a MUST once seq > 1
+
+Counter monotonicity, immutable-field preservation, and `audit_trail`
+append-only (exit codes 4 / 5 / 6) are checked ONLY when `--prev` names
+the previous stage-boundary file — calling the validator on a single file
+in isolation silently SKIPS all three check classes; it is a weaker,
+insufficient validation, not an equivalent one. Every validation call at
+seq > 1 MUST pass `--prev envelope-<seq-1>.json` (the previous boundary
+file in the same run directory). Only the very first call
+(`envelope-1.json`, no predecessor) may omit it.
+
+### What the validator ENFORCES vs what stays prose
+
+The retries.* counters table row above ("Monotonic — counters only
+increment, never reset by a downstream skill") and the External Caller
+Guide's "Do NOT omit `retries: {...}`" warning describe the intended
+behavior in prose; `validate_envelope.py`'s counter-monotonicity check
+(`--prev`, exit 4) is what actually ENFORCES it — a downstream skill that
+resets a counter now fails the validator's exit code at the next stage
+boundary, it does not merely violate an unread warning.
+
+### Alt-entry minimal shape
+
+Alt-entry envelopes (`phase: "phase-audit-entry"`, see External Caller
+Guide below) validate with the SAME script. The schema's minimal-shape
+allowance for this phase means `express_mode_used` / `audit_trail` /
+`retries` are omissible there — the validator's schema check (exit 3)
+recognizes `phase-audit-entry` and requires only a non-empty
+`external_copy`; it does not relax any other phase.
+
 ## Envelope Violation (bounce-back contract)
 
 Every downstream skill declares its `## Preconditions` schema in its own SKILL.md. The `using-copywriting-toolkit` router validates the envelope against that schema BEFORE launching the skill. On violation, the router does not launch; instead it emits a bounce-back envelope and re-routes upstream.
@@ -208,11 +268,12 @@ If several fields are missing, list them all in `missing[]`. Router picks the SI
 
 ## Router Validation
 
-`using-copywriting-toolkit` is the single enforcement point for precondition validation. It performs three checks before every skill launch:
+`using-copywriting-toolkit` is the single enforcement point for precondition validation. It performs three checks before every skill launch, plus a fourth duty at a different moment (item 4):
 
 1. **Aggregate retry cap** — read `envelope.retries.total_retries`; if `>= 4`, HALT and ask the user (do not launch any skill, do not bounce). Present the retries breakdown (`bounce_round` / `revise_round_count`) so the user can see why progress stalled.
 2. **Preconditions check** — load the target skill's `## Preconditions § Required envelope fields` table from its SKILL.md, verify every row against the current envelope. On any missing / malformed field → emit `violation` envelope, do NOT launch the target skill, route to the `bounce_to` skill named in the target's Preconditions, increment `bounce_round` and `total_retries`.
 3. **Express qualification (Shape A only)** — per `using-copywriting-toolkit/protocols/phase-decision-tree.md §Step 0.5`, inspect raw brief against intake's Level 1 field set. If qualified, dispatch intake in Express Mode (`copywriting-intake/protocols/express-mode.md`); otherwise default to Q1-Q10 full intake.
+4. **Envelope-file validation** — at every STAGE BOUNDARY (not skill launch), serialize the envelope and run the validator per §Envelope Validation above. A separate layer from check 2: the script checks structure/counters/history against the previous boundary file; the Preconditions check verifies the target skill's field requirements. Both run at their own moments — passing one never satisfies the other.
 
 Router does not draft, does not judge gate verdicts, does not rewrite. It routes, validates, and bounces.
 
@@ -225,6 +286,24 @@ Router does not draft, does not judge gate verdicts, does not rewrite. It routes
 ### Express Mode is not a Preconditions bypass
 
 Express Mode replaces Q1-Q10 **elicitation** with synthesis-plus-single-turn-confirmation. The Intake Completeness MUST gate still runs. The downstream skill still sees a well-formed envelope that satisfies its Preconditions. If Express-synthesised fields turn out to be wrong, a downstream skill will emit a violation → router routes back to intake → intake on re-entry forces Q1-Q10 (not Express) because bounce-backs are a disqualifier.
+
+## Gate Convergence Vocabulary (contract / craft) — canonical
+
+Canonical convergence semantics for EVERY gate in this plugin (Intake Completeness, Neta Safety, Voice Consistency, Ethics, Form 8a/8b, audit-stage reuse). Gate skills and rubrics POINT at this section; the `copywriter-evaluator` contract TRANSCRIBES these definitions verbatim with drift-pinned copies (a sanctioned exception to pointing-only, so the evaluator carries the definitions inline where it reads them) — either way, if a gate document and this section ever disagree, this section wins.
+
+**1. Every gate finding carries `class: contract | craft`.**
+
+- `contract` — the finding cites a violated CONTRACT term with an objective checkable referent: a brief constraint, a form spec limit or mandatory element, a declared voice target, or an ethics rule. Someone reading the referent and the draft can check the violation without taste.
+- `craft` — a qualitative observation: affinity thickness, flow, tone nuance, positioning polish.
+- **A finding whose class is unclear is tagged `contract` (fail closed)** — ambiguity must never soften a gate.
+
+**2. Gate verdicts aggregate over contract-class findings ONLY.** Craft-class findings are recorded observations that never gate — they travel in the verdict as notes for the operator and downstream stages, but they cannot flip `PASS` to `NEEDS_REVISION`, alone or in accumulation.
+
+**3. Round-2 duty.** A re-gate dispatch carries the prior round's findings verbatim. The evaluator verifies each prior finding against the current draft BEFORE raising anything new. Re-raising a closed finding in new words is forbidden — that is re-litigation, not review.
+
+**4. Oscillation stop.** A finding that resurfaces after being fix-verified ends the loop → surface to the operator, regardless of counter state (`bounce_round` / `revise_round_count` / `total_retries` headroom does not authorize another round).
+
+**Ethics semantics unchanged:** ethics-check's FATAL/FIXABLE checklist semantics are UNCHANGED by this vocabulary — FATAL still blocks unconditionally; FIXABLE still follows its own auto-revise rule. The same holds for the other checklist-mode gate, Intake Completeness: status-based checklist items are already contract-shaped referents, and their mechanics are not rewritten. This vocabulary governs how findings aggregate into verdicts in flag-mode gates, not what any checklist means.
 
 ## Audit Trail
 
@@ -356,7 +435,7 @@ Running a single multi-role agent blurs both. Using `domain-teams:worker` / `dom
 
 ## Inline-Duplication Drift Risk
 
-`persuasion-psychology-anchor.md` appears 5× identical in workflow skills. If drift observed later, a sync script is acceptable — do not attempt cross-skill loading at runtime.
+`persuasion-psychology-anchor.md` appears 5× identical in workflow skills (plus `sns-evolution-aisas-ulssas.md` 2×). Drift is checked by `scripts/check_anchor_copies.py` (landed commit `7d064a4c`) — do not attempt cross-skill loading at runtime; run the script instead.
 
 ## Verification Density Principle (v1.2.0)
 
