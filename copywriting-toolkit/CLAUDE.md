@@ -118,6 +118,13 @@ Between-skill artifact shape (JSON):
   "ideation_pool": ["... optional if Phase 2 ran ..."],
   "neta_candidates": ["... optional if Phase 3 ran pre-draft ..."],
   "draft": "...",
+  "express_mode_used": true,
+  "audit_trail": [
+    { "at": "2026-07-30T02:00:00Z", "event": "skill-entered", "skill": "copywriting-intake", "detail": "Express Mode" },
+    { "at": "2026-07-30T02:00:12Z", "event": "skill-exited", "skill": "copywriting-intake", "detail": "brief synthesized" },
+    { "at": "2026-07-30T02:00:13Z", "event": "skill-entered", "skill": "copywriting-long-form-pasona", "detail": "Phase 4 draft" }
+  ],
+  "retries": { "bounce_round": 0, "revise_round_count": 0, "total_retries": 0 },
   "next_stage": "copywriting-voice-quadrant-stage"
 }
 ```
@@ -321,6 +328,18 @@ Used by:
 - `copywriting-audit-stage` (reuses Phase 5-8 gates on external copy)
 
 Does NOT draft or soften — only judges.
+
+> **MUST — every gate evaluation REQUIRES a real `Agent`-tool dispatch of
+> `copywriter-evaluator`; never degrade to reviewing your own draft.** A
+> subagent has no `Agent`/`Task`/`Workflow` tool (live-probed 2026-07-23,
+> repo memory `skill-in-subagent-loses-internal-orchestration.md`), so a
+> gate skill (`copywriting-ethics-check-stage`, `copywriting-form-check-stage`,
+> `copywriting-audit-stage`) executed entirely inside one subagent loses its
+> writer≠evaluator separation SILENTLY: the same agent that produced the
+> draft ends up also producing the gate verdict — self-certification with no
+> error surfaced. If you are running inside a subagent and cannot confirm the
+> `Agent` tool is available, STOP and surface this to the parent orchestrator
+> instead of proceeding with a self-reviewed verdict.
 
 ### Why two agents, two personas
 

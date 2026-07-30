@@ -24,6 +24,11 @@ before delivery**. It runs only after `copywriting-ethics-check-stage`
 - **Preconditions** — `envelope.ethics_verdict == "PASS"`. If this
   field is missing or not `PASS`, stop and return to the orchestrator;
   the pipeline MUST pass Phase 7 first.
+- **Nested-dispatch guard** — gate evaluations REQUIRE a real Agent-tool
+  dispatch of `copywriter-evaluator`; if you are running inside a subagent
+  (no Agent tool), STOP and surface to the parent orchestrator — never
+  degrade to reviewing your own draft (full rationale: `../../CLAUDE.md
+  §agents/copywriter-evaluator.md (evaluator)`).
 
 ## Preconditions
 
@@ -60,6 +65,9 @@ Formal schema used by `using-copywriting-toolkit` router for bounce-back routing
   "voice_quadrant": { "primary": "Q1 | Q2 | Q3 | Q4", "edge": "...", "rationale": "...", "schwartz_alignment": "..." },
   "tone_notes": "...",
   "ethics_verdict": "PASS",
+  "express_mode_used": true,
+  "audit_trail": ["... append-only event log through Phase 7, see CLAUDE.md §Audit Trail ..."],
+  "retries": { "bounce_round": 0, "revise_round_count": 0, "total_retries": 0 },
   "next_stage": "copywriting-form-check-stage"
 }
 ```
@@ -203,6 +211,12 @@ On final `PASS` / `PASS_WITH_NOTES`:
   "ethics_verdict": "PASS",
   "form_verdict": "PASS | PASS_WITH_NOTES",
   "form_findings": "<optional 8b flag notes>",
+  "express_mode_used": true,
+  "audit_trail": [
+    "... prior entries unchanged ...",
+    { "at": "2026-07-30T02:10:00Z", "event": "gate-verdict", "skill": "copywriting-form-check-stage", "detail": "PASS" }
+  ],
+  "retries": { "bounce_round": 0, "revise_round_count": 0, "total_retries": 0 },
   "next_stage": null
 }
 ```
@@ -218,7 +232,7 @@ On `NEEDS_REVISION`: envelope returned to Phase 4 drafter with
   separate SHOULD gate.
 - Do NOT paraphrase `checklists/persuasion-framework-adherence-checklist.md`
   or `rubrics/form-appropriate-gate.md` — byte-identical copies from
-  `domain-teams/skills/copywriting-team/`.
+  `domain-teams/skills/copywriting-team/`. <!-- CHK-SKL-011-exempt: provenance citation -->
 - Do NOT run this skill before `ethics_verdict == "PASS"`.
 - Do NOT exceed 2 revise rounds silently — escalate to the user on
   round 3.

@@ -29,6 +29,11 @@ whether Phase 8 (form gate) may run.
   小霜「嘘をつかない」) boundaries are not subject to user override.
   The user may edit the draft and re-submit, but cannot waive a
   `FAIL_FATAL`.
+- **Nested-dispatch guard** — gate evaluations REQUIRE a real Agent-tool
+  dispatch of `copywriter-evaluator`; if you are running inside a subagent
+  (no Agent tool), STOP and surface to the parent orchestrator — never
+  degrade to reviewing your own draft (full rationale: `../../CLAUDE.md
+  §agents/copywriter-evaluator.md (evaluator)`).
 
 ## Input — Envelope Shape
 
@@ -49,6 +54,9 @@ Envelope`). At this phase the envelope MUST already carry:
     "schwartz_alignment": "ok | hard_rule_applied | conflict_flagged"
   },
   "tone_notes": "<from Phase 6>",
+  "express_mode_used": true,
+  "audit_trail": ["... append-only event log through Phase 6, see CLAUDE.md §Audit Trail ..."],
+  "retries": { "bounce_round": 0, "revise_round_count": 0, "total_retries": 0 },
   "next_stage": "copywriting-ethics-check-stage"
 }
 ```
@@ -207,6 +215,12 @@ On `PASS` (or `PASS` after a FIXABLE auto-revise round):
   "tone_notes": "...",
   "ethics_verdict": "PASS",
   "ethics_findings": "<optional FIXABLE notes applied>",
+  "express_mode_used": true,
+  "audit_trail": [
+    "... prior entries unchanged ...",
+    { "at": "2026-07-30T02:05:00Z", "event": "gate-verdict", "skill": "copywriting-ethics-check-stage", "detail": "PASS" }
+  ],
+  "retries": { "bounce_round": 0, "revise_round_count": 0, "total_retries": 0 },
   "next_stage": "copywriting-form-check-stage"
 }
 ```
@@ -219,8 +233,8 @@ unchanged envelope plus the findings block to the user, then stop.
 - Do NOT modify the draft beyond applying literal FIXABLE notes.
 - Do NOT paraphrase `checklists/ethics-checklist.md` or
   `standards/persuasion-ethics.md` — they are byte-identical copies
-  from `domain-teams/skills/copywriting-team/`. Drift is a CLAUDE.md
-  violation.
+  from `domain-teams/skills/copywriting-team/`. <!-- CHK-SKL-011-exempt: provenance citation -->
+  Drift is a CLAUDE.md violation.
 - Do NOT launch `copywriting-form-check-stage` until this gate
   returns `PASS`.
 - Do NOT merge this skill's evaluator logic into Phase 8 to save a
