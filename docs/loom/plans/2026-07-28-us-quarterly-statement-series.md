@@ -332,8 +332,10 @@ asking the dependency for discrete cash-flow quarters.
   - investing-toolkit/skills/analysis-kpi/scripts/kpi_us_quarterly_periods.py
   - investing-toolkit/skills/analysis-kpi/scripts/kpi_spine_view.py
 - **Acceptance**:
-  - **RED**: `test_every_projected_period_declares_its_kind` — no projected period lacks a kind, and the Q4 period from Task E is marked derived.
-  - **GREEN**: the projection round-trips a fixture with every period labelled, and the existing `derive-as-filed` output is byte-unchanged.
+  - **RED**: `test_every_projected_period_declares_its_kind` — over the committed fixture, EVERY period of every statement kind carries a `kind` from Task C's classifier and a `derived` boolean; the two Task E Q4s (`duration_2025-04-01_2025-06-30` and its FY2024 sibling) are `derived: true` and `kind: "discrete_quarter"`; every filed period is `derived: false`; and the balance sheet's instants come back `kind: "instant"`. **Assert the COUNT of projected periods per kind too** — a projection that silently dropped the derived quarters would otherwise satisfy every per-period assertion above.
+  - **GREEN**: the projection round-trips the committed fixture with every period labelled; the envelope matches Decision Log one-way door #2 (`pack`/`ticker`/`fetched_at`/`_status`, `statements.<kind>.{lines, periods}`, each period `{key, kind, derived, start, end}`); and `derive-as-filed` is untouched.
+  - **GREEN — the one refusal that RAISES (ratified 2026-07-31; this clause exists because the artifact declared a refusal this task's Acceptance did not enumerate — the same class Task E's GREEN already ratified once).** `project_quarterly_series` raises `ValueError` on a ticker that is empty or whitespace-only, before any derivation. A blank ticker is not a missing optional field: the envelope's `ticker` is the only statement of WHOSE numbers the payload holds, and a payload attributed to nobody is shaped exactly like a real one — this arc's recurring defect, and the same reason `stitch_quarterly_statements` refuses an empty filing list rather than answering with a well-formed nothing. It is a WHOLE-CALL refusal because there is nothing to attribute the result to; contrast Task E's per-line skip for a missing cell, which is ordinary. `ticker.upper()` normalisation is not a refusal and is unchanged (six precedents in `pack_us.py`).
+    **GREEN clause corrected 2026-07-31** (mislabelled "RED clause corrected 2026-07-30" when first written — a spec review caught both the wrong clause name and the wrong date; a future reader would have hunted for a RED change that never happened): the GREEN said "the existing `derive-as-filed` output is byte-unchanged", which **no test in this task could have failed** — `derive-as-filed` lives in `kpi_spine_view.py` with its own suite (`tests/analysis/test_kpi_spine_view.py`), and neither file is in this task's `Files touched`. Structurally unable to fail is the defect class this branch has now shipped seven times; the honest form of that clause is that this task does not touch it, which its `Files touched` already states and its sibling suite already guards.
 - **Dependencies**: Tasks C, E complete first
 - **Independent**: false
 - **Brief item covered**: "Project into this toolkit's output shape" + the user's option-乙 decision that the quarterly series gets its own projection.
@@ -381,6 +383,7 @@ asking the dependency for discrete cash-flow quarters.
   - investing-toolkit/skills/data-markets/scripts/pack.py
 - **Acceptance**:
   - **RED**: `test_quarterly_series_verb_is_registered_and_us_only` — the verb appears in the pack registry, rejects a non-US ticker, and returns the labelled projection for a stubbed series.
+  - **RED (money serialisation, added 2026-07-31 — this task's likeliest silent defect)**: Task F's projection returns line values as `Decimal`. **This verb must project them to exact text EXPLICITLY** — `pack_us._decimal_text` (`pack_us.py:1296-1312`) is the in-repo helper and its own docstring states why. It must NOT inherit the facade's fallback: `pack.py`'s `_emit` calls `json.dumps(obj, indent=2, default=str)` (**verified 2026-07-31 by opening it**), which serialises a `Decimal` **silently** — and would serialise a binary float just as happily, which is the whole point. Contrast `kpi_spine_view`, which dumps BARE (`json.dump(_project_money_to_text(view), ...)`), so a stray `Decimal` there really does raise. **Pin it with a bare `json.dumps` in the test, and make the stubbed series carry at least one `Decimal`** — otherwise this task's own RED goes green on a stub that has none, while the live run inherits the fallback. This entry exists because Task F's implementer described the behaviour as deliberate fail-loud; a spec reviewer opened the actual downstream path and found it silent.
   - **GREEN**: the test passes, the verb is declared in the skill's CLI reference so it has a documented entry point, AND a ONE-OFF live run against a real filer returns a series whose discrete-quarter count and date span are both recorded in the task's close-out — the requirement is "all available history, ten years as the floor", and no fixture-based test can observe it.
 - **External surfaces**: the pack CLI surface; the new verb must be added to `analysis-kpi/references/cli-reference.md` and verified to run.
 - **Dependencies**: Tasks F, J complete first
@@ -470,6 +473,24 @@ and was re-reviewed; it is logged here rather than silently applied.
    `statements.<kind>.{lines, periods}`, each period carrying
    `{key, kind, derived, start, end}`. No new top-level shape — existing consumers
    and tooling already read this envelope.
+   **WIDENED 2026-07-31 by the user, on a spec review's escalation**: one more
+   top-level key, **`n_filings_used`** — the SIXTH key of the returned dict, or the
+   fifth envelope metadata field if you exclude the `statements` container, and this
+   sentence says both because the count was miscounted twice on this branch — present
+   only when the input reports one
+   (absent rather than fabricated, following `kpi_spine_view`'s own optional-marker
+   doctrine). It earns the widening because Task J's partial-acquisition failure is
+   otherwise invisible downstream — a short answer and a complete one have the same
+   shape, which is this arc's recurring defect. **How this came up matters more than
+   the field**: Task F's implementer added it unasked, and the one test written to
+   stop a quiet widening asserted the widened set under the name
+   `test_the_envelope_is_the_one_the_user_ratified` — a guard that ratified what it
+   existed to catch, under a name claiming an approval that did not yet exist. The
+   approval now exists; the module docstring was corrected and the test renamed to
+   `test_the_envelope_key_sets_are_exact_at_every_level` (round 2), so the name
+   states what it checks rather than who approved it. **The durable rule that came
+   out of it**: a name saying WHO APPROVED cannot be checked by running it; a name
+   saying WHAT IS CHECKED can.
 3. **Cache on-disk format**: a thin envelope `{accession, fetched_at, sec_url,
    document}`, not the bare document. A few extra bytes buy provenance; adding it
    later would invalidate every cached filing on every user's machine, at 20-37

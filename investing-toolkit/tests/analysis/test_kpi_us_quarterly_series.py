@@ -1,8 +1,13 @@
 """Tests for analysis-kpi/scripts/kpi_us_quarterly_series.py — stitch a
 filer's own ALREADY-ACQUIRED filing list into the three statements via
-`edgartools`' own multi-filing stitcher (plan Task D), then subtract the
-discrete quarters the filings never state (plan Task E), both in
+`edgartools`' own multi-filing stitcher (plan Task D), subtract the
+discrete quarters the filings never state (plan Task E), and project the
+result with every period labelled (plan Task F), all in
 docs/loom/plans/2026-07-28-us-quarterly-statement-series.md.
+
+THREE FUNCTIONS, ONE PIPELINE: stitch → derive → project. The third is the
+answer a consumer reads, and its own section at the bottom of this file
+states what it pins; the two below are its inputs.
 
 TWO FUNCTIONS, TWO HALVES OF ONE PIPELINE. `stitch_quarterly_statements`
 takes the cumulative columns as filed; `derive_discrete_quarters` differences
@@ -101,7 +106,7 @@ expectation is read out of the input the test itself mutated, so no constant
 can satisfy it.
 
 No `@req` tags: this dispatch carries no registered loom-spec REQ-ids (the
-work is tracked by named plan Tasks D and E), so `@req` is omitted per the
+work is tracked by named plan Tasks D, E and F), so `@req` is omitted per the
 implementer contract.
 """
 from __future__ import annotations
@@ -110,7 +115,8 @@ import copy
 import importlib.util
 import json
 import sys
-from datetime import date, timedelta
+from collections import Counter
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -1872,3 +1878,778 @@ def test_derivation_does_not_mutate_the_statements_it_is_given(series):
     assert pristine == before, (
         "derive_discrete_quarters mutated the statements it was handed"
     )
+
+
+# ==========================================================================
+# Plan Task F — project the series with explicit period labels
+# ==========================================================================
+#
+# WHAT THIS SECTION IS FOR. The two functions above answer "what did the
+# filer state" and "what must be differenced out"; neither produces an
+# ANSWER a consumer can read. `project_quarterly_series` is the series' own
+# output shape, and the one thing it must never do is hand back a period
+# whose meaning has to be inferred from its day span -- which is what the
+# whole arc exists to remove (brief, Smallest End State step 5).
+#
+# THE PROJECTION IS ITS OWN SHAPE, NOT AN EXTENSION OF `derive-as-filed`
+# (user decision, brief Open Question 1). `derive-as-filed` lives in
+# `kpi_spine_view.py` with its own suite (`tests/analysis/
+# test_kpi_spine_view.py`) and neither file is touched by this task. NOTHING
+# HERE ASSERTS THAT IT IS UNCHANGED, deliberately: a test in this file over
+# a module this file does not import could not fail if that module changed,
+# and a test that cannot fail is the defect class this branch has shipped
+# seven times (plan Task F, Acceptance, "RED clause corrected 2026-07-30";
+# docs/loom/memory/a-test-can-be-correct-and-still-unable-to-fail.md).
+#
+# THE LITERAL COUNTS BELOW ARE MEASURED from the committed fixture through
+# the two committed functions, on 2026-07-31 -- never copied from prose.
+
+# 17 filed income periods + the 2 derived Q4s; 17 + 2 for cash flow; the
+# balance sheet's 11 instants + nothing (it carries no duration column to
+# difference). Each duration total is asserted to EXCEED its filed count
+# below, so a projection that dropped the derived quarters cannot satisfy it.
+_PROJECTED_PERIOD_COUNTS = {"income": 19, "balance_sheet": 11, "cash_flow": 19}
+
+# The same 41 periods bucketed by what Task C's classifier calls them. This
+# is the breakdown a consumer filters on, so it is pinned rather than only
+# the totals: a projection that emitted the derived Q4s under the wrong kind
+# would keep every total above intact.
+_PROJECTED_KIND_COUNTS = {
+    "income": {"discrete_quarter": 11, "ytd": 6, "annual": 2},
+    "balance_sheet": {"instant": 11},
+    "cash_flow": {"discrete_quarter": 11, "ytd": 6, "annual": 2},
+}
+
+# The two Task E quarters, per statement kind. The balance sheet's empty
+# list is an assertion, not a placeholder -- an instant-based statement that
+# started reporting derived periods would be inventing them.
+_DERIVED_KEYS_BY_KIND = {
+    "income": [_FY2024_DERIVED_Q4, _FY2025_DERIVED_Q4],
+    "balance_sheet": [],
+    "cash_flow": [_FY2024_DERIVED_Q4, _FY2025_DERIVED_Q4],
+}
+
+_STATEMENT_KINDS = ("income", "balance_sheet", "cash_flow")
+
+
+def _projection_of(series, fixture_doc, ticker: str = "MSFT") -> dict:
+    """The projection of the real stitched capture, through the real
+    `stitch_quarterly_statements` -- so these tests pin that the three
+    functions COMPOSE, which is the seam plan Task H calls through."""
+    stitched = series.stitch_quarterly_statements(_fake_filings(fixture_doc))
+    return series.project_quarterly_series(stitched, ticker)
+
+
+def _periods_of(projection: dict, kind: str) -> list[dict]:
+    return projection["statements"][kind]["periods"]
+
+
+def test_every_projected_period_declares_its_kind(
+    series, fixture_doc, period_kind
+):
+    """Plan Task F's RED. Every emitted period says WHAT IT IS -- a kind from
+    Task C's classifier and a `derived` boolean -- so no consumer has to infer
+    a period's meaning from its day span. The brief states the gap under
+    CURRENT STATE EVIDENCE, not under Smallest End State, and the sentence is
+    quoted here verbatim (corrected round 2 -- it was attributed to "Smallest
+    End State step 5", which is a different sentence, and the quote had been
+    lightly reworded inside its own quote marks):
+    "**there is no period type field anywhere in the row schema**, which is
+    why step 5 above is a requirement and not a nicety"
+    (docs/loom/specs/2026-07-28-us-quarterly-statement-series.md:90-92, opened
+    2026-07-31). Step 5 is the requirement the sentence points AT
+    (`:62-63`, "Label every period explicitly").
+
+    `kind` is checked against the COMMITTED classifier this file loads
+    separately, not against a literal table: a projection that bucketed spans
+    its own way would agree with a table written from the same misreading.
+
+    THAT CHECK BINDS THE FILED BRANCH ONLY, on this fixture. Both derived Q4s
+    here classify as `discrete_quarter` anyway, so nothing in this test can
+    tell a classifier read from a hardcoded kind on the DERIVED branch;
+    `test_a_derived_periods_kind_also_comes_from_the_classifier` below is what
+    pins that, on a constructed input whose derived quarter classifies
+    `unknown`.
+
+    THE COUNTS ARE THE LOAD-BEARING PART, and they are why this test is a RED
+    rather than a vacuous universal. Every per-period assertion here is
+    satisfied vacuously by a projection that DROPS periods -- emitting only
+    the filed ones, or only the ones it found easy, leaves "every period
+    declares its kind" true and the answer wrong. So the total per statement
+    kind, the breakdown by kind, and the exact set of derived keys are all
+    pinned, and the duration totals are asserted to exceed their own filed
+    counts so a filed-only projection fails on the number rather than on a
+    lucky key.
+
+    `derived` is a SEPARATE BOOLEAN, never a sixth kind value (plan Decision
+    Log, one-way door #1): the two Q4s are asserted to be BOTH
+    `derived is True` AND `kind == "discrete_quarter"`, which is unaskable if
+    the two axes are ever collapsed.
+    """
+    projection = _projection_of(series, fixture_doc)
+    stitched = series.stitch_quarterly_statements(_fake_filings(fixture_doc))
+
+    for kind in _STATEMENT_KINDS:
+        periods = _periods_of(projection, kind)
+        filed_keys = {entry[0] for entry in stitched[kind]["periods"]}
+
+        # --- every period declares both axes ---------------------------
+        for entry in periods:
+            assert entry["kind"] == period_kind(entry["key"]), (
+                f"{kind} {entry['key']}: projected kind {entry['kind']!r} "
+                f"disagrees with the committed classifier's "
+                f"{period_kind(entry['key'])!r}"
+            )
+            assert isinstance(entry["derived"], bool), (
+                f"{kind} {entry['key']}: derived is {entry['derived']!r}, "
+                "which is not a boolean -- a consumer cannot tell a "
+                "subtraction from a figure the filer stated"
+            )
+
+        # --- the counts, which no dropped period can survive ------------
+        expected_total = _PROJECTED_PERIOD_COUNTS[kind]
+        assert len(periods) == expected_total, (
+            f"{kind} projected {len(periods)} periods, expected "
+            f"{expected_total} ({len(filed_keys)} filed + "
+            f"{len(_DERIVED_KEYS_BY_KIND[kind])} derived)"
+        )
+        assert len(periods) == len(filed_keys) + len(_DERIVED_KEYS_BY_KIND[kind]), (
+            f"{kind}: the projected total no longer reconciles with the "
+            "stitched input plus this task's derived quarters"
+        )
+        assert Counter(entry["kind"] for entry in periods) == (
+            _PROJECTED_KIND_COUNTS[kind]
+        ), (
+            f"{kind} kind breakdown is "
+            f"{dict(Counter(entry['kind'] for entry in periods))}, expected "
+            f"{_PROJECTED_KIND_COUNTS[kind]}"
+        )
+
+        # --- exactly the Task E quarters are marked derived -------------
+        derived_keys = sorted(e["key"] for e in periods if e["derived"])
+        assert derived_keys == _DERIVED_KEYS_BY_KIND[kind], (
+            f"{kind}: the periods marked derived are {derived_keys}, "
+            f"expected {_DERIVED_KEYS_BY_KIND[kind]}"
+        )
+        for entry in periods:
+            if entry["derived"]:
+                assert entry["kind"] == "discrete_quarter", (
+                    f"{kind} {entry['key']} is derived but classifies as "
+                    f"{entry['kind']!r} -- a derived Q4 is both a discrete "
+                    "quarter AND derived, on two separate axes"
+                )
+                assert entry["key"] not in filed_keys, (
+                    f"{kind} {entry['key']} is marked derived but the filer "
+                    "states that column"
+                )
+            else:
+                assert entry["key"] in filed_keys, (
+                    f"{kind} {entry['key']} is marked filed but appears in "
+                    "neither the stitched statement's own periods"
+                )
+
+    # The two duration statements' totals must exceed their filed counts, or
+    # the count assertions above would be green on a filed-only projection.
+    for kind in ("income", "cash_flow"):
+        filed = len(stitched[kind]["periods"])
+        assert _PROJECTED_PERIOD_COUNTS[kind] > filed, (
+            f"the expected {kind} total ({_PROJECTED_PERIOD_COUNTS[kind]}) "
+            f"does not exceed its {filed} filed periods, so it proves "
+            "nothing about the derived quarters being carried"
+        )
+
+    # The balance sheet's instants: all of them, and nothing derived.
+    balance = _periods_of(projection, "balance_sheet")
+    assert {entry["kind"] for entry in balance} == {"instant"}
+    assert [entry for entry in balance if entry["derived"]] == [], (
+        "the balance sheet is instant-based -- it carries no duration column "
+        "to difference, so nothing in it may be marked derived"
+    )
+
+
+def test_a_derived_periods_kind_also_comes_from_the_classifier(
+    series, periods_module, period_kind
+):
+    """A DERIVED period's `kind` is READ from Task C's classifier, exactly as a
+    filed one's is -- never assumed from the fact that a subtraction produced
+    it.
+
+    ADDED ROUND 2 ON A QUALITY REVIEW'S MEASUREMENT. The test above pins this
+    for filed periods only: on the committed fixture both derived Q4s classify
+    as `discrete_quarter` anyway, so replacing `period_kind(derived["key"])`
+    with the literal `"discrete_quarter"` survives that test and every other one
+    in this file.
+
+    THE INPUT IS LEGAL, NOT CONTRIVED, which is what makes this a killer rather
+    than a mutation-score exercise. Both spans sit INSIDE Task C's own published
+    windows -- a 100-day Q1 is the top of the `discrete_quarter` window and a
+    175-day six-month column is the bottom of the first `ytd` window, both taken
+    from `span_windows()` here rather than written as literals. A filer whose
+    quarters run long is the whole shape. Their difference is 74 days, which
+    falls in NO window, and Task C answers `unknown` by design rather than
+    bucketing it (plan Decision Log, one-way door #1: an out-of-window span must
+    be VISIBLE). A hardcoded `discrete_quarter` calls it a quarter.
+
+    `"unknown"` IS ASSERTED AS A LITERAL DELIBERATELY, beside the classifier
+    comparison. It is not the expectation -- the classifier is -- it is the
+    guard that this constructed input still exercises the divergence. Plan Task
+    G is scheduled to widen these windows for a 52/53-week calendar; if a
+    widening ever swallows the 74-day gap, this line fails and says to re-pick
+    the two spans rather than leaving the test quietly toothless.
+    """
+    windows = _role_windows_from_task_c(periods_module)
+    q1_span, ytd6_span = windows["q1"][1], windows["ytd6"][0]
+
+    _key_of, statement = _synthetic_statement(
+        date(2024, 1, 1),
+        {"q1": q1_span, "ytd6": ytd6_span},
+        {"Revenue": {"q1": Decimal(30), "ytd6": Decimal(70)}},
+    )
+    projection = series.project_quarterly_series({"income": statement}, "MSFT")
+
+    derived = [
+        entry for entry in _periods_of(projection, "income") if entry["derived"]
+    ]
+    assert len(derived) == 1, (
+        f"a {q1_span}-day Q1 and a {ytd6_span}-day six-month column should "
+        f"yield exactly one derived quarter, got {derived}"
+    )
+    entry = derived[0]
+
+    span = (
+        date.fromisoformat(entry["end"]) - date.fromisoformat(entry["start"])
+    ).days
+    assert period_kind(entry["key"]) == "unknown", (
+        f"the derived period {entry['key']} spans {span} days, which Task C "
+        f"now classifies as {period_kind(entry['key'])!r} rather than "
+        "'unknown' -- the windows moved, so this test no longer distinguishes "
+        "a classifier read from a hardcoded kind; pick two spans whose "
+        "difference again falls outside every window"
+    )
+    assert entry["kind"] == period_kind(entry["key"]), (
+        f"the derived period {entry['key']} projects kind {entry['kind']!r} "
+        f"while the committed classifier answers "
+        f"{period_kind(entry['key'])!r} -- a derived period's kind is read, "
+        "not assumed from its provenance"
+    )
+
+
+def test_every_periods_start_and_end_reconstruct_its_own_key(
+    series, fixture_doc
+):
+    """`start` and `end` bound EXACTLY what the key says, so the arc's one
+    invariant -- a period key's span always describes the span of its value --
+    is readable without re-parsing a composite string.
+
+    Pinned by RECONSTRUCTING the key from the two dates rather than by
+    comparing them to literals: a swapped pair, an off-by-one quarter start,
+    or a derived period carrying its own FY input's dates all fail, and no
+    single hard-coded expectation can satisfy 41 periods at once.
+
+    An INSTANT is a point in time, so it comes back with `start == end ==`
+    its own date rather than with a null half-interval. A consumer computing
+    `end - start` then gets 0 days, which is what an instant's span IS; a
+    `None` would make every consumer branch on the kind before it could read
+    a date at all.
+    """
+    projection = _projection_of(series, fixture_doc)
+
+    seen_duration = seen_instant = 0
+    for kind in _STATEMENT_KINDS:
+        for entry in _periods_of(projection, kind):
+            key, start, end = entry["key"], entry["start"], entry["end"]
+            if key.startswith("instant_"):
+                seen_instant += 1
+                assert start == end == key[len("instant_"):], (
+                    f"{kind} {key}: an instant projects to "
+                    f"({start!r}, {end!r}), expected its own date on both "
+                    "sides -- an instant spans no days"
+                )
+                continue
+            seen_duration += 1
+            assert key == f"duration_{start}_{end}", (
+                f"{kind} {key} projects to start {start!r} and end {end!r}, "
+                "which do not reconstruct the key -- the dates and the key "
+                "disagree about what period this is"
+            )
+            assert start < end, (
+                f"{kind} {key}: start {start!r} is not before end {end!r}"
+            )
+
+    # 19 income + 19 cash-flow duration periods and the balance sheet's 11
+    # instants -- the same three totals `_PROJECTED_PERIOD_COUNTS` pins, split
+    # by which branch of this test they exercise, so neither branch can go
+    # unrun without failing here.
+    assert (seen_duration, seen_instant) == (38, 11), (
+        f"expected 38 duration and 11 instant periods across the three "
+        f"statements, saw {seen_duration} and {seen_instant} -- both branches "
+        "of this test must actually run"
+    )
+
+    # The derived Q4 is the sharpest case: its dates are in NEITHER of its
+    # two inputs, so a projection that copied an input's dates fails here.
+    for kind in ("income", "cash_flow"):
+        q4 = next(
+            entry for entry in _periods_of(projection, kind)
+            if entry["key"] == _FY2025_DERIVED_Q4
+        )
+        assert (q4["start"], q4["end"]) == ("2025-04-01", "2025-06-30"), (
+            f"{kind} derived Q4 spans {q4['start']}..{q4['end']}; its FY "
+            "input starts 2024-07-01 and its nine-month input ends "
+            "2025-03-31, so either would be a copied date rather than the "
+            "quarter's own"
+        )
+
+
+def test_the_envelope_key_sets_are_exact_at_every_level(series, fixture_doc):
+    """Plan Decision Log, ONE-WAY DOOR #2 — the projection reuses the
+    existing pack envelope (`pack` / `ticker` / `fetched_at` / `_status` /
+    `n_filings_used`) with `statements.<kind>.{lines, periods}`, each period
+    carrying exactly `{key, kind, derived, start, end}`.
+
+    ASSERTED AS EXACT KEY SETS, not as "contains". A one-way door is the one
+    contract a later change must not widen quietly: existing consumers and
+    tooling already read this envelope, and an extra field added here is a
+    field they will start depending on before anyone decides it should exist.
+    A missing one fails the same assertion, so the door holds in both
+    directions.
+
+    THE NAME WAS `test_the_envelope_is_the_one_the_user_ratified` UNTIL ROUND
+    2, and the rename is the point of this paragraph rather than housekeeping.
+    Written that way, this test asserted a SIX-key envelope while the user had
+    ratified five — so the one guard against a quiet widening was itself
+    ratifying the widening it existed to catch, under a name claiming an
+    approval that did not exist. The user has since ratified `n_filings_used`
+    (plan Decision Log, one-way door #2, widened 2026-07-31), so the assertion
+    is now correct; the name still had to go, because a name that says WHO
+    APPROVED cannot be checked by running it, while a name that says WHAT IS
+    CHECKED can. The same instinct is already on record one screen up
+    (`test_derived_q4_revenue_matches_the_recorded_cross_implementation_
+    figure` declined the plan's own name for claiming more than the evidence
+    supports) — applied there and not here, in the same file, by the same
+    author.
+
+    NO `label` ON A PERIOD, deliberately, and this is the one omission worth
+    stating. The stitched result carries the filer's own period labels and
+    they are exactly what this arc learned not to read: `discrete_quarters=
+    True` produced SIX label collisions on this filer, where a cumulative and
+    a discrete column shared one label. That six is MEASURED-not-repo —
+    counted against the deliberately uncommitted `True`-mode capture (module
+    docstring), so a later reader cannot re-derive it from anything in this
+    repo; nothing here rests on the exact figure, only on many-versus-zero.
+    `kind` is the machine-readable answer that replaces the labels, and adding
+    the label back beside it would re-offer the collision as if it were data.
+
+    `n_filings_used` rides through from the stitched input because it is the
+    only thing in the answer that reports its own INPUT -- a caller whose
+    acquire loop lost an accession needs it to tell a full span from a
+    partial one, and this projection is the last layer that can carry it. It
+    is ABSENT rather than fabricated when the input does not carry it (the
+    doctrine `kpi_spine_view.derive_spine_as_filed` states for its own
+    optional markers): a zero would claim a run that used no filings.
+    """
+    projection = _projection_of(series, fixture_doc, "MSFT")
+
+    assert set(projection) == {
+        "pack", "ticker", "fetched_at", "_status", "n_filings_used",
+        "statements",
+    }, f"the envelope's top-level keys are {sorted(projection)}"
+    assert projection["pack"] == "quarterly-series"
+    assert projection["ticker"] == "MSFT"
+    assert projection["_status"] == "ok"
+    assert projection["n_filings_used"] == fixture_doc["n_filings"] == 11
+
+    stamped = datetime.fromisoformat(projection["fetched_at"])
+    assert stamped.tzinfo is not None, (
+        f"fetched_at {projection['fetched_at']!r} carries no timezone, so it "
+        "cannot be compared against any other run's"
+    )
+    assert stamped.utcoffset() == timedelta(0), (
+        f"fetched_at {projection['fetched_at']!r} is not UTC; every other "
+        "pack in this repo stamps UTC"
+    )
+
+    assert set(projection["statements"]) == set(_STATEMENT_KINDS)
+    for kind in _STATEMENT_KINDS:
+        assert set(projection["statements"][kind]) == {"lines", "periods"}, (
+            f"{kind} projects "
+            f"{sorted(projection['statements'][kind])}, expected exactly "
+            "lines and periods"
+        )
+        for entry in _periods_of(projection, kind):
+            assert set(entry) == {"key", "kind", "derived", "start", "end"}, (
+                f"{kind} {entry.get('key')!r} projects the fields "
+                f"{sorted(entry)}, which is not the ratified period shape"
+            )
+
+    # A stitched result with no filing count reported: the key is left out,
+    # never zero-filled.
+    bare = series.project_quarterly_series(fixture_doc["statements"], "MSFT")
+    assert "n_filings_used" not in bare, (
+        "an input that never reported a filing count came back claiming "
+        f"{bare.get('n_filings_used')!r} filings"
+    )
+
+
+def test_each_line_carries_the_derived_cells_beside_the_filed_ones(
+    series, fixture_doc
+):
+    """A period the projection ANNOUNCES must be a period a reader can read a
+    figure from. The period axis says a derived Q4 exists; the lines are
+    where its numbers live, and a projection that listed the period and
+    dropped its cells would be an answer shaped like a series with a hole in
+    it.
+
+    Three things are pinned, and the third is the one a values-only test
+    would miss:
+
+      1. Every stitched line survives, in order and with its filed cells
+         untouched -- this is a projection of the filer's statement, not a
+         rewrite of it.
+      2. Every derived figure Task E produced appears under the derived
+         period's own key, on the line that produced it.
+      3. The COUNT of lines carrying each derived key equals the number of
+         figures Task E produced for it. A cell invented for a line that
+         carried only one of the two inputs is exactly the fabricated zero
+         Task E refuses to emit, and it would satisfy assertion 2.
+
+    VALUES STAY `Decimal`, as they arrive from the subtraction. Projecting
+    them to text or to float belongs at the CLI boundary, which is where
+    `kpi_spine_view` puts the same projection for the same reason
+    (`_project_money_to_text`: `float()` re-routes exact money through the
+    binary representation this module family bans, and a `default=str` dump
+    would stringify a float just as happily). Plan Task H owns that boundary;
+    this function must not pre-empt it, because a consumer in-process wants
+    the exact number.
+    """
+    stitched = series.stitch_quarterly_statements(_fake_filings(fixture_doc))
+    derived = series.derive_discrete_quarters(stitched)
+    projection = series.project_quarterly_series(stitched, "MSFT")
+
+    for kind in _STATEMENT_KINDS:
+        lines = projection["statements"][kind]["lines"]
+        rows = stitched[kind]["statement_data"]
+
+        # 1. every filed line and cell, in order and unchanged
+        assert [line.get("concept") for line in lines] == [
+            row.get("concept") for row in rows
+        ], f"{kind}: the projected lines are not the statement's own lines"
+        for line, row in zip(lines, rows):
+            for filed_key, filed_value in (row.get("values") or {}).items():
+                assert line["values"][filed_key] == filed_value, (
+                    f"{kind} {line.get('concept')}: the filed cell at "
+                    f"{filed_key} came back {line['values'][filed_key]!r}, "
+                    f"not the filer's own {filed_value!r}"
+                )
+
+        by_concept = {line.get("concept"): line for line in lines}
+        for entry in derived[kind]:
+            # 2. every derived figure, on its own line, still exact
+            for concept, value in entry["values"].items():
+                cell = by_concept[concept]["values"][entry["key"]]
+                assert cell == value and isinstance(cell, Decimal), (
+                    f"{kind} {concept} at {entry['key']}: projected "
+                    f"{cell!r} ({type(cell).__name__}), expected the exact "
+                    f"Decimal {value!r} the subtraction produced"
+                )
+            # 3. and NOT ONE CELL MORE
+            carrying = [
+                line.get("concept") for line in lines
+                if entry["key"] in line["values"]
+            ]
+            assert len(carrying) == len(entry["values"]), (
+                f"{kind} {entry['key']}: {len(carrying)} lines carry this "
+                f"derived period but the subtraction produced only "
+                f"{len(entry['values'])} figures -- the surplus cells were "
+                "invented for lines that carried only one input"
+            )
+
+    # The measured shape, so a silent collapse of either axis is visible:
+    # 19 income lines, 40 in each of the other two, and 15 / 32 derived
+    # figures per Q4.
+    assert [
+        len(projection["statements"][kind]["lines"]) for kind in _STATEMENT_KINDS
+    ] == [19, 40, 40]
+    assert [len(entry["values"]) for entry in derived["income"]] == [15, 15]
+    assert [len(entry["values"]) for entry in derived["cash_flow"]] == [32, 32]
+
+
+def _statements_with(fixture_doc, *kinds: str) -> dict:
+    """The captured statements with only `kinds` populated; the rest present
+    but EMPTY -- the shape a stitched result takes when the stitcher returned
+    a statement kind with no periods at all."""
+    statements = copy.deepcopy(fixture_doc["statements"])
+    for kind in _STATEMENT_KINDS:
+        if kind not in kinds:
+            statements[kind] = {"periods": [], "statement_data": []}
+    return statements
+
+
+@pytest.mark.parametrize(
+    "populated,expected",
+    [
+        (("income", "balance_sheet", "cash_flow"), "ok"),
+        (("income", "cash_flow"), "partial"),
+        (("balance_sheet",), "partial"),
+        ((), "failed"),
+    ],
+)
+def test_status_reports_which_statements_actually_came_back(
+    series, fixture_doc, populated, expected
+):
+    """`_status` is the envelope's own verdict on itself, and it exists
+    because an EMPTY statement projects to exactly the same shape as a full
+    one: three kinds, each with `lines` and `periods`, all well-formed. That
+    is the silent-truncation failure this module family already guards
+    against from the other direction (`stitch_quarterly_statements` refuses an
+    empty filing list rather than returning a fully-shaped nothing).
+
+    Three values, matching what the pack envelope already means elsewhere in
+    this repo (`pack_us.py` builds `ok` / `partial` / `failed` from its own
+    per-item counts): every kind answered, some did, none did.
+
+    ALL FOUR ROWS ARE ASSERTED, including `failed`, because a status that
+    only ever reads `ok` in the tests is a field nobody has checked can say
+    anything else.
+    """
+    projection = series.project_quarterly_series(
+        _statements_with(fixture_doc, *populated), "MSFT"
+    )
+
+    assert projection["_status"] == expected, (
+        f"with {list(populated) or 'no'} statement(s) populated the "
+        f"projection reports {projection['_status']!r}, expected {expected!r}"
+    )
+    # Whatever the status, the SHAPE is unchanged -- which is precisely why
+    # the status has to carry the news.
+    assert set(projection["statements"]) == set(_STATEMENT_KINDS)
+    for kind in _STATEMENT_KINDS:
+        assert set(projection["statements"][kind]) == {"lines", "periods"}
+
+
+def test_status_counts_periods_not_lines(series, fixture_doc):
+    """`_status` reads the PERIOD axis. A statement kind that came back with
+    rows but with no period to read them under has answered NOTHING.
+
+    ADDED ROUND 2 ON A QUALITY REVIEW'S MEASUREMENT. The parametrized test
+    above cannot see which field is counted: its `_statements_with` helper
+    empties `periods` and `statement_data` together, so a `_status` that
+    counted `lines` instead agrees with it on all four rows. The shape that
+    separates them is rows-without-periods, which no captured statement has --
+    hence constructed here, from the real capture's own rows so the lines are
+    genuinely non-empty.
+
+    WITH ALL THREE KINDS IN THAT SHAPE the two readings give OPPOSITE verdicts:
+    every kind has lines, so a lines-counting status reports `ok` -- a payload
+    announcing a complete answer whose every period axis is empty. The correct
+    answer is `failed`. This is the same silent-truncation family the envelope's
+    `_status` exists for: a full answer and an empty one are the same shape, and
+    a status field that reads the wrong axis makes it worse than none, because
+    it says so out loud.
+    """
+    statements = {
+        kind: {
+            "periods": [],
+            "statement_data": copy.deepcopy(
+                fixture_doc["statements"][kind]["statement_data"]
+            ),
+        }
+        for kind in _STATEMENT_KINDS
+    }
+
+    projection = series.project_quarterly_series(statements, "MSFT")
+
+    for kind in _STATEMENT_KINDS:
+        view = projection["statements"][kind]
+        assert view["lines"], (
+            f"{kind} projected no lines, so this input no longer distinguishes "
+            "a period count from a line count"
+        )
+        assert view["periods"] == [], (
+            f"{kind} projected {len(view['periods'])} periods from a statement "
+            "that carries none"
+        )
+    assert projection["_status"] == "failed", (
+        "three statements carrying rows but not one readable period report "
+        f"{projection['_status']!r} -- a status counting lines rather than "
+        "periods calls that a complete answer"
+    )
+
+
+def test_projection_does_not_mutate_the_statements_it_is_given(series):
+    """The stitched statements are the caller's. A projection that wrote its
+    derived cells into the input rows would be the arc's own defect one layer
+    up -- a derivation filed in place, over the columns it read.
+
+    THE BASELINE IS READ FRESH FROM THE FIXTURE FILE, for the reason
+    docs/loom/memory/a-no-mutation-test-cannot-baseline-off-shared-fixture-state.md
+    records: `fixture_doc` is MODULE-SCOPED and every projection test above
+    has already run over its rows -- and this suite's `_FakeXBRLS` hands
+    those rows back BY REFERENCE, so a projection that aliased them would
+    have written its cells into that shared dict before this test could
+    snapshot it. A `copy.deepcopy(fixture_doc[...])` baseline inherits the
+    same pollution. Only an input the module has provably never seen is a
+    trustworthy baseline.
+
+    MEASURED, not argued: with the projection sharing the caller's row dicts
+    rather than copying them, this test fails and names the derived Q4 key it
+    wrote into the input's own `values`.
+    """
+    pristine = json.loads(FIXTURE_PATH.read_text())["statements"]
+    before = copy.deepcopy(pristine)
+
+    projection = series.project_quarterly_series(pristine, "MSFT")
+
+    assert pristine == before, (
+        "project_quarterly_series mutated the statements it was handed"
+    )
+    # And the answer is not a VIEW onto them either: editing what came back
+    # must not reach the input.
+    projection["statements"]["income"]["lines"][0]["values"]["probe"] = 1
+    assert pristine == before, (
+        "editing the projection reached back into the caller's statements, "
+        "so the two share row objects"
+    )
+
+
+@pytest.mark.parametrize("reverse_input", [False, True])
+def test_periods_come_back_newest_first_with_each_derived_quarter_in_place(
+    series, fixture_doc, reverse_input
+):
+    """Periods are ordered END DESCENDING, then SHORTEST SPAN FIRST -- one
+    rule for filed and derived alike, so a derived quarter sits with the
+    periods it belongs among rather than in an appendix at the end.
+
+    THE RULE IS NOT INVENTED HERE: it is what the stitcher itself returns.
+    Measured on the committed capture, sorting the filed periods this way
+    reproduces their stitched order EXACTLY, in all three statements -- so
+    the projection re-orders nothing a reader had already learned to expect,
+    and part 1 below asserts that against the untouched input rather than
+    against a literal ordering.
+
+    Where the derived Q4 lands is the consequence that matters: it ends on
+    the same day as its own FY column and spans 90 days rather than 364, so
+    it comes immediately BEFORE it -- next to the quarters it is comparable
+    with. Appending derived periods after the filed ones would leave every
+    other assertion in this file green.
+
+    Run over the stitched input BOTH WAYS. A projection that merely preserved
+    input order would pass the forward case and fail reversed; the ordering
+    has to be the projection's own answer, not an inherited one.
+    """
+    stitched = series.stitch_quarterly_statements(_fake_filings(fixture_doc))
+    if reverse_input:
+        for kind in _STATEMENT_KINDS:
+            stitched[kind]["periods"] = list(reversed(stitched[kind]["periods"]))
+    projection = series.project_quarterly_series(stitched, "MSFT")
+
+    for kind in _STATEMENT_KINDS:
+        keys = [entry["key"] for entry in _periods_of(projection, kind)]
+        ends = [entry["end"] for entry in _periods_of(projection, kind)]
+        spans = [
+            (date.fromisoformat(entry["end"]) - date.fromisoformat(entry["start"])).days
+            for entry in _periods_of(projection, kind)
+        ]
+        ordering = list(zip([-date.fromisoformat(e).toordinal() for e in ends], spans))
+        assert ordering == sorted(ordering), (
+            f"{kind}: the projected periods are not newest-end-first, "
+            f"shortest-span-first: {keys}"
+        )
+
+        # 1. For the FILED periods alone, that ordering IS the stitcher's own.
+        filed_projected = [
+            entry["key"] for entry in _periods_of(projection, kind)
+            if not entry["derived"]
+        ]
+        stitched_order = [
+            entry[0] for entry in fixture_doc["statements"][kind]["periods"]
+        ]
+        assert filed_projected == stitched_order, (
+            f"{kind}: the filed periods came back in a different order than "
+            f"the stitcher returned them.\n  got: {filed_projected}\n  "
+            f"stitched: {stitched_order}"
+        )
+
+    # 2. Each derived Q4 immediately precedes the FY column it was
+    # subtracted out of -- same end date, one quarter instead of a year.
+    for kind in ("income", "cash_flow"):
+        keys = [entry["key"] for entry in _periods_of(projection, kind)]
+        assert keys.index(_FY2025_DERIVED_Q4) + 1 == keys.index(_FY2025_FY), (
+            f"{kind}: the derived Q4 {_FY2025_DERIVED_Q4} is at position "
+            f"{keys.index(_FY2025_DERIVED_Q4)} and its own FY column at "
+            f"{keys.index(_FY2025_FY)}; they end on the same day, so the "
+            "quarter belongs immediately before the year"
+        )
+
+
+def test_a_period_key_with_no_readable_dates_still_projects_and_sorts_last(
+    series
+):
+    """A period key this module cannot read as dates is still PROJECTED --
+    with `kind: "unknown"` and no dates -- and sorts to the end.
+
+    Skipping it would be the worse answer: the column exists in the filer's
+    statement and its cells are in the lines, so dropping it from the period
+    axis would leave figures no period accounts for. Task C already answers
+    `unknown` rather than bucketing such a key, and this is the same posture
+    one layer up -- VISIBLE, never rounded to a neighbour and never silently
+    gone.
+
+    It sorts LAST because there is nothing to sort it by: an ordering rule
+    reading dates it does not have would have to invent them.
+
+    CONSTRUCTED: every period key in the committed capture is well-formed, so
+    nothing captured exercises this at all.
+    """
+    start = date(2023, 7, 1)
+    key_of, statement = _synthetic_statement(
+        start,
+        {"q1": 91, "ytd6": 183, "ytd9": 273, "fy": 364},
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": 30, "ytd9": 60, "fy": 100}},
+    )
+    statement["periods"].append(["duration_2024-07-01_2025-06-31", "no such day"])
+
+    projection = series.project_quarterly_series({"income": statement}, "MSFT")
+    entries = _periods_of(projection, "income")
+
+    unreadable = entries[-1]
+    assert unreadable["key"] == "duration_2024-07-01_2025-06-31", (
+        f"the unreadable key did not sort last: "
+        f"{[entry['key'] for entry in entries]}"
+    )
+    assert (unreadable["kind"], unreadable["start"], unreadable["end"]) == (
+        "unknown", None, None,
+    ), f"the unreadable key projected as {unreadable}"
+    # And it cost the statement nothing else: the four filed columns and the
+    # three derivable quarters are all still there.
+    assert len(entries) == len(key_of) + 3 + 1
+
+
+def test_the_ticker_is_normalised_and_a_missing_one_is_refused(
+    series, fixture_doc
+):
+    """The envelope's `ticker` is the projection's only statement of WHOSE
+    numbers these are, so it is normalised on the way in and refused when it
+    is not there.
+
+    NORMALISED to upper case, because every other pack in this repo stamps it
+    that way (`pack_us.py`'s own envelope does `ticker.upper()`), and a
+    consumer keying two runs of the same filer by this field would otherwise
+    hold `msft` and `MSFT` as two companies.
+
+    REFUSED when blank -- loudly, not by emitting an empty string. This is
+    the same asymmetry `stitch_quarterly_statements` already draws for an
+    empty filing list: a fully-shaped payload attributed to nobody is
+    indistinguishable from a real one, and the whole point of this envelope
+    is that a reader can tell what they are looking at. Whitespace counts as
+    blank; a ticker of spaces is not a filer.
+    """
+    projection = series.project_quarterly_series(fixture_doc["statements"], "msft")
+    assert projection["ticker"] == "MSFT", (
+        f"a lower-case ticker projected as {projection['ticker']!r}, so two "
+        "runs of one filer would key as two companies"
+    )
+
+    for blank in ("", "   "):
+        with pytest.raises(ValueError):
+            series.project_quarterly_series(fixture_doc["statements"], blank)

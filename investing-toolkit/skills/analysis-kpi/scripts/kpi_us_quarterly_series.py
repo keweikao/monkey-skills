@@ -110,6 +110,64 @@ side only; per plan Task H, Acceptance, the end-to-end seam is exercised
 solely by a ONE-OFF LIVE RUN. So the two halves are joined by a live run
 and by these two docstrings agreeing -- not by any offline test.
 
+THE SERIES GETS ITS OWN PROJECTION (plan Task F), NOT A ROW IN THE ANNUAL
+ONE. `project_quarterly_series` below is the answer a consumer reads, and it
+is deliberately not an extension of `kpi_spine_view`'s `derive-as-filed`
+(brief Open Question 1, resolved by the user): that view has no period-type
+concept, and quarterly period semantics -- discrete / year-to-date / derived
+-- would show an annual reader markings that mean nothing there. This module
+does not import `kpi_spine_view` and does not touch it; that view has its
+own suite (`tests/analysis/test_kpi_spine_view.py`), which is what guards it.
+
+WHAT THE PROJECTION ADDS, in one sentence: every period says WHAT IT IS.
+Nothing in the stitched result does -- periods exist only as composite key
+strings (`duration_2024-07-01_2025-06-30`) and there is no period-type field
+anywhere in the row schema, so meaning has to be inferred from a day span by
+every consumer separately, or not at all (brief, Current State Evidence). The
+projection answers it once, on two orthogonal axes: `kind` from Task C's
+classifier, and `derived` beside it as a SEPARATE BOOLEAN (plan Decision Log,
+one-way door #1).
+
+THE ENVELOPE IS RATIFIED, NOT CHOSEN HERE (one-way door #2): `pack` /
+`ticker` / `fetched_at` / `_status` / `n_filings_used`, with
+`statements.<kind>.{lines, periods}` and each period
+`{key, kind, derived, start, end}`.
+
+`n_filings_used` IS A WIDENING of that door, ratified by the user 2026-07-31
+(plan Decision Log, one-way door #2). It is stated here because this module
+adds it and an earlier version of this paragraph claimed the opposite -- "no
+field of this module's own is added" -- while the code below added one. What
+earns the widening: it is the only field in the answer that reports the
+answer's own INPUT, and without it an acquire loop that lost an accession
+(plan Task J) produces a short series shaped exactly like a complete one,
+which is this arc's recurring defect. The field is carried THROUGH from the
+stitched input, never computed here, and is left ABSENT rather than zeroed
+when the input reports no count. Nothing further may be added on this
+module's own authority -- the correction above is what the last unratified
+addition cost.
+
+VALUES STAY `Decimal` THROUGH THIS LAYER, and plan Task H must project them
+to text EXPLICITLY at the verb. Projecting money to text belongs at the CLI
+boundary: `float()` routes an exact decimal back through the binary
+representation this module family bans on money.
+
+WHAT THE FACADE DOES WITH A STRAY `Decimal` IS SILENT, NOT LOUD -- state it
+plainly, because a wrong reason attached to a right decision is how the next
+person removes the decision. `pack.py`'s `_emit` is
+`print(json.dumps(obj, indent=2, default=str))` (`pack.py:439-440`, opened
+2026-07-31), so a `Decimal` that reaches the pack facade is stringified
+without complaint. This module's own `Decimal`s therefore do NOT fail loud
+downstream, and the projection at the verb cannot be left to that fallback.
+The contrast that makes the reason concrete: `kpi_spine_view` dumps BARE
+(`json.dump(_project_money_to_text(view), sys.stdout, ensure_ascii=False)`,
+`kpi_spine_view.py:1359`), so a `Decimal` its own projection missed really
+does raise there. The repo has ruled on exactly this twice, and both rulings
+turn on the same sentence -- the `default=str` fallback "would equally
+happily serialize a float", so it must never be what keeps money exact:
+`pack_us.py:1296-1312` (`_decimal_text`) and `kpi_spine_view.py:1301-1307`
+(`_project_money_to_text`). An in-process consumer wants the exact number;
+the verb owns turning it into text.
+
 `edgar` IS IMPORTED LOCALLY, inside `_build_xbrls` below, never at module
 level -- mirroring `sec_edgar_client.py`'s own convention (verified
 2026-07-30: all four of its `import edgar` sites are function-local, none at
@@ -123,9 +181,10 @@ against a duck-typed stand-in, without installing the dependency.
 """
 from __future__ import annotations
 
+import copy
 import importlib
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -276,6 +335,18 @@ _PERIODS_MODULE = "kpi_us_quarterly_periods"
 _ROLES_IN_SPAN_ORDER = ("q1", "ytd6", "ytd9", "fy")
 
 
+def _periods_module():
+    """Task C's committed module object, imported lazily on first use.
+
+    Both readers go through here -- the role windows below and the projection
+    further down -- so there is ONE import site, and a test that patches Task
+    C's accessor on `sys.modules[_PERIODS_MODULE]` reaches both.
+    """
+    if str(_SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPT_DIR))
+    return importlib.import_module(_PERIODS_MODULE)
+
+
 def _role_windows() -> dict[str, tuple[int, int]]:
     """`{role: (low, high)}` for the four cumulative roles, taken from Task C's
     public `span_windows()`.
@@ -289,10 +360,7 @@ def _role_windows() -> dict[str, tuple[int, int]]:
     see `_reject_overlapping_role_windows` for why that is a refusal rather than
     a best effort.
     """
-    if str(_SCRIPT_DIR) not in sys.path:
-        sys.path.insert(0, str(_SCRIPT_DIR))
-    periods = importlib.import_module(_PERIODS_MODULE)
-    windows = periods.span_windows()
+    windows = _periods_module().span_windows()
 
     ytd = sorted(windows["ytd"], key=lambda span: span[0])
     if len(ytd) != 2:
@@ -641,3 +709,230 @@ def derive_discrete_quarters(statements: Any) -> dict[str, list[dict[str, Any]]]
         kind: _derive_one_statement((statements or {}).get(kind), windows)
         for kind in _STATEMENT_TYPE_OF
     }
+
+
+# ==========================================================================
+# The series' own projection (plan Task F)
+# ==========================================================================
+
+
+_INSTANT_PREFIX = "instant_"
+
+# The envelope's own `pack` token. Plan Task H registers the CLI verb that
+# returns this projection, and the two must read the same -- a payload whose
+# `pack` names a verb nobody can run is unlocatable provenance.
+_PACK_NAME = "quarterly-series"
+
+
+def _bounds_text(period_key: str) -> tuple[str | None, str | None]:
+    """`(start, end)` as ISO text for a FILED period key, or `(None, None)`
+    when the key carries no readable dates.
+
+    An INSTANT answers with its own date on BOTH sides. An instant is a point
+    in time, so it spans zero days, and saying that is more useful than a half
+    interval: a consumer can subtract the two dates of any period without
+    first branching on its kind. `(None, None)` is reserved for a key whose
+    dates cannot be read at all -- never invented, and never rounded to a
+    neighbouring period, for the same reason Task C answers `unknown` rather
+    than bucketing an out-of-window span.
+    """
+    if period_key.startswith(_INSTANT_PREFIX):
+        try:
+            moment = date.fromisoformat(period_key[len(_INSTANT_PREFIX):])
+        except ValueError:
+            return None, None
+        return moment.isoformat(), moment.isoformat()
+    bounds = _duration_bounds(period_key)
+    if bounds is None:
+        return None, None
+    return bounds[0].isoformat(), bounds[1].isoformat()
+
+
+def _project_periods(
+    statement: Any, derived_entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The period axis of one statement: every filed column and every derived
+    quarter, each saying WHAT IT IS.
+
+    `kind` comes from Task C's classifier -- the same reader every downstream
+    consumer uses -- rather than from a second bucketing written here, and
+    `derived` is a separate boolean beside it, never folded into `kind`.
+
+    A FILED period's `start`/`end` are read from its own key, which is the
+    only statement of its span the stitched result carries. A DERIVED one's
+    are taken from the subtraction that produced it rather than re-parsed from
+    its key.
+
+    THAT IS A PROVENANCE PREFERENCE, NOT A CROSS-CHECK, and saying otherwise
+    was wrong: an earlier version of this docstring claimed the two are
+    "computed independently", so that carrying the subtraction's own answer
+    keeps key and bounds checkable against each other. They are not
+    independent. `_derive_one_quarter` builds the key as an f-string of the
+    same two `date` objects it writes to `start`/`end`, so `key ==
+    f"duration_{start}_{end}"` holds by construction for every derived period
+    and no test can fail on it. Measured 2026-07-31: swapping this branch for
+    `_bounds_text(derived["key"])` -- the exact substitution the old claim said
+    was avoided -- leaves the whole suite green.
+
+    What this branch actually buys is one less parse of a string this module
+    just formatted, and a `start`/`end` that stays correct if the key format
+    ever changes. What guards the derived bounds is not this choice but the
+    key LITERALS the tests assert (`duration_2025-04-01_2025-06-30` and its
+    FY2024 sibling), which come from the plan's own arithmetic on the two
+    input columns.
+    """
+    period_kind = _periods_module().period_kind
+    entries = []
+    for filed in (statement or {}).get("periods") or []:
+        key = filed[0]
+        start, end = _bounds_text(key)
+        entries.append({
+            "key": key,
+            "kind": period_kind(key),
+            "derived": False,
+            "start": start,
+            "end": end,
+        })
+    for derived in derived_entries:
+        entries.append({
+            "key": derived["key"],
+            "kind": period_kind(derived["key"]),
+            "derived": True,
+            "start": derived["start"],
+            "end": derived["end"],
+        })
+    return sorted(entries, key=_period_sort_key)
+
+
+def _period_sort_key(entry: dict[str, Any]) -> tuple[int, int, int]:
+    """Newest END first, then SHORTEST SPAN first; periods with no readable
+    dates last, in the order they arrived.
+
+    NOT AN ORDER INVENTED HERE. Measured on this arc's committed capture,
+    this rule reproduces the stitcher's own period order exactly, in all
+    three statements -- so the projection re-orders nothing a reader of the
+    stitched output had already learned to expect. What it adds is a place
+    for the DERIVED quarters: a derived Q4 ends on the same day as the fiscal
+    year it was subtracted out of and spans a quarter rather than a year, so
+    it lands immediately before that column, among the periods it is
+    comparable with. Appending them after the filed ones would have been
+    cheaper and would put a quarter of 2025 after a quarter of 2023.
+
+    A period whose dates could not be read sorts LAST because there is
+    nothing to sort it by; `sorted` is stable, so those keep their arrival
+    order rather than being shuffled by a tiebreak that means nothing.
+    """
+    if entry["start"] is None or entry["end"] is None:
+        return (1, 0, 0)
+    start = date.fromisoformat(entry["start"])
+    end = date.fromisoformat(entry["end"])
+    return (0, -end.toordinal(), (end - start).days)
+
+
+def _project_lines(
+    statement: Any, derived_entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The lines of one statement -- the filer's own rows, in the filer's own
+    order, each carrying its derived cells beside its filed ones.
+
+    A DEEP COPY of every row. The caller's stitched statements stay untouched
+    (the defect this arc replaced is a derivation written back over its own
+    inputs, plan §RESOLVED FINDING), and a consumer editing the projection
+    cannot reach back through it into them.
+
+    A derived figure lands on the line that produced it and NOWHERE ELSE: a
+    line the subtraction skipped -- because it carried only one of the two
+    input columns -- gets no cell here either, since inventing one would be
+    the fabricated zero Task E refuses to emit, wearing a real period's key.
+
+    PROVENANCE LIVES ON THE PERIOD AXIS, not here: a cell does not say
+    whether it was filed or derived, because its period already does, once,
+    for every line at once. That is what one-way door #1's two orthogonal
+    axes buy -- `derived` beside `kind`, both on the period.
+    """
+    rows = [
+        copy.deepcopy(row) for row in (statement or {}).get("statement_data") or []
+    ]
+    by_concept: dict[Any, dict[str, Any]] = {}
+    for row in rows:
+        by_concept.setdefault(row.get("concept"), row)
+    for entry in derived_entries:
+        for concept, value in entry["values"].items():
+            row = by_concept.get(concept)
+            if row is None:
+                continue
+            row.setdefault("values", {})[entry["key"]] = value
+    return rows
+
+
+def _projection_status(projected: dict[str, Any]) -> str:
+    """`"ok"` / `"partial"` / `"failed"` -- how many of the three statement
+    kinds came back with any period at all.
+
+    THE ENVELOPE'S SHAPE CANNOT REPORT THIS ON ITS OWN, which is the whole
+    reason the field exists: a statement kind the stitcher answered with
+    nothing projects to `{"lines": [], "periods": []}`, which is as
+    well-formed as a complete one and as easy to read straight past. The
+    three values mean what they already mean elsewhere in this repo's pack
+    envelope (`pack_us.py`): every kind answered, some did, none did.
+    """
+    answered = sum(1 for view in projected.values() if view["periods"])
+    if answered == len(projected):
+        return "ok"
+    return "partial" if answered else "failed"
+
+
+def project_quarterly_series(statements: Any, ticker: str) -> dict[str, Any]:
+    """The quarterly series in this toolkit's own output shape (plan Task F).
+
+    Takes `stitch_quarterly_statements`' return value, derives the quarters
+    the filings do not state, and answers with every period labelled.
+
+    THE ENVELOPE IS RATIFIED, NOT CHOSEN HERE (plan Decision Log, one-way
+    door #2): the existing pack envelope `pack` / `ticker` / `fetched_at` /
+    `_status` / `n_filings_used`, with `statements.<kind>.{lines, periods}`
+    and each period `{key, kind, derived, start, end}`. Existing consumers and
+    tooling already read that envelope, and `n_filings_used` is the ONE field
+    this projection adds to it -- ratified by the user 2026-07-31, not chosen
+    here either (see the module docstring for what earns it). It is carried
+    through from the stitched input rather than invented, and left ABSENT when
+    the input reports no count.
+
+    RAISES `ValueError` on a blank ticker, which is a refusal, not a
+    projection of nothing. A payload attributed to nobody is shaped exactly
+    like a real one, so returning it would put an unattributable series into a
+    consumer's hands -- the same reason `stitch_quarterly_statements` refuses
+    an empty filing list rather than answering with a well-formed nothing.
+    """
+    if not (ticker or "").strip():
+        raise ValueError(
+            "project_quarterly_series: ticker is empty, so this projection "
+            "would carry no statement of whose numbers it holds. A payload "
+            "attributed to nobody is shaped exactly like a real one -- the "
+            "same reason an empty filing list is refused rather than "
+            "returned as a well-formed nothing."
+        )
+
+    derived = derive_discrete_quarters(statements)
+    projected = {
+        kind: {
+            "lines": _project_lines(
+                (statements or {}).get(kind), derived[kind]
+            ),
+            "periods": _project_periods(
+                (statements or {}).get(kind), derived[kind]
+            ),
+        }
+        for kind in _STATEMENT_TYPE_OF
+    }
+    envelope = {
+        "pack": _PACK_NAME,
+        "ticker": ticker.upper(),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "_status": _projection_status(projected),
+    }
+    n_filings_used = (statements or {}).get("n_filings_used")
+    if n_filings_used is not None:
+        envelope["n_filings_used"] = n_filings_used
+    envelope["statements"] = projected
+    return envelope
