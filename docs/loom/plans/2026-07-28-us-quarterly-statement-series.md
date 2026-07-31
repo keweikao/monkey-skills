@@ -187,15 +187,25 @@ quarter is via the keys direction 乙 rejects, or via labels that collide six wa
 
 - **Description**: Wrap `_acquire_raw_filing` with a disk cache keyed by
   accession. Filings are immutable, so the cache has no TTL — existence is
-  validity. Cache the raw document, not the parsed object.
+  validity. ~~Cache the raw document, not the parsed object.~~ **Struck
+  2026-07-31** — there is no document at this seam; see the RESOLVED note below and
+  Decision Log #3. Cache the five values that rebuild the object.
+  **RESOLVED 2026-07-31.** A pre-dispatch note here claimed the cache had to sit on
+  "the DOCUMENT the object is built from" and that a `Filing` is not serialisable.
+  An implementer measured both to be false and returned `NEEDS_CONTEXT` before
+  writing any code; the user re-decided the on-disk format (Decision Log #3, which
+  now carries the full finding). **`_acquire_raw_filing`'s return shape does NOT
+  change** — a cache hit reconstructs an `edgar.Filing` from the five stored fields,
+  so `fetch_narrative_sections` and `acquire_filing` are untouched, and
+  `get_by_accession_number` is simply never called on a hit.
 - **Module**: investing-toolkit/skills/data-markets/scripts/sec_edgar_client.py
-- **Files touched**: investing-toolkit/skills/data-markets/scripts/sec_edgar_client.py, investing-toolkit/tests/data/test_raw_filing_cache.py
+- **Files touched**: investing-toolkit/skills/data-markets/scripts/sec_edgar_client.py, investing-toolkit/tests/data/test_raw_filing_cache.py, investing-toolkit/tests/data/test_sec_narrative.py, investing-toolkit/tests/test_exhibit_fetch.py (**last two added 2026-07-31** — `company` is one of the five values `edgar.Filing.__init__` requires, so the cache payload reads it; three pre-existing doubles omitted it and raise on a missing attribute by their own `fixtures-mirror-producer-shape` doctrine. Three added lines, no behaviour changed. **Third instance of this on this branch** — Task D's list gained its capture script, Task I's gained its own "exactly as Task D's was", and now this; the pattern is that a task's real file set is only knowable once the code exists.)
 - **Context paths**:
   - investing-toolkit/skills/data-markets/scripts/sec_edgar_client.py
   - investing-toolkit/skills/data-markets/scripts/cache_util.py
 - **Acceptance**:
-  - **RED**: `test_second_acquire_of_same_accession_does_not_refetch` — a spy on the fetch path records exactly one call across two `_acquire_raw_filing` invocations for one accession.
-  - **GREEN**: the spy records one fetch; a third invocation in a fresh process also records zero fetches (disk hit).
+  - **RED**: `test_second_acquire_of_same_accession_does_not_refetch` — a spy on the network path records exactly ONE call across two `_acquire_raw_filing` invocations for the same accession, and the second call returns something satisfying the same `.obj()` / `.form` / `.cik` / `.filing_date` surface as the first. **Both halves are required**: a cache that returns a hit of the wrong shape would satisfy the call count alone, and this arc's recurring defect is exactly a wrong answer with the right shape.
+  - **GREEN (restated 2026-07-31 — the original said "a third invocation in a fresh process also records zero fetches", which no test in a pytest process can execute; an implementer would have had to either fake it or silently drop it)**: three things, all offline. (1) The spy records one network call for two invocations. (2) **Cross-process persistence is proven by writing the cache in one place and reading it in a test that re-imports the client fresh, with the network path made to RAISE** (**reworded 2026-07-31**: this said "writing in one test and reading in another", and the artifact writes from a module-scoped fixture instead. A spec review judged the letter wrong and the artifact right — a fixture is the stronger form, and it is what this repo's own `a-no-mutation-test-cannot-baseline-off-shared-fixture-state.md` prescribes. The clause's real requirement is that the reader shares nothing in memory with the writer.) The reader must also assert the returned value is NOT an error dict — otherwise `_acquire_raw_filing`'s own `except Exception` swallows the raise into an error slot and the test passes on a cache that refetched every time. — a fetch attempt then fails loudly instead of passing quietly, which is the executable form of "a fresh process gets a disk hit". (3) A DIFFERENT accession still fetches, so the cache is keyed rather than blanket-hit; without this, a wrapper that returns the first filing for every accession passes clauses 1 and 2. (4) **`.filing_date` on a cache hit is a `datetime.date`, not a `str`** — assert the TYPE, not just the value. `Filing.from_dict` coerces it to `str`, so this is a real divergence a live acquisition would not have, and no count-based or value-based assertion sees it (`str(date) == "2025-04-30"` compares equal to the string).
 - **External surfaces**: local filesystem under `cache_util.resolve_cache_dir()`; no new network surface.
 - **Dependencies**: Task A completes first
 - **Independent**: false
@@ -444,6 +454,8 @@ projection.
   - **RED**: `test_partial_acquisition_failure_is_reported_not_silent` — when one accession in the span fails to acquire, the loop records that accession as a failed item AND still returns the filings acquired from the rest. A run that silently returns a shorter span, or that aborts the whole request, fails this test. **The same test also pins the loop's OUTPUT CONTRACT**: what it yields must be whatever `_acquire_raw_filing` returns, never an accession row or dict — that is the input contract Task D's Description fixes, and it is checkable from Task J's own position. **Narrowed 2026-07-30**: an earlier wording asked this test to prove the objects are accepted by Task D's function unmodified, which Task J cannot execute — it declares no dependency on Task D, and no committed raw-filing fixture exists in any task's `Files touched` to feed D's function offline. That end-to-end seam stays where it already lives, in Task H's one-off live run.
   - **GREEN**: the test passes offline, and a failed accession appears in the run's `failed_items` with its accession number, matching the existing per-accession failure shape at `pack_us.py:1553-1555`.
 - **External surfaces**: none new — reuses `sec_edgar_client._acquire_raw_filing` through Task B's cache.
+- **Note on Task B's cache (added 2026-07-31, from Task B's spec review — an obligation Task B created that this entry did not state)**: **stub at `sec_edgar_client._acquire_raw_filing`**, the boundary this file's own docstring already names (`test_data_markets_us.py:61-67`) — **not** at `edgar.get_by_accession_number`. Task B put a disk cache behind the latter, and `test_data_markets_us.py` pins no cache directory (**verified 2026-07-31: zero occurrences of `INVESTING_TOOLKIT_CACHE` in that file, and all six existing stub sites use the higher boundary**), so a lower stub would let the loop take a hit from the developer's real cache directory. On a second run the loop would take that disk hit instead of reaching the stub, and `test_partial_acquisition_failure_is_reported_not_silent` would **stop exercising the failure it exists to pin, without failing**. If a lower stub is ever needed, add an autouse `INVESTING_TOOLKIT_CACHE` fixture first — `test_sec_narrative.py:137-144` and `test_exhibit_fetch.py:88-93` are the pattern.
+  **This is the second unstated cross-task obligation on this branch** — Task F created one for Task H (money serialisation) that also had to be written in after the fact. Both were found by a reviewer, neither by the plan. A task that changes a seam another task calls through should state what it now requires of that caller, in the caller's own entry, before the caller is dispatched.
 - **Dependencies**: Tasks A, B complete first
 - **Independent**: false
 - **Brief item covered**: "Assemble the filing list — every 10-Q and 10-K available, oldest first (~77 filings for a filer with full XBRL history), optionally capped." — the acquisition half of that item; Task A covers the listing half.
@@ -491,10 +503,50 @@ and was re-reviewed; it is logged here rather than silently applied.
    states what it checks rather than who approved it. **The durable rule that came
    out of it**: a name saying WHO APPROVED cannot be checked by running it; a name
    saying WHAT IS CHECKED can.
-3. **Cache on-disk format**: a thin envelope `{accession, fetched_at, sec_url,
-   document}`, not the bare document. A few extra bytes buy provenance; adding it
-   later would invalidate every cached filing on every user's machine, at 20-37
-   minutes per filer to rebuild.
+3. **Cache on-disk format**: ~~a thin envelope `{accession, fetched_at, sec_url,
+   document}`, not the bare document.~~ **RE-DECIDED 2026-07-31 by the user, on an
+   implementer's `NEEDS_CONTEXT`** — the original rested on a premise that
+   measurement refuted, so it is superseded rather than amended. The provenance
+   rationale is unchanged and still load-bearing: a few extra bytes buy provenance,
+   and adding a field later would invalidate every cached filing on every user's
+   machine, at 20-37 minutes per filer to rebuild.
+
+   **The ratified format**:
+   `{accession, fetched_at, sec_url, filing: {accession_number, cik, company, form, filing_date}}`
+
+   **What was wrong with the original, measured rather than argued.** There is no
+   document at this seam to cache. `_acquire_raw_filing` never fetches a filing
+   document — it resolves an accession against SEC's quarterly INDEX files and
+   builds a `Filing` from an index row. So `document` had no producer, and the
+   envelope carried none of the five values needed to rebuild the object. The
+   expensive thing is the index scan, and edgartools caches it with a process-local
+   `@lru_cache(maxsize=8)`, which is exactly why the brief measured a fresh process
+   re-paying in full. A disk cache is still the right fix; its payload was wrong.
+
+   **A premise the user was given, now known false**: this plan and the dispatch
+   both stated "a `Filing` is not serialisable". Measured: it pickles in a couple of
+   hundred bytes — an implementer measured 216 and a reviewer re-measured 234 for the
+   same filer, and the discrepancy is recorded rather than resolved because nothing
+   rests on it — and the library ships `to_dict()` / `from_dict()`. Pickle is still NOT the format
+   — a third-party object graph is a bad durable format and JSON via `cache_util` is
+   this repo's convention — but the user re-decided knowing the premise was wrong.
+
+   **Why the library's own `to_dict()` shape**: adopting the dependency's
+   serialisation means a future edgartools field change surfaces as a mismatch
+   rather than as our own silent drift.
+
+   **`sec_url` stays, but must be the reconstructable archives URL** — built from
+   `cik` + accession with `SEC_ARCHIVES_URL` and `_accession_nodash`, never
+   `Filing.filing_url`. Measured: `filing_url` resolves the primary document over
+   the wire (an implementer's probe died on `IdentityNotSetException`), so using it
+   would add a network round-trip on every cache MISS — on the one seam whose
+   purpose is removing network cost.
+
+   **Do NOT use `Filing.from_dict` to read the cache back.** Its source coerces
+   `filing_date=str(...)`, so a cache hit would carry `.filing_date` as `str` while
+   a live acquisition carries `datetime.date`. Construct with `date.fromisoformat`
+   instead. That divergence is invisible to a hit-count assertion, and it is exactly
+   the RED's "a wrong answer with the right shape".
 
 ### Two-way doors — decided without escalation
 

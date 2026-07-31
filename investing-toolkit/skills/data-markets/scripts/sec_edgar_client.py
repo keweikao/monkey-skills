@@ -78,6 +78,7 @@ TTL_SUBMISSIONS = 86400       # 24 hours
 TTL_SUBMISSION_PAGES = 7 * 86400  # 7 days
 TTL_NARRATIVE = cache_util.compute_ttl("immutable", None)  # permanent; filings don't change
 TTL_EXHIBIT_RAW = cache_util.compute_ttl("immutable", None)  # permanent; a filed exhibit's bytes never change
+TTL_RAW_FILING = cache_util.compute_ttl("immutable", None)  # permanent; a filing's identity never changes
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0
@@ -1134,8 +1135,17 @@ def _ensure_edgar_identity(identity: str | None = None) -> dict | None:
 # Real Filing shape captured live 2026-07-12 (AAPL FY2024 10-K, accession
 # 0000320193-24-000123; anchored by test_data_markets_live.py
 # ::test_edgartools_acquire_real_10k_shape):
-#   accession_no:str  cik:int  form:str  filing_date:datetime.date(!)
+#   accession_no:str  cik:int  company:str  form:str  filing_date:datetime.date(!)
 #   period_of_report:str  filing_url:str (primary-doc URL)  homepage_url:str
+# (`company` added to this record 2026-07-31: the raw-filing cache payload reads
+# it — it is one of the five values `Filing.__init__` needs to rebuild the
+# object — so it is now load-bearing rather than merely present. Its anchoring
+# is WEAKER than the fields above it, and knowingly so: the live test asserts
+# the others explicitly, and reaches `company` only by EXECUTING the cache write
+# on a cold run, where a missing attribute would raise. The typed surface behind
+# it — `Filing.__init__(cik, company, form, filing_date, accession_no)` and
+# `to_dict()` — was probed offline against edgartools 5.42.0 on 2026-07-31 and is
+# recorded in test_raw_filing_cache.py's module docstring.)
 # edgartools has NO `primary_document` attr — the primary-doc filename is the
 # last path segment of filing_url, which is itself the reconstructable SEC
 # Archives URL `.../data/{cik}/{accession-no-dashes}/{document}`.
@@ -1197,6 +1207,94 @@ def _acquire_error(error_class: str, detail: str, *, identifier=None,
     return slot
 
 
+def _raw_filing_archives_url(cik: int, accession: str) -> str:
+    """The filing's SEC Archives DIRECTORY URL, reconstructed from cik +
+    accession with NO network call.
+
+    Deliberately NOT ``Filing.filing_url``: that property resolves the filing's
+    primary document over the wire, so building it here would add a network
+    round-trip to every cache MISS — on the one seam whose whole purpose is
+    removing network cost. The directory URL is coarser provenance (it names the
+    filing's folder, not its primary document) and that is the ratified trade,
+    not an oversight. See the plan's Decision Log #3.
+    """
+    return SEC_ARCHIVES_URL.format(
+        cik_int=cik, accession_nodash=_accession_nodash(accession), doc=""
+    )
+
+
+def _raw_filing_cache_payload(accession: str, filing) -> dict:
+    """The ratified on-disk cache payload for one acquired filing.
+
+    Shape (user-ratified 2026-07-31, plan Decision Log #3 — a one-way door;
+    widening it later invalidates every cached filing on every machine, at
+    20-37 minutes per filer to rebuild)::
+
+        {accession, fetched_at, sec_url,
+         filing: {accession_number, cik, company, form, filing_date}}
+
+    ``filing`` mirrors edgartools' OWN ``Filing.to_dict()`` field names — note
+    ``accession_number``, not this repo's usual ``accession`` — so a future
+    field change in the dependency surfaces as a mismatch against the library
+    rather than as our own silent drift. ``filing_date`` is ISO text here
+    because the payload is JSON; ``_filing_from_cache_payload`` restores it to a
+    ``datetime.date``.
+    """
+    return {
+        "accession": accession,
+        "fetched_at": _now_iso(),
+        "sec_url": _raw_filing_archives_url(filing.cik, accession),
+        "filing": {
+            "accession_number": filing.accession_no,
+            "cik": filing.cik,
+            "company": filing.company,
+            "form": filing.form,
+            "filing_date": _filing_date_iso(filing.filing_date),
+        },
+    }
+
+
+def _filing_from_cache_payload(edgar_module, payload: dict) -> object | None:
+    """Rebuild a real ``edgar.Filing`` from a cache payload, or None on a
+    malformed one (fail-open → the caller refetches and self-heals, matching
+    ``cache_util.load_cache``'s own doctrine for a corrupt entry).
+
+    ``Filing.__init__(cik, company, form, filing_date, accession_no)`` is the
+    whole identity — every other attribute (``period_of_report``,
+    ``filing_url``, ``homepage_url``, ``obj()``) is a lazily-derived property on
+    an index-acquired filing too, so a rebuilt filing diverges from a live one
+    on none of them. Verified against edgartools 5.42.0 on 2026-07-31.
+
+    **Deliberately NOT ``Filing.from_dict``**, which is otherwise the obvious
+    reader for a ``to_dict`` payload: its source coerces ``filing_date=str(...)``,
+    so a cache hit would carry ``filing_date`` as a ``str`` where a live
+    acquisition carries a ``datetime.date``. ``date.fromisoformat`` preserves
+    the type. That divergence is invisible to a hit-count or value assertion —
+    ``str(date)`` renders exactly ``"2025-04-30"`` — so it is pinned by an
+    explicit type assertion in test_raw_filing_cache.py.
+    """
+    stored = payload.get("filing")
+    # A REDUNDANT early-out, deliberately kept and deliberately labelled: every
+    # non-dict value `json.loads` can produce (null / bool / number / str /
+    # list) raises TypeError on `stored["cik"]` and lands in the same fail-open
+    # below, so no test can distinguish this line's presence — it states the
+    # precondition where a reader looks for it instead of leaving it implied by
+    # an incidental TypeError. The BEHAVIOUR is pinned either way, by
+    # `test_a_corrupt_cache_entry_refetches_and_self_heals`'s non-dict rows.
+    if not isinstance(stored, dict):
+        return None
+    try:
+        return edgar_module.Filing(
+            cik=int(stored["cik"]),
+            company=str(stored["company"]),
+            form=str(stored["form"]),
+            filing_date=date.fromisoformat(str(stored["filing_date"])),
+            accession_no=str(stored["accession_number"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _acquire_raw_filing(accession: str) -> object:
     """Acquire the RAW edgartools ``Filing`` object for an accession — the SHARED
     producer boundary the acquire→segment seam is built on.
@@ -1214,12 +1312,55 @@ def _acquire_raw_filing(accession: str) -> object:
     crash on ``filing.obj()`` / ``filing.form`` (a ``dict`` has neither). Keeping
     the raw filing at this seam is what preserves the live ``--action narrative``
     contract against real edgartools.
+
+    Cache: a disk HIT rebuilds the Filing from its stored identity and NEVER
+    calls ``get_by_accession_number``. Filings are immutable, so existence is
+    validity — no TTL, no invalidation policy. This is load-bearing rather than
+    convenient: the resolution scans SEC's quarterly INDEX files, edgartools
+    caches those with a process-local ``@lru_cache(maxsize=8)``, and so a fresh
+    process re-pays the brief's measured 15.9-29.1 s PER FILING in full — 20-37
+    minutes for the ~77 filings of a full history, every run. Note what is
+    cached is the filing's IDENTITY, not a document: no filing document is
+    fetched at this seam at all.
+
+    The key family ``raw_filing_<accession-no-dashes>`` is distinct from
+    ``narrative_sections_`` / ``exhibit_raw_`` for the reason those two record
+    in their own docstrings — three incompatible payload shapes sharing the
+    immutable TTL, so a shared key would let a warm machine take a
+    schema-passing HIT of the WRONG shape that never self-heals.
+
+    The key NORMALISES the accession through ``_accession_nodash``: both
+    spellings circulate (that is why that helper exists, and ``--accession`` on
+    this client's CLI takes whatever a user types), and keyed on the raw string
+    they would be two entries for one filing — never a wrong answer, but a
+    second full index scan on the seam built to remove it, in a cache nothing
+    expires. The stored ``accession`` field keeps the spelling as REQUESTED,
+    which is inert provenance: what a hit returns is rebuilt from
+    ``filing.accession_number``, the canonical form edgartools itself resolved.
+
+    A failed acquisition is a loud ``{"error": ...}`` slot that is SURFACED,
+    never cached — a transient 429/403 is not poisoned into a permanent entry.
     """
     identity_error = _ensure_edgar_identity()
     if identity_error is not None:
         return identity_error
 
     import edgar
+
+    # The identity guard stays FIRST, and a test now holds it there:
+    # test_the_identity_guard_precedes_even_a_warm_cache_hit
+    # A hit sends nothing, which is exactly why the ordering was invisible to
+    # every other test — the SEC fair-access identity is a precondition of this
+    # SEAM, not merely of the send. `edgar` is needed to rebuild a cached Filing
+    # anyway (neither the import nor `set_identity` sends a request).
+    path = cache_util.cache_path(
+        "sec_edgar", f"raw_filing_{_accession_nodash(accession)}"
+    )
+    cached = cache_util.load_cache(path, TTL_RAW_FILING)
+    if cached is not None:
+        filing = _filing_from_cache_payload(edgar, cached)
+        if filing is not None:
+            return filing
 
     try:
         filing = edgar.get_by_accession_number(accession)
@@ -1235,6 +1376,7 @@ def _acquire_raw_filing(accession: str) -> object:
             f"accession {accession!r} did not resolve to a filing",
             identifier=accession,
         )
+    cache_util.save_cache(path, _raw_filing_cache_payload(accession, filing))
     return filing
 
 

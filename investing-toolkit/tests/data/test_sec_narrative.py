@@ -566,6 +566,10 @@ def _real_shape_filing() -> SimpleNamespace:
     return SimpleNamespace(
         accession_no="0000320193-24-000123",
         cik=320193,
+        # `company` is one of the five values edgar.Filing.__init__ requires, so
+        # `_acquire_raw_filing`'s disk cache reads it; the real Filing has always
+        # carried it and this double simply had not needed it before.
+        company="Apple Inc.",
         form="10-K",
         filing_date=datetime.date(2024, 11, 1),  # a date object, NOT a string
         period_of_report="2024-09-28",
@@ -723,6 +727,7 @@ def _segmentable_filing(form: str, typed_obj) -> SimpleNamespace:
     return SimpleNamespace(
         accession_no="0000320193-24-000123",
         cik=320193,
+        company="Apple Inc.",  # see _acquired_filing above — required by the cache
         form=form,
         filing_date=datetime.date(2024, 11, 1),
         period_of_report="2024-09-28",
