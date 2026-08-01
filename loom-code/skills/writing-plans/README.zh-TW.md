@@ -36,14 +36,14 @@ brainstorming → brief                             (Discovery 階段)
 - **Context paths**: implementer 讀的既有 code 路徑（paths-not-content）
 - **Acceptance**: RED 測試名 + GREEN 可觀察條件
 - **Dependencies**: `none` | `Task N completes first` | `Tasks N, M parallel`
-- **Reuse-adequacy**: 任務指示重用既有 helper 到新 lane 時，一行講清楚該 helper 的行為在新 lane 是否跟舊 lane 一致，不一致的話為什麼可接受（見 `references/plan-format.md` §`Reuse-adequacy`）
+- **Reuse-adequacy**: 當任務的 Description 指示重用既有 helper 到新 lane 時，兩個作者填寫的 slot — `Observed`（報告 helper 現在做什麼，結尾要接一個來自封閉詞彙 `read <repo-relative-path>:<line>` / `inferred from docstring` / `unverified assumption — <what would settle it>` 的 source marker）與 `Intended`（規格：新呼叫路徑會做什麼）。沒有作者端的 adequacy 判定欄位 — 那是 reviewer 的判斷（見 `references/plan-format.md` §`Reuse-adequacy`）
 - **Brief item covered**: 引 brief 的 Smallest End State / Decision 對應段落
 
 這個 shape 就是 `subagent-driven-development` 派 3 個 subagent 時消費的形狀。
 
 ## 宣告 DONE 前的自審
 
-Plan 寫好後，writing-plans 派 [`references/plan-document-reviewer-prompt.md`](references/plan-document-reviewer-prompt.md) 當 evaluator subagent。Reviewer 跑 16 項檢查（其中 2 項 non-blocking——1 項已退役、1 項僅供參考，實際會擋審的是 14 項），涵蓋每任務的失敗測試驗收條件、brief-任務 coverage map、DAG 無 cycle 等，回 PASS / NEEDS_REVISION。NEEDS_REVISION 就修 plan + 重審。最多 2 輪；還沒過就 escalate 給 user（多半是 brief 本身需要重想）。
+Plan 寫好後，writing-plans 派 [`references/plan-document-reviewer-prompt.md`](references/plan-document-reviewer-prompt.md) 當 evaluator subagent。Reviewer 跑檢查，涵蓋每任務的失敗測試驗收條件、brief-任務 coverage map、DAG 無 cycle 等，回 PASS / NEEDS_REVISION。NEEDS_REVISION 就修 plan + 重審。最多 2 輪；還沒過就 escalate 給 user（多半是 brief 本身需要重想）。
 
 plan-document-reviewer 與 SDD 的 spec-reviewer / code-quality-reviewer **不同** — 後者評 code，這個評 plan 結構。
 

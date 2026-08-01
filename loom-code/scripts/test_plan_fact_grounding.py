@@ -44,6 +44,7 @@ Stdlib only (pathlib). plan-format.md is resolved relative to this
 test file.
 """
 
+import re
 from pathlib import Path
 
 PLAN_FORMAT = (
@@ -227,55 +228,143 @@ def _per_task_block_section(text: str) -> str:
     return "".join(lines[start:end])
 
 
-def test_reuse_adequacy_field_present():
-    """plan-format.md's per-task block documents a reuse-adequacy
-    declaration: the behaviour-match claim, the why-acceptable clause,
-    and an inline definition of what counts as a behaviour difference
-    (Task 2, brief item 'Reuse-adequacy declaration'; motivating
-    evidence: #619 reused the top-line lane's selector in the
-    statement lane without re-checking its semantics --
-    `docs/loom/audits/2026-07-27-investing-arc-defect-provenance-audit.md`
-    §3.7 A-2)."""
+def _reuse_adequacy_subsection(text: str) -> str:
+    """Isolate the live `#### `Reuse-adequacy`` subsection only --
+    narrower than `_per_task_block_section`.
+
+    The absence assertion in
+    `test_reuse_adequacy_block_pins_two_slots_and_marker_vocabulary`
+    needs a scope that excludes the OTHER five per-task field
+    subsections (Files touched, Review-weight, External surfaces,
+    ...), each of which legitimately carries its own bulleted
+    sub-items -- checking "no extra bulleted field" against the whole
+    per-task block would false-positive on those. The section runs
+    from the field's own `####` heading to the next heading of the
+    same or shallower depth (`### Stated facts ...`).
+    """
+    lines = text.splitlines(keepends=True)
+    start = None
+    depth = 0
+    for i, line in enumerate(lines):
+        if line.startswith("#") and "reuse-adequacy" in line.lower():
+            start = i
+            depth = len(line) - len(line.lstrip("#"))
+            break
+    assert start is not None, (
+        "plan-format.md carries no heading naming the Reuse-adequacy "
+        "field's own subsection"
+    )
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        line = lines[j]
+        if line.startswith("#") and len(line) - len(line.lstrip("#")) <= depth:
+            end = j
+            break
+    return "".join(lines[start:end])
+
+
+def _normalize_ws(s: str) -> str:
+    """Collapse all whitespace runs to single spaces.
+
+    The malformed-block consequence sentence is pinned verbatim in the
+    plan's `## Notes` section as hard-wrapped prose; plan-format.md is
+    free to wrap it differently. Comparing on collapsed whitespace
+    checks the pinned WORDS, not an incidental line-wrap column choice.
+    """
+    return " ".join(s.split())
+
+
+def test_reuse_adequacy_block_pins_two_slots_and_marker_vocabulary():
+    """The `Reuse-adequacy` schema is TWO author-written slots --
+    `Observed` (a report, ending in an obligatory source marker from a
+    closed vocabulary of exactly three) and `Intended` (a specification)
+    -- with no author-side adequacy/justification field left to write;
+    that verdict moves to the reviewer (Task 1,
+    `docs/loom/plans/2026-07-31-reuse-adequacy-declaration-hardening.md`;
+    brief `docs/loom/specs/2026-07-31-reuse-adequacy-declaration-hardening.md`
+    §Smallest End State). This guards against the single free-prose line
+    the schema replaces, whose direction of fit was ambiguous enough that
+    a live weak-tier author wrote a specification where a report belonged
+    (brief §Problem)."""
     text = _text()
     section = _per_task_block_section(text)
     low = section.lower()
 
-    # field name
+    # field name (property moved from the retired
+    # `test_reuse_adequacy_field_present`: the per-task schema
+    # documents a Reuse-adequacy declaration)
     assert "reuse-adequacy" in low, (
         "the per-task block must name a Reuse-adequacy field -- a task "
         "instructed to reuse an existing helper must declare whether its "
         "behaviour still holds in the new lane"
     )
 
-    # behaviour-match claim
-    assert "behaviour-match claim" in low, (
-        "must name the behaviour-match claim -- the one-line statement of "
-        "whether the helper's behaviour in the new lane matches its "
-        "behaviour in the old one"
-    )
-    match_para = _first_paragraph_at(section, "behaviour-match claim").lower()
-    assert "new lane" in match_para and "old" in match_para, (
-        "the behaviour-match claim must be defined against the concrete "
-        "old-lane vs new-lane comparison, not left abstract"
+    # both slots named
+    assert "observed" in low, "must name the `Observed` slot"
+    assert "intended" in low, "must name the `Intended` slot"
+    assert "belongs in `intended`, not here" in _normalize_ws(low), (
+        "must state explicitly that a sentence about what the new code "
+        "WILL do belongs in `Intended`, not `Observed` -- otherwise the "
+        "direction-of-fit ambiguity this schema exists to remove is still "
+        "available to a plan author"
     )
 
-    # why-acceptable clause
-    assert "why-acceptable clause" in low, (
-        "must name the why-acceptable clause -- the stated reason a "
-        "behaviour difference, if any, is acceptable for this task"
+    # the three marker tokens, verbatim from the plan's `## Notes` pin
+    assert "read <repo-relative-path>:<line>" in low, (
+        "must carry the `read <repo-relative-path>:<line>` marker token "
+        "verbatim from the pin"
     )
-    accept_para = _first_paragraph_at(section, "why-acceptable clause").lower()
-    assert "acceptable" in accept_para, (
-        "the why-acceptable clause must require a stated reason the "
-        "difference is acceptable, not just record that one exists"
+    assert "inferred from docstring" in low, (
+        "must carry the `inferred from docstring` marker token verbatim "
+        "from the pin"
+    )
+    assert "unverified assumption — <what would settle it>" in low, (
+        "must carry the `unverified assumption — <what would settle it>` "
+        "marker token verbatim from the pin"
     )
 
-    # inline definition of "behaviour difference"
-    diff_para = _first_paragraph_at(section, "behaviour difference").lower()
-    for cue in ("different value", "different branch", "different default"):
-        assert cue in diff_para, (
-            f"'behaviour difference' must be defined inline at its first "
-            f"use by enumerating what counts ({cue!r} missing) -- a "
-            f"weak-tier reader cannot classify a helper's divergence from "
-            f"the bare term"
-        )
+    # <path> pinned repo-relative
+    assert "repo-relative" in low, (
+        "the `read` marker's path must be pinned as repo-relative -- an "
+        "absolute path resolves on no other machine"
+    )
+
+    # malformed-block consequence, verbatim from the pin (whitespace-normalized)
+    consequence = (
+        "an absent marker, a marker outside this vocabulary, or an "
+        "absolute path in the `read` form makes the block malformed: the "
+        "reviewer returns needs_revision on that ground alone and does "
+        "not evaluate adequacy."
+    )
+    assert consequence in _normalize_ws(low), (
+        "must state the malformed-block consequence verbatim from the "
+        "plan's `## Notes` pin"
+    )
+
+    # no author-side adequacy/justification field
+    assert "there is no author-written adequacy" in low, (
+        "must say explicitly that there is no author-written "
+        "adequacy/justification field -- the verdict is the reviewer's, "
+        "not the author's"
+    )
+
+    # ABSENCE assertion: the live subsection must declare NO bulleted
+    # field beyond `Observed` / `Intended`. A disclaiming sentence is
+    # not enough -- mutation-tested by inserting a literal
+    # `- **`Adequacy`**: <verdict>` bullet right after the `Intended`
+    # slot while leaving the disclaimer sentence untouched; that
+    # mutation must fail exactly this assertion (code-quality-reviewer
+    # finding on fd37f788: the other 9 assertions above stay green
+    # against it).
+    live_subsection = _reuse_adequacy_subsection(text)
+    field_names = re.findall(
+        r"^-\s+\*\*`([^`]+)`\*\*", live_subsection, flags=re.MULTILINE
+    )
+    allowed_fields = {"observed", "intended"}
+    extra_fields = [f for f in field_names if f.strip().lower() not in allowed_fields]
+    assert not extra_fields, (
+        f"the live `Reuse-adequacy` subsection declares bulleted "
+        f"field(s) {extra_fields!r} beyond `Observed` / `Intended` -- "
+        f"the schema has NO author-written adequacy field; saying so "
+        f"in prose is not enough, the field itself must be absent"
+    )

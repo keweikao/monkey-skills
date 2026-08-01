@@ -36,14 +36,14 @@ brainstorming → brief                            (Discovery 段階)
 - **Context paths**: implementer が読む既存コードのパス（paths-not-content）
 - **Acceptance**: RED テスト名 + GREEN 観察可能条件
 - **Dependencies**: `none` | `Task N completes first` | `Tasks N, M parallel`
-- **Reuse-adequacy**: 既存 helper を別レーンで再利用する時、その振る舞いが元のレーンと一致するか、一致しないならなぜ許容できるかを 1 行で（`references/plan-format.md` §`Reuse-adequacy` 参照）
+- **Reuse-adequacy**: タスクの Description が既存 helper を別レーンで再利用するよう指示する場合、著者が書く 2 つのスロット — `Observed`（helper が今日何をするかの報告。閉じた語彙 `read <repo-relative-path>:<line>` / `inferred from docstring` / `unverified assumption — <what would settle it>` のいずれかの source marker で終える）と `Intended`（新しい呼び出し経路が何をするかの仕様）。著者側の adequacy 判定は書かない — それは reviewer の判断（`references/plan-format.md` §`Reuse-adequacy` 参照）
 - **Brief item covered**: ブリーフの Smallest End State / Decision からの引用 / 参照
 
 この形式が `subagent-driven-development` がタスクごとに 3 サブエージェントを派遣する時に消費する shape。
 
 ## DONE 宣言前の自己レビュー
 
-プラン作成後、writing-plans は [`references/plan-document-reviewer-prompt.md`](references/plan-document-reviewer-prompt.md) を evaluator サブエージェントとして派遣する。レビュアは 16 個のチェック（うち 2 つは non-blocking — 1 つは廃止済み、1 つは advisory、実際に落ちうるのは 14 個）を実行し、タスクあたりの failing-test 受入条件、ブリーフ-タスクカバレッジ map、DAG 循環なし等をカバーしたうえで PASS / NEEDS_REVISION を返す。NEEDS_REVISION なら writing-plans がプランをパッチして再レビュー。最大 2 ラウンド；まだ通らなければユーザにエスカレーション（ブリーフ自体の再考が必要な可能性が高い）。
+プラン作成後、writing-plans は [`references/plan-document-reviewer-prompt.md`](references/plan-document-reviewer-prompt.md) を evaluator サブエージェントとして派遣する。レビュアはチェックを実行し、タスクあたりの failing-test 受入条件、ブリーフ-タスクカバレッジ map、DAG 循環なし等をカバーしたうえで PASS / NEEDS_REVISION を返す。NEEDS_REVISION なら writing-plans がプランをパッチして再レビュー。最大 2 ラウンド；まだ通らなければユーザにエスカレーション（ブリーフ自体の再考が必要な可能性が高い）。
 
 plan-document-reviewer は SDD の spec-reviewer / code-quality-reviewer と **別物** — 後者はコードを評価、こちらはプラン構造を評価。
 
