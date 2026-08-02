@@ -348,6 +348,7 @@ findings:
     where: <file:line OR commit SHA range>
     source: <rubric / checklist / standard file:section that triggered this>
     note: <1-2 sentence finding>
+    origin: none | <path> :: "<verbatim quote from that file>"  # REQUIRED on code-arm findings only (docs-arm exempt) — see below
     evidence_needed: craft | domain-convention | project-local  # OPTIONAL
 
 summary:
@@ -355,6 +356,32 @@ summary:
 ```
 
 `evidence_needed` (OPTIONAL): set it when the finding's correct resolution is owned by an authority outside this codebase (engineering literature / domain authority / this repo's own docs) rather than by the diff itself — the reviewer never runs the research; it flags.
+
+`origin:` (REQUIRED): state the quote gate as an action you perform, not a
+judgment you make — name the upstream artifact ONLY when you can quote the
+wrong statement verbatim; otherwise write `none`. `none` carries **no
+penalty**: the field records what you hold, not what you can infer, so
+declining to name an artifact is never scored against the finding. A missing
+`origin:` line (on a finding whose `dimension:` requires one), or a malformed
+`origin:` line (on ANY finding that writes one, docs-arm included), refuses
+to mint the same way an empty `where:` does — `loom_gate_markers.py` treats
+it as an opaque finding. The quote itself is verified separately and
+does NOT gate the mint — an unverified quote is recorded in the origin
+ledger, not refused. Grammar, transcribed verbatim from the field's pin:
+
+```
+origin: none
+origin: <path> :: "<verbatim quote from that file>"
+```
+
+To find a quotable upstream artifact, the reviewer derives candidate
+upstream planning artifacts from `docs/loom/plans/` and `docs/loom/specs/`
+itself — the dispatch packet carries no plan, brief, or spec path, and none
+is added for this. This follows the same self-derivation shape D8 already
+uses for `docs/loom/PRINCIPLES.md` below, not a fresh mechanism. Finding
+none there is an ordinary `none`, not a defect: no dimension scores the
+branch against a plan, and the reviewer must not search harder to
+manufacture a hit.
 
 ### Aggregation rule
 

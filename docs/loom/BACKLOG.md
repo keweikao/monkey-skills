@@ -66,6 +66,9 @@
 - [2026-08-02-archive-script-residual-hardening-symlinked-dest-parent-and-guards](backlog/2026-08-02-archive-script-residual-hardening-symlinked-dest-parent-and-guards.md) — three residual guard gaps in loom-code/scripts/archive_change_folder.py that the two-unit generalization left behind
 - [2026-08-02-backlog-index-two-frontmatter-readers-disagree-on-duplicate-keys](backlog/2026-08-02-backlog-index-two-frontmatter-readers-disagree-on-duplicate-keys.md) — four generator and reader nits in scripts/backlog_index.py and its neighbours, all latent today
 - [2026-08-02-citations-into-the-generated-backlog-index-by-line-number](backlog/2026-08-02-citations-into-the-generated-backlog-index-by-line-number.md) — documents still cite docs/loom/BACKLOG.md by line number or heading anchor, both of which are invalidated by the generated file — six by line number (resolve silently wrong), eleven more by a §-heading the generated index has no headings for
+- [2026-08-02-finding-block-field-scanner-false-refuses-on-indent-drift](backlog/2026-08-02-finding-block-field-scanner-false-refuses-on-indent-drift.md) — loom_gate_markers' per-finding field scanner anchors on one column, so two shapes of benign indentation drift refuse a well-formed verdict and blame the wrong field
+- [2026-08-02-quote-informativeness-needs-corpus-selectivity-not-length](backlog/2026-08-02-quote-informativeness-needs-corpus-selectivity-not-length.md) — no length or width threshold can separate an informative origin quote from a corpus-universal fragment — the measured axis is document frequency, and a selectivity gate is the successor mechanism
+- [2026-08-03-origin-arc-close-out-residue](backlog/2026-08-03-origin-arc-close-out-residue.md) — four small claim-accuracy items left open when the finding-origin-attribution arc shipped, each a one-clause edit that a fifth review round would have cost more to catch than to fix later
 
 ## PARKED
 - [2026-07-08-automate-research-toolkit-s-sync-primitives-sh](backlog/2026-07-08-automate-research-toolkit-s-sync-primitives-sh.md) — Automate research-toolkit's sync-primitives.sh
@@ -87,6 +90,8 @@
 - [2026-07-27-reuse-adequacy-got-the-gate-it-had-been-missing](backlog/2026-07-27-reuse-adequacy-got-the-gate-it-had-been-missing.md) — `Reuse-adequacy` got the gate it had been missing
 - [2026-07-30-copywriting-toolkit-modernization-arc-port-the-0-42-0-convergence-lesson](backlog/2026-07-30-copywriting-toolkit-modernization-arc-port-the-0-42-0-convergence-lesson.md) — copywriting-toolkit modernization arc — port the 0.42.0 convergence lessons
 - [2026-07-30-standalone-docs-review-skill-shape-decided-shipped-this-arc-0-42-0](backlog/2026-07-30-standalone-docs-review-skill-shape-decided-shipped-this-arc-0-42-0.md) — Standalone docs-review skill — shape decided this arc (0.42.0)
+- [2026-08-02-origin-quote-tier-counts-have-no-durable-ledger](backlog/2026-08-02-origin-quote-tier-counts-have-no-durable-ledger.md) — the origin-quote match-tier counts are written to a marker the next review-pass overwrites, so the observable the pre-registered stop rule depends on does not accumulate
 
 ## CLOSED — SUPERSEDED
 - [2026-07-26-investing-toolkit-spine-chain-misses-33-filer-years-of-reported-history](backlog/2026-07-26-investing-toolkit-spine-chain-misses-33-filer-years-of-reported-history.md) — investing-toolkit — spine chain misses 33 filer-years of reported history
+- [2026-08-02-a-one-character-origin-quote-still-verifies](backlog/2026-08-02-a-one-character-origin-quote-still-verifies.md) — the origin field's anti-fabrication property rests on a quote being hard to invent, but the validator accepts any non-blank substring, so a one-character quote verifies against almost any file and counts as a genuine origin
