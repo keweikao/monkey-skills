@@ -136,7 +136,7 @@ Key seam facts from recon (2026-07-22):
 - Brief item covered: §Constraints 4 (normalize unit before comparing) + §Problem (no fabricated value) — the write-side guarantee T6's history docstring trusts
 
 ## Task 7 — BACKLOG correction + brief-obsolescence cleanup
-- Description: Delete the unevidenced "≥10yr, industry norm" claim from `docs/loom/BACKLOG.md:167`, replace the "Slice C = coverage file + retention + tearsheet" framing with this slice's shipped shape, and log the five pre-existing defects the recon found (from brief §Pre-existing defects) as next-touch items. Docs-only.
+- Description: Delete the unevidenced "≥10yr, industry norm" claim from `docs/loom/backlog/2026-07-20-investing-toolkit-non-monetary-operational-kpi-automation.md`, replace the "Slice C = coverage file + retention + tearsheet" framing with this slice's shipped shape, and log the five pre-existing defects the recon found (from brief §Pre-existing defects) as next-touch items. Docs-only.
 - Module: docs/loom/BACKLOG.md
 - Files touched: docs/loom/BACKLOG.md
 - Context paths:
@@ -144,6 +144,20 @@ Key seam facts from recon (2026-07-22):
   - docs/loom/specs/2026-07-20-kpi-observation-history.md (§What Becomes Obsolete, §Pre-existing defects)
 - Acceptance:
   - RED: grep diagnostic — `grep -n "≥10yr" docs/loom/BACKLOG.md` returns a hit before, zero after; the five pre-existing defects each appear as a next-touch line.
+  **Correction (2026-08-02, whole-branch review remediation).** The
+  Description above was repointed by the citation sweep from
+  `docs/loom/BACKLOG.md:167` to
+  `docs/loom/backlog/2026-07-20-investing-toolkit-non-monetary-operational-kpi-automation.md`
+  — verified correct: that entry now carries the corrected framing this task
+  produced ("Retention DROPPED — the earlier ten-year-lookback 'industry
+  norm' framing was unevidenced …"). `Module:`, `Files touched:`,
+  `Context paths:`, and the RED grep below were left unchanged and still
+  name `docs/loom/BACKLOG.md`: this task genuinely ran against the
+  hand-edited monolith on 2026-07-22, which predates the 2026-08-01
+  one-entry-per-file migration that made `docs/loom/BACKLOG.md` generated
+  output. That is real history and is not being rewritten. Do not use this
+  block as a guide to editing `docs/loom/BACKLOG.md` today — see
+  `docs/loom/backlog/README.md`.
   - GREEN: the stale claim is gone; the five defects are logged.
 - Dependencies: none
 - Independent: true   # docs-only, disjoint from all code files
