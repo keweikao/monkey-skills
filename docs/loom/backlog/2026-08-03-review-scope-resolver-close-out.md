@@ -1,9 +1,9 @@
 ---
 name: 2026-08-03-review-scope-resolver-close-out
-description: what the review-scope-resolver arc shipped, the two decisions its branch is waiting on, and the four-item queue that came out of it — recorded here because the session's own diagnosis was that a queue living only in conversation evaporates
+description: what the review-scope-resolver arc shipped, and the queue that came out of it — recorded here because the session's own diagnosis was that a queue living only in conversation evaporates; the arc itself merged as PR #641, so only the queue is still live
 status: OPEN
-origin: the review-scope-resolver arc (loom-code 0.46.0, branch feat-review-scope-resolver, unpushed)
-start: before the branch is pushed, or before the next arc begins — whichever comes first
+origin: the review-scope-resolver arc (loom-code 0.46.0), merged as PR #641, squash 2b8785d3
+start: before the next arc begins — the queue below is what remains; the push gate this entry originally carried is spent
 ---
 
 ## What shipped
@@ -21,21 +21,24 @@ against the wrong set of files. It says nothing about whether the review of
 those files is correct. Those two were conflated repeatedly during the arc and
 the CHANGELOG now separates them explicitly.
 
-## The two decisions the branch is waiting on
+## The two decisions the branch was waiting on — both resolved
 
-The branch is complete and verified but **cannot honestly be pushed yet**:
+**Struck 2026-08-03.** This section described a live push gate on branch
+`feat-review-scope-resolver`. That branch shipped: PR #641, squash `2b8785d3`,
+now an ancestor of `origin/main`. Kept as a struck record rather than deleted
+because the queue below is still live and because the shape is worth seeing —
+the gate was real, it was resolved by an authorized third round plus the user's
+word, and the section outlived the event it described by long enough for two
+separate later edits to this file to pass over it untouched.
 
-1. **The docs arm's last verdict was NEEDS_REVISION.** Its three findings were
-   fixed and each fix was mechanically verified, but no reviewer has passed the
-   fixed version. `requesting-docs-review`'s convergence contract caps the loop
-   at two rounds and permits a third **only on explicit user authorization**, so
-   no third round was run. A review-pass gate marker cannot be minted from a
-   NEEDS_REVISION verdict, and minting one on the orchestrator's own
-   verification would be exactly the self-signed waiver the gate exists to
-   prevent. Push therefore needs either an authorized round 3 or a knowing,
-   recorded waiver.
-2. **Push and PR are outward-facing.** They need the user's word regardless of
-   the above.
+1. ~~**The docs arm's last verdict was NEEDS_REVISION.**~~ Resolved: an
+   authorized round ran and the branch merged. The contract it names is
+   unchanged and still governs — `requesting-docs-review` caps the loop at two
+   rounds and permits a third only on explicit user authorization, a review-pass
+   gate marker cannot be minted from a NEEDS_REVISION verdict, and minting one
+   on the orchestrator's own verification would be exactly the self-signed
+   waiver the gate exists to prevent.
+2. ~~**Push and PR are outward-facing.**~~ Resolved: the user gave the word.
 
 Close-out verification that IS complete: the suite this branch runs against —
 `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest loom-code/scripts/ scripts/ .claude/hooks/` —
@@ -67,20 +70,30 @@ the same self-referential-count trap this arc hit four times before.)
    before editing any" now lives in
    `docs/loom/memory/enumerate-every-copy-before-editing-a-claim-and-name-the-leaks.md`,
    but nothing obliges a repairer to hit it — and this arc failed to follow it
-   twice, once by the author who had written it hours earlier. A repairer-side
-   pre-action or an unwrapping scan script would close the hard-wrap leak
-   mechanically; the synonym leak stays open by nature and must be named rather
-   than papered over.
-4. **PCE's historical baseline — deferred, and it has a clock.** Reconstructing
-   it means re-reading the ~35 MB of session transcripts the provenance audit
-   was extracted from (2026-07-22 → 07-27, across three worktree project dirs).
-   Those transcripts still exist as of 2026-08-03; the oldest surviving file in
-   that directory is from 2026-07-04, so retention appears to be about thirty
-   days. **If the baseline is wanted, it must be reconstructed before roughly
-   2026-08-21.** The audit it depends on also has internal inconsistencies filed
-   separately — three live, a fourth filed and then withdrawn as not a
-   contradiction — and one of the live three is judgment-shaped rather than
-   arithmetic.
+   twice, once by the author who had written it hours earlier.
+   **Half done 2026-08-03.** The unwrapping scan script shipped as
+   `scripts/claim_copy_sweep.py` — it normalizes whitespace on both sides so
+   hard-wrapped copies cannot hide, and it partitions operative from frozen.
+   What remains open is the OBLIGATION half: nothing requires a repairer to run
+   it, left that way deliberately rather than added as another gate. The synonym
+   leak stays open by nature (`--also` covers only phrasings you already know
+   about) and must be named rather than papered over.
+4. ~~**PCE's historical baseline — deferred, and it has a clock.**~~
+   **WONTDO 2026-08-03, decided by the user.** Grounds and the accepted
+   consequence are recorded in the PCE entry's own decision block
+   (`docs/loom/backlog/2026-07-27-phase-containment-effectiveness-success-measure-for-plan-stage-fact-grou.md`);
+   in short, the comparison's "after" side is empty and unscheduled under the
+   filed population, the result would not be a rate at this n, and the useful
+   half was answered more cheaply by
+   `docs/loom/audits/2026-08-03-remediation-candidate-status-and-live-population.md`.
+   The transcripts were not preserved, so the baseline is unreconstructible
+   once they age out — accepted, not overlooked. **The forward-recording half
+   of PCE is NOT closed by this** and still stands under its own entry.
+   Two figures this item stated are also corrected there: the transcript volume
+   ("~35 MB" — measured 2026-08-03 as 954 files / 303 MB in that window) and
+   the retention basis. The provenance audit's internal inconsistencies remain
+   filed separately and remain live; their trigger changed from "before
+   computing the baseline" to "before anyone cites the audit for a count".
 
 ## Residual notes carried, not fixed
 

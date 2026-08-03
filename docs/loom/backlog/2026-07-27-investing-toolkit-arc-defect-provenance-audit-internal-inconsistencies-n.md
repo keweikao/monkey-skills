@@ -3,12 +3,14 @@ name: 2026-07-27-investing-toolkit-arc-defect-provenance-audit-internal-inconsis
 description: investing-toolkit arc defect-provenance audit — internal inconsistencies need reconciliation
 status: OPEN
 origin: found while writing the Phase Containment Effectiveness BACKLOG entry (Task 9, `docs/loom/plans/2026-07-27-plan-stage-fact-grounding.md:452-455`), round 3, after a prior round's attempt to compute a baseline from this audit produced a four-bucket per-instance attribution that both reviewers rejected as out of scope. Re-checking the source turned up the inconsistencies below.
-start: before computing the Phase Containment Effectiveness baseline (entry above) — that measure depends on a trustworthy Category-A count and close-out determination from this document.
+start: before anyone CITES this audit for a count. Its original trigger — "before computing the Phase Containment Effectiveness baseline" — died on 2026-08-03 when that baseline was marked WONTDO (see the PCE entry's decision block). The inconsistencies themselves are untouched by that decision and still mislead any reader who takes a Category-A number from this document, which is why the audit's own erratum mandates reading this entry first.
 ---
 
-- Start: before computing the Phase Containment Effectiveness baseline (entry above) — that
-  measure depends on a trustworthy Category-A count and close-out determination from this
-  document.
+- Start: before anyone CITES this audit for a count. Its original trigger — "before computing
+  the Phase Containment Effectiveness baseline" — died on 2026-08-03 when that baseline was
+  marked WONTDO (see the PCE entry's decision block). The inconsistencies themselves are
+  untouched by that decision and still mislead any reader who takes a Category-A number from
+  this document, which is why the audit's own erratum mandates reading this entry first.
 - Origin: found while writing the Phase Containment Effectiveness BACKLOG entry (Task 9,
   `docs/loom/plans/2026-07-27-plan-stage-fact-grounding.md:452-455`), round 3, after a prior
   round's attempt to compute a baseline from this audit produced a four-bucket per-instance
@@ -47,8 +49,15 @@ start: before computing the Phase Containment Effectiveness baseline (entry abov
      summary of it — the same failure this branch's own cross-read rule exists to catch,
      committed while writing the entry that catalogues it. Left visible rather than deleted:
      the reconciliation task must not re-derive a phantom item, and the miss is the point.
-  - **Why it matters**: the Phase Containment Effectiveness measure (entry above) needs a
-    reliable Category-A count and a reliable close-out/pre-close-out split per confirmed
-    instance. Items 1-3 cannot be trusted as-is. Reconcile by re-reading the
-    underlying session transcripts this audit was extracted from (audit header §Method) and correcting
-    the audit's prose, then recompute the PCE baseline from the corrected document.
+  - **Why it matters**: anyone citing this audit for a Category-A count, or for a
+    close-out/pre-close-out split per confirmed instance, is citing an unreliable number —
+    items 1-3 cannot be trusted as-is. Reconcile by re-reading the underlying session
+    transcripts this audit was extracted from (audit header §Method) and correcting the
+    audit's prose.
+  - **The PCE baseline is no longer a reason to do this.** That measure — filed at
+    `docs/loom/backlog/2026-07-27-phase-containment-effectiveness-success-measure-for-plan-stage-fact-grou.md`
+    (named, not "the entry above": one entry per file now, and the generated index orders
+    this one ahead of it) — had its historical-baseline half marked WONTDO on 2026-08-03,
+    and its transcripts were not preserved. Reconciling this audit therefore no longer
+    unblocks a baseline; it only stops the audit misleading its next reader, which is
+    reason enough and is what the erratum enforces.
