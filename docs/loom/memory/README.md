@@ -71,6 +71,21 @@ origin: <PR / session / audit reference>
 **How to apply:** <the operative rule, readable standalone>
 ```
 
+**The `description` states the durable rule; it never states the current
+state of tooling.** "X is not yet mechanised", "the sweep will miss Y",
+"no script covers Z" are body content — the body can be corrected in the
+commit that changes the tooling, and the reader sees the correction in
+context. The description cannot: it is duplicated byte-identical into
+§Index, it is the only text a pull-time grep surfaces before the file is
+opened, and nothing mechanically compares it against the body. A
+description asserting an open leak therefore outlives the commit that
+closes the leak, and the recall surface goes on reporting the old world.
+Recorded instance: an entry whose description presented a hard-wrap leak
+as open while its own body stated the leak was mechanised — the store's
+integrity checker exited 0 throughout, because byte-identity to the index
+is the invariant it enforces, and truth against the body is not checkable
+(`docs/loom/audits/2026-08-04-docs-review-convergence-experiment.md`).
+
 ## Index
 
 One line per memory: `[<name>](<file>.md) — <description>`.
@@ -119,7 +134,9 @@ relevance surface never diverges from the file.
 [durable-store-mirrors-cache-util-not-imports-it](durable-store-mirrors-cache-util-not-imports-it.md) — A new durable/append-only store in an analysis skill must NOT reuse data-markets' cache_util — resolve_cache_dir returns the EVICTABLE cache dir (wrong for irreplaceable history: root under XDG_DATA_HOME instead) and a direct cross-skill import breaches the analysis↔data-markets layer boundary (the repo pattern is subprocess, not import); mirror the sanitize + atomic-write PATTERN in self-contained helpers.
 [edgartools-fiscal-year-column-unreliable](edgartools-fiscal-year-column-unreliable.md) — edgartools' facts dataframe `fiscal_year` column mislabels prior-year comparatives — derive the fiscal period from `period_end`, never that column
 [editing-a-user-dirty-file-sweeps-their-wip-into-your-commit](editing-a-user-dirty-file-sweeps-their-wip-into-your-commit.md) — Path-level git add cannot split hunks — editing a file that already carries the user's uncommitted WIP sweeps the WIP into your commit silently (tests stay green, diff looks intentional); check git status per-file BEFORE editing, and if dirty: reconstruct the edit onto the committed base, commit, then restore the user's delta uncommitted on top
-[enumerate-every-copy-before-editing-a-claim-and-name-the-leaks](enumerate-every-copy-before-editing-a-claim-and-name-the-leaks.md) — Before editing a claim that may exist in more than one place, enumerate the population and record the partition instead of describing it — and know what the sweep will miss: this repo's prose is hard-wrapped so a quote split across two lines matches nothing, a proposition restated in synonyms is invisible to any string search, and a count of a string inside the document stating that count is never stable; the leaks are named because a rule that hides them ships as reliable and misses silently
+[measure-a-checks-fire-rate-before-building-it](measure-a-checks-fire-rate-before-building-it.md) — Before building a mechanical check, run its naive form over the existing corpus and count how often it fires — the measurement is cheaper than the build and can kill the design; a signal that fires on most instances is a notifier rather than a gate, and a defect class that is not deterministically decidable at all is answered by removing the category of claim from the format contract instead of by a detector
+
+[enumerate-every-copy-before-editing-a-claim-and-name-the-leaks](enumerate-every-copy-before-editing-a-claim-and-name-the-leaks.md) — Before editing a claim that may exist in more than one place, enumerate the population and record the partition instead of describing it — and name what the enumeration cannot see, because a rule that hides its leaks ships as reliable and misses silently: a proposition restated in synonyms is invisible to any string search, and a count of a string inside the document stating that count is never stable
 [equivalence-gate-verifies-behavior-not-facts](equivalence-gate-verifies-behavior-not-facts.md) — A behavioral-equivalence gate (judge ensemble comparing outputs) faithfully preserves inherited FACTUAL errors — a wrong citation (Beck Child Test "Part II", actually Part III) survived an equivalence-gated compression and a fresh reuse because both sides of every comparison carried the same error; factual accuracy of names/citations/numbers in skill text needs an explicit review dimension (or a fact-check pass), it is never covered by equivalence
 [equivalence-test-prompts-must-satisfy-target-intake-contract](equivalence-test-prompts-must-satisfy-target-intake-contract.md) — A behavioral-equivalence test prompt that violates the target skill's own input contract cannot arbitrate equivalence — it produced a false 3/3 not_equivalent verdict (baseline/candidate each picked different defensible readings of the invalid input); validate prompts against the skill's intake contract first, and confirm any single-run divergence with n≥2 replicates per side before believing it
 [eval-oracle-tokens-stable-fragments](eval-oracle-tokens-stable-fragments.md) — Substring-matched eval-oracle tokens must be the shortest distinctive stable fragment (surname / product name) with |-alternatives for alias-language-case variance — full names break on translation, spacing, word order; and a miss's class (form vs genuine drop) must be re-derived per run, never carried over from an earlier run

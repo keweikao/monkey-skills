@@ -5,6 +5,33 @@ All notable changes to the `loom-code` plugin (formerly `code-toolkit`) will be 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.47.0] — 2026-08-04 — the docs arm can open the code it is told to check
+
+### Added
+
+- **Mixed-branch dispatch hands the docs arm `read-context`.**
+  `requesting-code-review`'s per-file split gave the docs arm only the `.md`
+  paths, while `requesting-docs-review` required its reviewers to check
+  claims against the current code — a duty with no material to serve it. The
+  split now also passes the branch's non-`.md` file list as `read-context`:
+  files a reviewer OPENS to verify an artifact's claims about a shipped
+  interface, never scope it reviews. Findings against a `read-context` file
+  are reported for the code arm, not scored by the docs arm. Closes a
+  recorded miss where a brief claiming its tool accepts stdin survived both
+  arms because neither had both texts.
+
+### Changed
+
+- **Directive 1's rationale for the 2-round cap is corrected.** The skill
+  attributed the cap to extra rounds manufacturing defects. A controlled
+  measurement — four fresh arms over an already-passed tree — returned seven
+  gating findings with zero overlap, none manufactured. The cap holds for the
+  stronger reason: an empty round is not a reachable state, so "the reviewer
+  found nothing" cannot be the termination condition. Round-2 findings are now
+  explicitly presumed real and decided on severity, and the contract states the
+  operative corollary — prefer adding a deterministic check over authorizing
+  another round (`docs/loom/audits/2026-08-04-docs-review-convergence-experiment.md`).
+
 ## [0.46.0] — 2026-08-03 — one resolver owns review scope, and a stale base refuses
 
 ### Added
