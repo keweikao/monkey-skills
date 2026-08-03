@@ -16,9 +16,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
   split now also passes the branch's non-`.md` file list as `read-context`:
   files a reviewer OPENS to verify an artifact's claims about a shipped
   interface, never scope it reviews. Findings against a `read-context` file
-  are reported for the code arm, not scored by the docs arm. Closes a
-  recorded miss where a brief claiming its tool accepts stdin survived both
-  arms because neither had both texts.
+  are reported for the code arm in a separate unscored
+  `read_context_findings:` block, not scored by the docs arm; the
+  `docs-reviewer` agent contract carries the matching input section,
+  permitted-read extension, and output slot. Closes a recorded miss where a
+  spec claiming its tool accepts stdin reached merge unflagged: the arm that
+  read the claim was not given the file that falsifies it.
 
 ### Changed
 

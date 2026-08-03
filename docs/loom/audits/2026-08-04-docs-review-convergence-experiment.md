@@ -41,8 +41,13 @@ is dropped.**
 | Treatment A | 2 | NEEDS_REVISION |
 | Treatment B | 2 | NEEDS_REVISION |
 
-**The harm gate did not reduce gating findings.** The registered
-prediction fired and the proposal was dropped, unbuilt.
+**The harm gate did not reduce gating findings.** The criterion actually
+applied was the weaker, one-sided form: *no reduction* — the treatment
+counts (2, 2) sit at the top of the controls' range (1, 2), so the gate
+removed nothing. The registered wording said "the same count", which the
+literal reading (1 vs 2) does not satisfy; the one-sided form is what was
+used and what the conclusion rests on. Either way the proposal was
+dropped, unbuilt.
 
 The result that was not predicted is the load-bearing one:
 
@@ -51,21 +56,35 @@ The result that was not predicted is the load-bearing one:
 
 ## Were they real?
 
-Every finding was checked. Two were confirmed by hand, both against
-artifacts that had passed round 4 that same day:
+All seven were checked, but not to the same depth, and the difference
+matters to what this audit may be cited for. Each of the seven was read
+against the text it cited and found to describe that text accurately —
+no finding pointed at a passage that did not say what it claimed. Two
+were additionally confirmed by running the command that decides them,
+both against artifacts that had passed round 4 that same day:
 
 - `docs/loom/memory/enumerate-every-copy-before-editing-a-claim-and-name-the-leaks.md`
-  — the frontmatter `description` presents the hard-wrap leak as open
+  — the frontmatter `description` presented the hard-wrap leak as open
   ("hard-wrapped so a quote split across two lines matches nothing")
-  while the body states the opposite ("The unwrapping half is now
-  mechanised"). `scripts/check_loom_memory_integrity.py` exits 0 on it:
+  while the body stated the opposite ("The unwrapping half is now
+  mechanised"). **The quoted description no longer exists**: the same
+  commit that added this audit rewrote it, so a reader checking the file
+  today finds the corrected text, not the contradiction.
+  `scripts/check_loom_memory_integrity.py` exited 0 on it throughout:
   the checker compares the index line against the frontmatter
   byte-for-byte and never compares either against the body.
 - `docs/loom/specs/2026-08-03-claim-copy-sweep.md:82` — states the tool
   accepts a claim via `--claim` **or stdin**. `grep -c stdin
-  scripts/claim_copy_sweep.py` returns 0.
+  scripts/claim_copy_sweep.py` returns 0. PR #643 (`9960b202`) was a
+  mixed branch: the spec is `.md` and went to the docs arm, the script
+  is `.py` and went to the code arm. Under the per-file split then in
+  force, the reviewer that read the claim was not given the file that
+  falsifies it. What the code arm did or did not read is not recorded —
+  the observable fact is the scope split, not the other arm's attention.
 
-None was manufactured.
+None was manufactured — meaning none cited a passage that did not exist
+or did not say what the finding said. That is the claim this audit
+supports; it is not a claim that all seven were worth fixing.
 
 ## What this means
 
@@ -94,7 +113,12 @@ The second also yields the operative consequence: **a deterministic
 check outranks another review round.** A checker returns the same
 finding on every run; a reviewer returns a different subset each time.
 Both of the hand-verified findings above are of a kind a mechanism
-could have held — see the follow-ups this audit fed.
+could have held, and each fed one follow-up: the description-vs-body
+contradiction produced the `description` rule now in
+`docs/loom/memory/README.md` §Format (a format contract, not a detector
+— `docs/loom/memory/measure-a-checks-fire-rate-before-building-it.md`
+records why), and the stdin claim produced the `read-context` field in
+`requesting-code-review` Step 1 / `requesting-docs-review` Step 3.
 
 ## Limits — stated, not buried
 
@@ -105,12 +129,27 @@ could have held — see the follow-ups this audit fed.
   experiment says nothing about whether `🔴` findings overlap more.
 - The harm gate was refuted **as a lever on finding count**. It was not
   tested as a lever on relay quality, which is a different claim.
+- **Zero overlap characterises the tail, not review in general.** The
+  four-arm review of the branch that shipped this audit overlapped on
+  three locations out of its seven distinct findings — the opposite
+  result. The difference is what the tree carried: the measurement above
+  ran against an already-passed corpus holding only small residual
+  defects, while that branch carried a structural gap (a mechanism
+  written into the skill layer but not into the agent contract that
+  executes it). Both arms found the structural gap; neither found the
+  other's residual nits. So a panel does converge on structural defects,
+  and the disjoint sampling above is a property of the residual tail.
 
 ## Corrections this arc's research pass produced
 
 The session that led here ran a deep-research pass whose first-round
 output was checked against primary sources. The corrections are recorded
-because each would have changed a decision:
+because each would have changed a decision. **Citation status, stated
+rather than implied**: only the κ bullet carries a document identifier.
+The others name an author, venue, or literature by description, and the
+primary documents were not re-opened while writing this audit. Treat
+every bullet below as a pointer to re-verify before reuse, not as a
+citation that has been checked here:
 
 - **The κ≈0.3 figure for LLM-as-judge agreement** was misattributed
   (arXiv 2505.12201, not the number first cited) and mis-scoped: it
@@ -133,7 +172,16 @@ because each would have changed a decision:
 
 ## Consumers
 
+Every place that cites this audit, so an editor revising a claim above
+knows what depends on it:
+
 - `loom-code/skills/requesting-docs-review/SKILL.md` — Directive 1's
-  rationale and the matching red-flag row cite this audit.
+  rationale, the matching red-flag row, and Step 3's `read-context`
+  rationale (the stdin miss).
+- `loom-code/CHANGELOG.md` — the 0.47.0 entry.
 - `docs/loom/memory/README.md` §Format — the description-vs-body
   contradiction above is the recorded instance behind its rule.
+
+Re-run the list with `python3 scripts/claim_copy_sweep.py --claim
+"2026-08-04-docs-review-convergence-experiment"` rather than trusting
+this enumeration after either document moves.

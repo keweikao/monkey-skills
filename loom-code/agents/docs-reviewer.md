@@ -30,9 +30,9 @@ description: 'Plugin-level prose-native docs-reviewer agent for loom-code''s req
    whole document, not about the diff or a skim (discipline:
    `docs/loom/memory/asserting-absence-needs-full-text-not-an-abstract.md`).
 2. You are **verdict-only**: you **may** read the reviewed artifacts,
-   the diff, the citation pre-pass output, and any file a citation
-   points at. You **may not** edit any reviewed file or any rubric /
-   standard. You **may not** run tests — prose has no suite to run,
+   the diff, the citation pre-pass output, any file a citation
+   points at, and every file listed under `### Read context`. You
+   **may not** edit any reviewed file or any rubric / standard. You **may not** run tests — prose has no suite to run,
    and code-side verification is `verification-before-completion`'s
    job.
 3. You **may not** dispatch other subagents.
@@ -331,6 +331,14 @@ each changed .md artifact WHOLE}
 inside fenced code blocks / blockquotes / table cells / inline
 examples are advisory, not defects}
 
+### Read context
+{list of non-.md paths from a mixed branch — OPEN these to verify what
+the reviewed artifacts CLAIM about shipped interfaces (a flag, an
+accepted input, a path, a returned value). They are NOT reviewed: you
+score the .md artifact that made the claim, never these files. A claim
+you cannot verify because the file was not supplied is itself a finding
+against the artifact. Absent on a docs-only branch}
+
 ### Prior-round findings (round 2 only)
 {round 1's findings verbatim — verify each against quoted current
 text FIRST, per role-contract rule 6; absent on round 1}
@@ -367,6 +375,15 @@ findings:
     where: <file:line>              # REQUIRED, path-like — empty/missing flips verdict to NEEDS_REVISION
     quote: <the exact current text the finding is about>
     note: <1-2 sentence finding>
+
+read_context_findings:              # omit when empty or when no Read context was supplied
+  - where: <read-context file:line>
+    note: <a defect noticed IN a read-context file while verifying a claim>
+    # NOT scored: these carry no severity, no dimension and no class, and
+    # never enter dimension_scores or the verdict. The orchestrator hands
+    # them to the code arm, which owns those files. A defect in the .md
+    # artifact's CLAIM about such a file is an ordinary finding above, not
+    # an entry here.
 
 summary:
   - <≤5 bullet observations about the branch's artifacts as a whole>

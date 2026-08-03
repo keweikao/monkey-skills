@@ -71,20 +71,44 @@ origin: <PR / session / audit reference>
 **How to apply:** <the operative rule, readable standalone>
 ```
 
-**The `description` states the durable rule; it never states the current
-state of tooling.** "X is not yet mechanised", "the sweep will miss Y",
-"no script covers Z" are body content — the body can be corrected in the
-commit that changes the tooling, and the reader sees the correction in
-context. The description cannot: it is duplicated byte-identical into
+**The `description` states the durable rule; it never states which tools
+currently exist.**
+
+**The test** — one question, applied clause by clause: *would this clause
+become false if someone shipped, removed, or reconfigured a tool?* If yes,
+it is body content. If no, it may stay.
+
+- Fails the test, so belongs in the body: "X is not yet mechanised",
+  "no script covers Z", "the check runs in CI but not in pytest",
+  "mechanized in `<some-tool>`".
+- Passes, so may stay: a permanent property of the method itself — "a
+  proposition restated in synonyms is invisible to any string search" is
+  true of string search, not of any particular script.
+
+**Why the description and not the body.** The body can be corrected in the
+same commit that changes the tooling, and the reader meets the correction
+in context. The description cannot: it is duplicated byte-identical into
 §Index, it is the only text a pull-time grep surfaces before the file is
 opened, and nothing mechanically compares it against the body. A
 description asserting an open leak therefore outlives the commit that
 closes the leak, and the recall surface goes on reporting the old world.
+
 Recorded instance: an entry whose description presented a hard-wrap leak
 as open while its own body stated the leak was mechanised — the store's
 integrity checker exited 0 throughout, because byte-identity to the index
 is the invariant it enforces, and truth against the body is not checkable
 (`docs/loom/audits/2026-08-04-docs-review-convergence-experiment.md`).
+`docs/loom/memory/measure-a-checks-fire-rate-before-building-it.md`
+records why this is a format rule and not a detector.
+
+**Binding: forward-only, and the store does not yet conform.** The rule
+governs an entry when it is written and when its description is next
+edited; it does not oblige a retrofit sweep. Three existing entries fail
+the test today, enumerated here rather than left as a silent universal —
+`leading-at-req-comment-trips-living-spec-checker` (names which lane the
+check runs in), `squash-dialog-can-drop-entire-pr-body` ("mechanized in
+memory-grep --verify-merged"), and `test-must-land-in-the-ci-lane-its-plugin-runs`
+(names loom-code CI's current job list). Fix each on its next touch.
 
 ## Index
 
@@ -134,8 +158,6 @@ relevance surface never diverges from the file.
 [durable-store-mirrors-cache-util-not-imports-it](durable-store-mirrors-cache-util-not-imports-it.md) — A new durable/append-only store in an analysis skill must NOT reuse data-markets' cache_util — resolve_cache_dir returns the EVICTABLE cache dir (wrong for irreplaceable history: root under XDG_DATA_HOME instead) and a direct cross-skill import breaches the analysis↔data-markets layer boundary (the repo pattern is subprocess, not import); mirror the sanitize + atomic-write PATTERN in self-contained helpers.
 [edgartools-fiscal-year-column-unreliable](edgartools-fiscal-year-column-unreliable.md) — edgartools' facts dataframe `fiscal_year` column mislabels prior-year comparatives — derive the fiscal period from `period_end`, never that column
 [editing-a-user-dirty-file-sweeps-their-wip-into-your-commit](editing-a-user-dirty-file-sweeps-their-wip-into-your-commit.md) — Path-level git add cannot split hunks — editing a file that already carries the user's uncommitted WIP sweeps the WIP into your commit silently (tests stay green, diff looks intentional); check git status per-file BEFORE editing, and if dirty: reconstruct the edit onto the committed base, commit, then restore the user's delta uncommitted on top
-[measure-a-checks-fire-rate-before-building-it](measure-a-checks-fire-rate-before-building-it.md) — Before building a mechanical check, run its naive form over the existing corpus and count how often it fires — the measurement is cheaper than the build and can kill the design; a signal that fires on most instances is a notifier rather than a gate, and a defect class that is not deterministically decidable at all is answered by removing the category of claim from the format contract instead of by a detector
-
 [enumerate-every-copy-before-editing-a-claim-and-name-the-leaks](enumerate-every-copy-before-editing-a-claim-and-name-the-leaks.md) — Before editing a claim that may exist in more than one place, enumerate the population and record the partition instead of describing it — and name what the enumeration cannot see, because a rule that hides its leaks ships as reliable and misses silently: a proposition restated in synonyms is invisible to any string search, and a count of a string inside the document stating that count is never stable
 [equivalence-gate-verifies-behavior-not-facts](equivalence-gate-verifies-behavior-not-facts.md) — A behavioral-equivalence gate (judge ensemble comparing outputs) faithfully preserves inherited FACTUAL errors — a wrong citation (Beck Child Test "Part II", actually Part III) survived an equivalence-gated compression and a fresh reuse because both sides of every comparison carried the same error; factual accuracy of names/citations/numbers in skill text needs an explicit review dimension (or a fact-check pass), it is never covered by equivalence
 [equivalence-test-prompts-must-satisfy-target-intake-contract](equivalence-test-prompts-must-satisfy-target-intake-contract.md) — A behavioral-equivalence test prompt that violates the target skill's own input contract cannot arbitrate equivalence — it produced a false 3/3 not_equivalent verdict (baseline/candidate each picked different defensible readings of the invalid input); validate prompts against the skill's intake contract first, and confirm any single-run divergence with n≥2 replicates per side before believing it
@@ -166,6 +188,7 @@ relevance surface never diverges from the file.
 [loop-engine-must-null-guard-every-agent-dispatch](loop-engine-must-null-guard-every-agent-dispatch.md) — In a Workflow-driven convergence loop (goal-loop / wiki-update / principles-improve-loop), `agent()` returns null when the dispatched subagent dies on a terminal error (API overload, session/quota limit, user skip) after retries — so EVERY consumer that dereferences an agent() return (`.exitCode`/`.hash`/…) must null-guard first, or a transient infra death crashes the whole loop on `null.exitCode` instead of stopping honestly. The graceful-stop / "safe to leave unattended" guarantee is only as strong as its weakest unguarded agent() consumer.
 [market-canonical-must-satisfy-consumer-field-contract](market-canonical-must-satisfy-consumer-field-contract.md) — When a new data source fills a canonical/normalized structure that downstream analysis reads, its output must emit EVERY field the consumers read — a partial schema silently resolves missing fields to 0/default (e.g. dcf_compute net_debt=0), producing wrong results with no error. The producer's own tests pass; only whole-branch review comparing producer output to consumer field-reads catches it.
 [match-kpi-on-full-dimensional-signature-not-one-axis](match-kpi-on-full-dimensional-signature-not-one-axis.md) — An XBRL fact's identity is its FULL dimensional signature (all real breakdown axis:member pairs) — key a KPI by the whole signature, not one axis member, or a cross-dimensioned fact conflates a total with its slices; treat ConsolidationItemsAxis as a separate reconciliation qualifier, never a breakdown
+[measure-a-checks-fire-rate-before-building-it](measure-a-checks-fire-rate-before-building-it.md) — Before building a mechanical check, run its naive form over the existing corpus and count how often it fires — the measurement is cheaper than the build and can kill the design; a signal that fires on most instances is a notifier rather than a gate, and a defect class that is not deterministically decidable at all is answered by removing the category of claim from the format contract instead of by a detector
 [migration-acceptance-greps-scope-by-content-not-filetype](migration-acceptance-greps-scope-by-content-not-filetype.md) — A migration task's acceptance grep scoped by file type (SKILL.md/README only) leaves .py/.yml/schema-doc consumers of the migrated names unscanned — sweep by content pattern repo-wide and justify carve-outs, or the blind spot ships
 [nested-cross-file-locks-need-one-global-order](nested-cross-file-locks-need-one-global-order.md) — When one function HOLDS lock A while acquiring lock B (nested cross-file/cross-store locks), it is deadlock-free ONLY if every code path acquires them in the same global order — no path may take them B-then-A. Sequential use (release A, THEN acquire B) is not nesting and never deadlocks; prefer it, and when you must nest, prove the global order by checking every sibling that touches both locks.
 [new-arc-branch-bases-on-origin-main-not-merged-tip](new-arc-branch-bases-on-origin-main-not-merged-tip.md) — After a squash-merged arc, cut the NEXT arc's branch from origin/main — not from the previous arc's local branch tip; a tip-cut branch carries a stale base whose diff-vs-main is polluted by the old arc's commits and any content main gained since, and the pollution only surfaces at finishing
