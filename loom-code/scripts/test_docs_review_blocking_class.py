@@ -213,8 +213,8 @@ def test_plugin_version_and_changelog_at_0_47_0():
     item 2).
 
     This pin tracks the CURRENT shipping version by design: each bump
-    rewrites it (see the supersede chain above), which is what makes a
-    missing bump fail CI rather than ship a silent marketplace no-op."""
+    rewrites it, which is what makes a missing bump fail CI rather than
+    ship a silent marketplace no-op."""
     plugin_text = PLUGIN_JSON.read_text(encoding="utf-8")
     assert '"version": "0.47.0"' in plugin_text, (
         "loom-code/.claude-plugin/plugin.json must read version 0.47.0"

@@ -129,16 +129,18 @@ records why), and the stdin claim produced the `read-context` field in
   experiment says nothing about whether `🔴` findings overlap more.
 - The harm gate was refuted **as a lever on finding count**. It was not
   tested as a lever on relay quality, which is a different claim.
-- **Zero overlap characterises the tail, not review in general.** The
-  four-arm review of the branch that shipped this audit overlapped on
-  three locations out of its seven distinct findings — the opposite
-  result. The difference is what the tree carried: the measurement above
-  ran against an already-passed corpus holding only small residual
-  defects, while that branch carried a structural gap (a mechanism
-  written into the skill layer but not into the agent contract that
-  executes it). Both arms found the structural gap; neither found the
-  other's residual nits. So a panel does converge on structural defects,
-  and the disjoint sampling above is a property of the residual tail.
+- **Zero overlap may characterise the tail rather than review in
+  general.** The branch that shipped this audit carried a structural gap
+  — a mechanism written into the skill layer but not into the agent
+  contract that executes it — and its two docs arms **both** raised it,
+  independently. The measurement above ran instead against an
+  already-passed corpus holding only small residual defects. So the
+  direction is: a panel agrees on structural defects and diverges on
+  residual nits. No magnitude is stated here on purpose — a count of that
+  branch's own findings, written into a file on that branch, changes
+  every time the branch is reviewed again
+  (`docs/loom/memory/a-passage-that-describes-itself-decays-on-every-edit.md`).
+  The reviews themselves are the record; read them in the PR.
 
 ## Corrections this arc's research pass produced
 

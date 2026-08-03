@@ -103,12 +103,25 @@ records why this is a format rule and not a detector.
 
 **Binding: forward-only, and the store does not yet conform.** The rule
 governs an entry when it is written and when its description is next
-edited; it does not oblige a retrofit sweep. Three existing entries fail
-the test today, enumerated here rather than left as a silent universal —
-`leading-at-req-comment-trips-living-spec-checker` (names which lane the
-check runs in), `squash-dialog-can-drop-entire-pr-body` ("mechanized in
-memory-grep --verify-merged"), and `test-must-land-in-the-ci-lane-its-plugin-runs`
-(names loom-code CI's current job list). Fix each on its next touch.
+edited; it does not oblige a retrofit sweep. Fix a non-conforming
+description on its next touch.
+
+**How the list below was built, and what it cannot see.** A keyword sweep
+of the index for phrases that name current tooling (`scans only`,
+`CI runs`, `CI-only`, `mechanized in`, `is github:`, `expose no`, …).
+**This is not the population** — the test is semantic, so a description
+that fails it in words the sweep does not carry is invisible here, exactly
+as `enumerate-every-copy-before-editing-a-claim-and-name-the-leaks`
+predicts of any string search. Re-run the sweep rather than trusting this
+list; treat it as the entries found, never as the entries that exist.
+
+Found: `ci-skill-structure-scan-gap-obsidian` (which plugins a workflow
+scans), `deploy-surface-ab-legs-run-post-merge` (the marketplace's current
+source), `leading-at-req-comment-trips-living-spec-checker` (which lane the
+check runs in), `skill-in-subagent-loses-internal-orchestration` (which
+tools subagents expose), `squash-dialog-can-drop-entire-pr-body`
+("mechanized in memory-grep --verify-merged"), and
+`test-must-land-in-the-ci-lane-its-plugin-runs` (loom-code CI's job list).
 
 ## Index
 

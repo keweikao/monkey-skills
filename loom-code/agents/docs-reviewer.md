@@ -379,11 +379,12 @@ findings:
 read_context_findings:              # omit when empty or when no Read context was supplied
   - where: <read-context file:line>
     note: <a defect noticed IN a read-context file while verifying a claim>
-    # NOT scored: these carry no severity, no dimension and no class, and
-    # never enter dimension_scores or the verdict. The orchestrator hands
-    # them to the code arm, which owns those files. A defect in the .md
-    # artifact's CLAIM about such a file is an ordinary finding above, not
-    # an entry here.
+    # NOT scored: these carry no severity, no dimension and no class, they
+    # never enter dimension_scores or any verdict, and nobody assigns them a
+    # severity later. The orchestrator surfaces them and hands them to the
+    # code arm, which reviews those files under its own rubrics. A defect in
+    # the .md artifact's CLAIM about such a file is an ordinary finding
+    # above, not an entry here.
 
 summary:
   - <≤5 bullet observations about the branch's artifacts as a whole>
