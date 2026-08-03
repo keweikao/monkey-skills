@@ -77,13 +77,22 @@ amendment note below for the precedent this follows).
 
 - **`Reuse-adequacy` `Observed` line citations below are as-of-authoring, not
   refreshed against this branch's own later edits to `loom_gate_markers.py`**
-  (`writing-plans/references/plan-format.md` §`Reuse-adequacy`: `Observed`
-  reports what the code did when the citation was written; `check_doc_citations.py`
-  only bounds-checks a citation against the file's current length, never its
-  content) — fix (d) above corrected a citation that was wrong *at authoring
-  time* (an off-by-one), which is a different thing from the line drift this
-  branch's own implementation work causes afterward, and only the former is
-  in scope for correction.
+  — **this plan's own choice, recorded here; not an inherited convention.**
+  `writing-plans/references/plan-format.md` §`Reuse-adequacy`
+  (`loom-code/skills/writing-plans/references/plan-format.md:141-163`) records
+  no refresh policy in either direction, and its `Observed` slot — "State, in
+  the present tense, what the helper does **today**, about code that already
+  exists" — if anything leans against the choice made here. Nothing mechanical
+  enforces either reading: on a `path:line` citation `check_doc_citations.py`
+  checks only that the line number falls within the target file's current
+  length, never what stands at that line
+  (`loom-code/scripts/check_doc_citations.py:229-233`). Its one lane that does
+  read target content — `§N` anchor resolution — is opt-in behind `--sections`
+  and marked experimental
+  (`loom-code/scripts/check_doc_citations.py:88-95`). Fix (d) above corrected a
+  citation that was wrong *at authoring time* (an off-by-one), which is a
+  different thing from the line drift this branch's own implementation work
+  causes afterward, and only the former is in scope for correction.
 
 - **Change-folder binding: none, by recorded decision — not by a fresh skip.**
   Detection layer (ii) finds two non-archived folders
