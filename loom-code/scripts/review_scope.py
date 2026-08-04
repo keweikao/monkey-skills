@@ -22,9 +22,23 @@ Exit codes:
   1 — refusal. No file list is printed. stderr carries the reason from
       `FreshnessResult.reason`, and — only for the stale-base shape,
       the one case where both shas resolved — the concrete
-      `git rebase --onto <remote_sha> <base_sha> HEAD` remedy. Every
-      other refusal shape has no shas to fill in, so no rebase
-      invocation is printed for it. There are seven, and the list is
+      `git rebase --onto <remote_sha> <old_base> HEAD` remedy, where
+      `<old_base>` is the branch's reflog creation sha
+      (`branch_creation_sha`) when it is a descendant-or-equal of the
+      merge-base AND an ancestor of HEAD, falling back to the merge-base
+      itself otherwise. The creation sha is preferred because a
+      squash-merge repo can leave merge-base..HEAD carrying
+      already-squashed foreign commits whose replay conflicts (squashing
+      changes patch-ids, so rebase's duplicate-skip cannot drop them) —
+      the merge-base fallback is textbook-correct for merge/rebase
+      workflows but unsafe in exactly that state — when it happens, one
+      extra stderr line follows the rebase remedy: a caveat naming the
+      verifiable recovery action (`git rebase --abort`, then retry with
+      the reflog's own last-line sha) so the caller need not judge
+      whether the printed old-base was safe. No caveat is printed when
+      the creation sha was used. Every other refusal
+      shape has no shas to fill in, so no rebase invocation is printed
+      for it. There are seven, and the list is
       exhaustive against `check_freshness`'s early returns: an
       unresolvable default branch, a local-only ref, a failed or
       expired fetch, a failed or expired lookup of the remote's live
@@ -219,6 +233,32 @@ def check_freshness(
     )
 
 
+def branch_creation_sha(repo: Path) -> str | None:
+    """Return the sha the current branch was cut from, or None when it
+    cannot be established. Resolves the current branch name via `git
+    symbolic-ref --short -q HEAD` (None on detached HEAD, where there is
+    no branch to look up); reads that branch's reflog OLDEST entry via
+    `git log -g --format=%H%x1f%gs refs/heads/<branch>` (the reflog is
+    printed newest-first, so the oldest entry is the last output line);
+    returns that entry's sha only when its subject starts with `branch:
+    Created from` — a pruned or rewritten reflog whose oldest surviving
+    entry is not the creation entry returns None rather than a wrong
+    sha. Any git failure (including no reflog at all) returns None."""
+    branch = _git(repo, "symbolic-ref", "--short", "-q", "HEAD")
+    if branch is None:
+        return None
+
+    output = _git(repo, "log", "-g", "--format=%H%x1f%gs", f"refs/heads/{branch}")
+    if not output:
+        return None
+
+    lines = output.splitlines()
+    sha, _, subject = lines[-1].partition("\x1f")
+    if not subject.startswith("branch: Created from"):
+        return None
+    return sha
+
+
 def resolve_changed_files(repo: Path, ref: str) -> list[str] | None:
     """Return `repo`'s branch's changed-file list against `ref`, computed
     the same way the review stations do today — `git diff <ref>...HEAD
@@ -247,11 +287,44 @@ def main(argv: list[str] | None = None) -> int:
     if not result.fresh:
         print(f"review-scope: refused — {result.reason}", file=sys.stderr)
         if result.base_sha is not None and result.remote_sha is not None:
+            old_base = result.base_sha
+            creation = branch_creation_sha(repo)
+            # TRAP: _git returns "" (falsy, not None) on a SUCCESSFUL
+            # `merge-base --is-ancestor` — it emits no stdout on a zero
+            # exit. Test both ancestry conditions with `is not None`,
+            # never truthiness, or a real usable creation sha reads as a
+            # failed check here.
+            creation_usable = (
+                creation is not None
+                and _git(repo, "merge-base", "--is-ancestor", result.base_sha, creation)
+                is not None
+                and _git(repo, "merge-base", "--is-ancestor", creation, "HEAD")
+                is not None
+            )
+            if creation_usable:
+                old_base = creation
             print(
                 "review-scope: rebase onto the current base: "
-                f"git rebase --onto {result.remote_sha} {result.base_sha} HEAD",
+                f"git rebase --onto {result.remote_sha} {old_base} HEAD",
                 file=sys.stderr,
             )
+            if not creation_usable:
+                # The remedy fell back to the merge-base rather than the
+                # branch's own creation sha, so merge-base..HEAD may carry
+                # already-squashed foreign commits (see module docstring).
+                # Print a verifiable recovery action rather than leaving
+                # the caller to judge whether the printed old-base is
+                # safe: abort and retry with the reflog's own last-line
+                # sha, not a guess.
+                branch = _git(repo, "symbolic-ref", "--short", "-q", "HEAD")
+                branch_label = branch if branch is not None else "<branch>"
+                print(
+                    "review-scope: if the rebase stops on commits that are "
+                    "not this branch's own work, run git rebase --abort and "
+                    "retry with the second sha replaced by the last-line sha "
+                    f"of: git reflog show {branch_label}",
+                    file=sys.stderr,
+                )
         return 1
 
     ref = default_branch_ref(repo)

@@ -496,6 +496,64 @@ def test_non_markdown_files_are_not_swept(tmp_path):
     assert "thing.py" not in result.stdout, result.stdout
 
 
+def test_py_module_docstring_copy_is_reported(tmp_path):
+    """`.py` MODULE docstrings are in scope now (Decision 2); function/class
+    docstrings and other string literals stay out by construction. The
+    module-docstring claim is hard-wrapped across a line break to exercise
+    normalize, and its reported line must be the ACTUAL file line."""
+    write(tmp_path, "docs/loom/specs/md_copy.md", f"{CLAIM}\n")
+    write(
+        tmp_path,
+        "scripts/module_docstring.py",
+        '"""We decided that the resolver refuses when freshness\n'
+        'cannot be established, which is the whole point."""\n',
+    )
+    write(
+        tmp_path,
+        "scripts/function_docstring_only.py",
+        '"""Unrelated module docstring."""\n'
+        "\n\n"
+        "def foo():\n"
+        f'    """{CLAIM}"""\n'
+        "    pass\n",
+    )
+    result = run(tmp_path, "--claim", CLAIM)
+    assert result.returncode == 0, result.stderr
+    assert "docs/loom/specs/md_copy.md:1" in result.stdout, result.stdout
+    assert "scripts/module_docstring.py:1" in result.stdout, result.stdout
+    assert "function_docstring_only.py" not in result.stdout, result.stdout
+
+
+def test_output_names_python_docstring_scope(tmp_path):
+    """The self-describing output must name the extended scope (Decision 2):
+    the summary line counts scanned `.py` module docstrings, and the LEAKS
+    block's absolute `.md`-only claim is replaced by one that also carves out
+    `.py` module docstrings and names the newly-adjacent non-leaks (function/
+    class docstrings, other string literals) that stay out of scope."""
+    write(tmp_path, "docs/loom/specs/sentinel.md", f"{CLAIM}\n")
+    write(
+        tmp_path,
+        "scripts/module_docstring.py",
+        '"""We decided that the resolver refuses when freshness\n'
+        'cannot be established, which is the whole point."""\n',
+    )
+    result = run(tmp_path, "--claim", CLAIM)
+    assert result.returncode == 0, result.stderr
+    assert "python module docstrings" in result.stdout, result.stdout
+
+    normalized = claim_copy_sweep.normalize(result.stdout)
+    new_leak = claim_copy_sweep.normalize(
+        "anything outside `.md` files and `.py` module docstrings — a copy "
+        "living in a code comment, a function or class docstring, a "
+        "non-docstring string literal, a test fixture, or a commit message "
+        "is out of scope by construction."
+    )
+    assert new_leak in normalized, result.stdout
+
+    old_leak = claim_copy_sweep.normalize("anything outside `.md` files —")
+    assert old_leak not in normalized, result.stdout
+
+
 def test_git_directory_is_skipped(tmp_path):
     write(tmp_path, ".git/notes.md", f"{CLAIM}\n")
     write(tmp_path, "docs/loom/specs/sentinel.md", f"{CLAIM}\n")
@@ -519,6 +577,21 @@ def assert_usage_error(result):
     file is absent, so a bare returncode check passes before any code exists."""
     assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
     assert "usage" in result.stderr.lower(), result.stderr
+
+
+def test_unparseable_py_lands_on_unreadable_list(tmp_path):
+    """A `.py` the parser rejects must be LISTED, not skipped in silence —
+    the module contract's fail-loud promise, extended to the python scope
+    (whole-branch review finding: the SyntaxError→unreadable route shipped
+    untested). Paired positive: the `.md` copy still reports, proving the
+    sweep itself ran."""
+    write(tmp_path, "docs/loom/specs/md_copy.md", f"{CLAIM}\n")
+    write(tmp_path, "scripts/broken.py", "def broken(:\n")
+    result = run(tmp_path, "--claim", CLAIM)
+    assert result.returncode == 0, result.stderr
+    assert "docs/loom/specs/md_copy.md:1" in result.stdout, result.stdout
+    assert "files this run could not read" in result.stdout, result.stdout
+    assert "scripts/broken.py (SyntaxError)" in result.stdout, result.stdout
 
 
 def test_missing_claim_is_a_usage_error(tmp_path):
