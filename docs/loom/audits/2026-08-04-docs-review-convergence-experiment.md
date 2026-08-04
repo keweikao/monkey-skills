@@ -140,7 +140,7 @@ records why), and the stdin claim produced the `read-context` field in
   branch's own findings, written into a file on that branch, changes
   every time the branch is reviewed again
   (`docs/loom/memory/a-passage-that-describes-itself-decays-on-every-edit.md`).
-  The reviews themselves are the record; read them in the PR.
+  The reviews themselves are the record; read them in PR #644.
 
 ## Corrections this arc's research pass produced
 
