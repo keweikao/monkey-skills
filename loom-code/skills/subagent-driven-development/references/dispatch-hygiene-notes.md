@@ -1,9 +1,13 @@
 # Dispatch hygiene notes
 
-Illustrative material extracted from `SKILL.md` to stay under the
-CHK-SKL-010 word cap. Both sections below are referenced from the body
-by a one-line pointer; nothing here changes the rules those pointers
-summarize — this file only carries the full worked-out illustration.
+Companion file to `SKILL.md`, kept out of the body to stay under the
+CHK-SKL-010 word cap. It carries two kinds of section, and each is
+referenced from a skill body by a one-line pointer: worked-out
+illustrations of rules the body already states (§Worked example, §SDD
+flow diagram — the pointer's rule is authoritative, the section only
+illustrates it), and standing dispatch guidance stated in full here
+(§Capacity-error recovery, §Worktree-isolated reviewer dispatch — the
+section itself is the rule; the body pointer is the route to it).
 
 ## Capacity-error recovery
 
@@ -21,6 +25,29 @@ already-committed artifacts (same subagent types, same inputs) — the
 commits are durable, so no work is lost. Treat any returned
 `NEEDS_REVISION` as a **new fix commit** (not a revert of the
 committed work), then proceed as if the verdicts had arrived on time.
+
+## Worktree-isolated reviewer dispatch
+
+- **The worktree may be detached at the default-branch tip** — when the
+  orchestrator's working tree already holds the branch under review,
+  `isolation: worktree` cannot check that branch out a second time, so
+  the new worktree lands detached at the default branch's tip instead.
+  The dispatch packet must tell the reviewer to address the artifact
+  via `git show <branch>:<path>` or `git show <sha>:<path>` (both
+  resolve through the shared object DB regardless of what the worktree
+  has checked out; bare `git show <sha>` prints the commit itself,
+  which suits diff review) and never assume the checked-out `HEAD` is
+  the artifact under review.
+- **Name known environmental test failures in the packet** — a suite
+  run from a flat extracted copy or a foreign checkout can fail tests
+  the branch itself did not break (live: `test_codex_git_guard_shim.py`
+  needs a real `.git` directory). Naming these once in the dispatch
+  packet saves every reviewer arm from independently rediscovering and
+  re-proving the same environmental failure.
+- **`standards_version` comes from the REVIEWED BRANCH's manifest**
+  (`git show <branch>:loom-code/.claude-plugin/plugin.json`), never
+  the worktree's own checkout — a detached worktree otherwise stamps
+  the wrong version (live: 0.50.0 stamped on a 0.51.0 branch).
 
 ## Worked example — the built-in `/recap` style is the target
 
