@@ -5,6 +5,35 @@ All notable changes to the `loom-code` plugin (formerly `code-toolkit`) will be 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.49.0] — 2026-08-04 — the delta-scope rule says where its range comes from
+
+### Fixed
+
+- **A delta-scoped round could not compute its own scope.** 0.48.0 told the
+  orchestrator to put `delta-scoped: <commit range>` in the dispatch packet
+  and never said where the range came from — not the branch base, not the
+  merge-base, and not recoverable from the diff. The rule was executable only
+  by an orchestrator that happened to remember which commit the previous
+  round reviewed, which no passage asked it to record. Step 3 now states the HEAD
+  sha each dispatch reviews and Step 5 surfaces it; Directive 2 defines the
+  range as `<previous round's sha>..HEAD` and
+  **falls back to `unbounded` when no prior sha can be found**. The
+  `docs-reviewer` contract carries the same fallback for a range it cannot
+  resolve. The asymmetry justifying that direction is **visibility, not
+  cost**: an unbounded round is genuinely expensive — it re-opens the
+  pre-existing pool and can consume a round under the cap — but every cost is
+  visible and decidable, while a wrongly-guessed range suppresses findings
+  nobody ever saw.
+- **The sha now has a field, and the contract states where that stops.**
+  `reviewed_sha:` is REQUIRED in the panel verdict and in the `docs-reviewer`
+  output contract, and Step 5 surfaces it — enough for the next round in the
+  same session. Across a session boundary the read side is not
+  wired: a durable record exists (marker minting appends `head_sha` to the
+  origin ledger) but no step consults it, and it holds only the last MINTED
+  round, so it can be several rounds stale. Directive 2 states that boundary
+  and notes a stale sha is safe to use — it widens the range, never narrows it
+  (`docs/loom/backlog/2026-08-04-a-delta-scoped-round-cannot-resume-across-a-session.md`).
+
 ## [0.48.0] — 2026-08-04 — the docs arm stops minting on a mixed branch, and later rounds scope to the delta
 
 ### Fixed
