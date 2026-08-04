@@ -60,7 +60,14 @@ def _text() -> str:
 
 
 def _norm(s: str) -> str:
-    """Collapse whitespace so a re-wrapped line still matches."""
+    """Collapse whitespace so a re-wrapped line still matches, and strip
+    markdown emphasis markers so bold text (e.g. "last **minted**
+    round") is not falsely distinct from the equivalent plain phrase
+    ("last minted round") when a test checks a phrase's presence or
+    absence -- three prior vacuous-pin variants in this arc were hard
+    wrap, whitespace, and inline bold; this closes the inline-bold
+    gap."""
+    s = s.replace("*", "")
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -125,6 +132,31 @@ def _convergence_window(text: str) -> str:
         "directives -- directives placed after the steps are a trailing "
         "aside, the placement regression this window forbids"
     )
+    return "".join(lines[start:end])
+
+
+def _prior_findings_check_window(text: str) -> str:
+    """The `prior_findings_check:` fence entry inside `## Verdict
+    structure` -- from the `prior_findings_check:` line to the next
+    top-level key line (`findings:`). Narrower than the whole heading
+    window, which also contains `findings:`'s own `- severity:` line
+    and would false-green an assertion that no `- severity:` line
+    appears inside the prior_findings_check fence."""
+    verdict = _heading_window(text, "Verdict structure")
+    lines = verdict.splitlines(keepends=True)
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("prior_findings_check:"):
+            start = i
+            break
+    assert start is not None, (
+        "`## Verdict structure` carries no `prior_findings_check:` fence"
+    )
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r"^[a-z_]+:", lines[j]):
+            end = j
+            break
     return "".join(lines[start:end])
 
 
@@ -387,9 +419,12 @@ def test_union_reaggregation_mutation_guard():
     _assert_reaggregate_never_adopt_one_arm(low)
 
     key_phrase = (
-        "re-run §aggregation rule on the union (per-dimension score = "
-        "the worse of the two arms' scores) — never adopt one arm's "
-        "own verdict"
+        "re-run §aggregation rule on the union — per-dimension score is "
+        "re-aggregated from that dimension's union findings, not either "
+        "arm's own: two arms contributing different findings to one "
+        "dimension can each score clean alone yet union to "
+        "needs_revision, which either arm's own score would miss — "
+        "never adopt one arm's own verdict"
     )
     assert key_phrase in low, (
         "test fixture assumption broken -- SKILL.md wording changed "
@@ -401,26 +436,63 @@ def test_union_reaggregation_mutation_guard():
         _assert_reaggregate_never_adopt_one_arm(mutated)
 
 
-def _assert_per_dimension_worse_score(low: str) -> None:
+def _assert_per_dimension_score_is_union_recomputed(low: str) -> None:
     """Raise AssertionError unless `low` states each minted dimension
-    score is the WORSE of the two arms' scores (mirrors
-    requesting-code-review's wording, T2 quality review correctness
-    finding)."""
+    score is RE-AGGREGATED from that dimension's union findings, not
+    copied from either arm's own score (I1 fix: worse-of-arms
+    understates when the two arms contribute DIFFERENT findings to one
+    dimension -- two arms that each score a dimension clean alone can
+    still union to NEEDS_REVISION there, which worse-of-arms would miss
+    since neither arm alone carried a 🟡/🔴 in it)."""
     assert "per-dimension score" in low, (
         "must state how the orchestrator computes per-dimension panel "
         "scores for the minted verdict"
     )
-    assert "worse of the two arms" in low, (
-        "per-dimension score must be the WORSE of the two arms' scores, "
-        "mirroring requesting-code-review's wording verbatim"
+    assert "re-aggregated from that dimension's union findings" in low, (
+        "per-dimension score must be RE-AGGREGATED from that "
+        "dimension's union findings, not copied from either arm"
+    )
+    assert "worse of the two arms' scores" not in low, (
+        "must retire worse-of-arms as the per-dimension score rule -- "
+        "it understates when the two arms contribute different "
+        "findings to the same dimension"
     )
 
 
-def test_per_dimension_score_is_worse_of_two_arms():
-    """The minted per-dimension score is the WORSE of the two arms'
-    scores -- same rule as requesting-code-review's panel aggregation."""
+def test_per_dimension_score_is_union_recomputed():
+    """The minted per-dimension score is RE-AGGREGATED from that
+    dimension's union findings, not the worse of the two arms' own
+    scores -- worse-of-arms silently understates a dimension where the
+    two arms found DIFFERENT defects (1 instruction-class 🟡 each ->
+    union has 2 -> NEEDS_REVISION at the verdict level, while
+    worse-of-arms still reads PASS_WITH_NOTES since neither arm alone
+    crossed the threshold)."""
     low = _norm(_steps_window(_text())).lower()
-    _assert_per_dimension_worse_score(low)
+    _assert_per_dimension_score_is_union_recomputed(low)
+
+
+def test_per_dimension_score_union_recompute_mutation_guard():
+    """Mutation probe: reverting the union-recompute wording back to
+    worse-of-arms must fail this pin -- proves the pin is sensitive to
+    the regression it exists to catch (the verdict/dimension_scores
+    contradiction I1 closes), not just to the section going absent."""
+    low = _norm(_steps_window(_text())).lower()
+    _assert_per_dimension_score_is_union_recomputed(low)
+
+    key_phrase = (
+        "per-dimension score is re-aggregated from that dimension's "
+        "union findings, not either arm's own"
+    )
+    assert key_phrase in low, (
+        "test fixture assumption broken -- SKILL.md wording changed "
+        "under this test; update key_phrase to match"
+    )
+    mutated = low.replace(
+        key_phrase, "per-dimension score is the worse of the two arms' scores"
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_per_dimension_score_is_union_recomputed(mutated)
 
 
 def test_convergence_directives():
@@ -489,6 +561,63 @@ def test_convergence_directives():
     )
 
 
+def test_delta_scope_rationale_carries_no_unsourced_magnitudes():
+    """The delta-scope rationale sentence (Directive 1) may state only
+    what the cited audit records -- direction without magnitude. The
+    audit (docs/loom/audits/2026-08-04-docs-review-convergence-experiment.md)
+    carries neither an edit count nor a size label for either round's
+    fixes; both phrases were unsourced (I3)."""
+    low = _norm(_convergence_window(_text())).lower()
+    assert "four one-to-two-sentence edits" not in low, (
+        "the delta-scope rationale must not carry the unsourced edit "
+        "count 'four one-to-two-sentence edits' -- the audit records no "
+        "such count"
+    )
+    assert "broad rewrite" not in low, (
+        "the delta-scope rationale must not carry the unsourced size "
+        "label 'broad rewrite' -- the audit records no such label"
+    )
+
+
+def test_delta_scope_rationale_is_size_grounded_and_attribution_correct():
+    """Two follow-on defects from the same magnitude retraction (Task 8,
+    docs/loom/plans/2026-08-04-docs-review-0490-defect-fixes.md):
+
+    (1) the (b)/(c) risk sentence must not claim 'three gating defects'
+    caught by 'the next round' -- the audit's round-2 cell shows the
+    HISTORICAL unbounded control caught 2; the third came from a FRESH
+    retrospective delta-scoped treatment arm, not from 'the next round'
+    itself (docs/loom/audits/2026-08-04-docs-review-convergence-experiment.md
+    Round 2 row). Direction without count or mis-attribution is what's
+    sourced.
+
+    (2) the 'A large rewrite -> (a)' conclusion needs a size
+    characterization to hang on now that the evidence clause measures
+    delta-vs-unbounded catch parity, not rewrite size. The audit's own
+    row labels -- 'large delta' (round 2 row) / 'small delta' (round 3
+    row) -- are audit-recorded direction words and may be used, without
+    reintroducing an edit count."""
+    low = _norm(_convergence_window(_text())).lower()
+
+    assert "three gating defects" not in low, (
+        "the (b)/(c) risk sentence must not carry the unsourced count "
+        "'three gating defects' -- the audit's HISTORICAL round-2 "
+        "unbounded control caught 2, and the third came from a FRESH "
+        "retrospective treatment arm, not 'the next round'"
+    )
+    assert "the next round caught" not in low, (
+        "the (b)/(c) risk sentence must not attribute the third gating "
+        "defect to 'the next round' -- it came from a fresh retrospective "
+        "delta-scoped arm, not the branch's real next round"
+    )
+    assert "larger delta" in low and "smaller delta" in low, (
+        "the criterion paragraph must reintroduce a size characterization "
+        "(round 1's fixes were the larger delta, round 2's the smaller) "
+        "using the audit's own round-label direction words, so the "
+        "'A large rewrite -> (a)' conclusion has something to hang on"
+    )
+
+
 def test_aggregation_instruction_class_only():
     """The aggregation rule applies to instruction-class findings ONLY;
     evidence-class findings are recorded observations that never gate;
@@ -516,6 +645,45 @@ def test_aggregation_instruction_class_only():
     assert "never edited in place" in low, (
         "the supersede sentence must forbid editing in place"
     )
+
+
+def test_threshold_provenance_sentence():
+    """The Aggregation rule states the inherited-threshold provenance
+    honestly: the 2-🟡 bar is inherited unexamined from
+    requesting-code-review, where it sits on top of a passing test
+    suite the docs arm has none of."""
+    low = _norm(_heading_window(_text(), "Aggregation rule")).lower()
+    assert "inherited unexamined" in low, (
+        "the Aggregation rule must state the thresholds are inherited "
+        "unexamined from requesting-code-review"
+    )
+    assert "instruction-class findings only" in low, (
+        "the instruction-class-only needle must survive this edit"
+    )
+    assert "grep-window" in low, (
+        "the contrast with a passing test suite must qualify itself: "
+        "the docs arm still has a grep-window test floor beneath it, "
+        "per the Cross-skill contract's sibling-gate row"
+    )
+
+
+def test_class_default_provenance_marker():
+    """The finding schema's `class:` line may carry an optional
+    `(defaulted)` annotation when the reviewer fail-closed defaulted to
+    `instruction` instead of judging it -- and the aggregation-equivalence
+    sentence must say so verbatim, inside `## Verdict structure` (I5)."""
+    section = _norm(_heading_window(_text(), "Verdict structure")).lower()
+    assert "(defaulted)" in section, (
+        "§Verdict structure must show the optional `(defaulted)` tag on "
+        "the `class:` line"
+    )
+    assert "treated exactly as" in section, (
+        "§Verdict structure must state the `(defaulted)` tag is treated "
+        "exactly as `instruction` by the aggregation rule"
+    )
+    assert "class: instruction | evidence" in _heading_window(
+        _text(), "Verdict structure"
+    ), "the pinned `class: instruction | evidence` literal must survive"
 
 
 def test_verdict_structure_prose_dimensions():
@@ -554,6 +722,198 @@ def test_cross_skill_contract_names_callers():
     )
     assert "finishing-a-development-branch" in low, (
         "must name finishing-a-development-branch (upstream orchestrator)"
+    )
+
+
+def test_prior_findings_carrier_every_later_round():
+    """The prior-findings carrier is not round-2-specific: every round
+    after round 1 receives the previous round's surviving findings.
+    `resurfaced` (Directive 3) was otherwise unreachable at round 2, the
+    only round the old wording let carry `prior_findings_check` (D1)."""
+    conv = _norm(_convergence_window(_text())).lower()
+    assert "round-n handoff" in conv, (
+        "Directive 2 must be generalized to a round-N handoff, not "
+        "round-2-specific"
+    )
+    assert "round n's" in conv and "round n-1" in conv, (
+        "Directive 2 must state round N's packet carries round N-1's "
+        "findings"
+    )
+    assert "receives the surviving findings it verifies" in conv, (
+        "Directive 1 option (a) must state the authorized verification "
+        "round receives the surviving findings it verifies"
+    )
+    assert "round 2 only" not in conv, (
+        "the convergence directives must not restrict the carrier to "
+        "round 2 only"
+    )
+    assert "one extra round" in conv and "retained" in conv, (
+        "Directive 2 must state that a finding fix-verified in round "
+        "N-1 is retained in round N's carrier for exactly one extra "
+        "round, so a regression can be tagged `resurfaced` — "
+        "otherwise a fix-verified finding drops out of every later "
+        "carrier and Directive 3's oscillation stop stays unreachable"
+    )
+
+    verdict = _norm(_heading_window(_text(), "Verdict structure")).lower()
+    assert "every round after round 1" in verdict, (
+        "the verdict-schema comment must generalize prior_findings_check "
+        "to every round after round 1"
+    )
+    assert "round 2 only" not in verdict, (
+        "the verdict-schema comment must not restrict prior_findings_check "
+        "to round 2 only"
+    )
+
+    steps = _norm(_steps_window(_text())).lower()
+    assert "every round after round 1" in steps, (
+        "Step 3's dispatch-packet enumeration must also generalize the "
+        "prior-round-findings clause to every round after round 1, not "
+        "leave a round-2-only synonym copy behind"
+    )
+
+
+def test_prior_findings_restated_as_scalar():
+    """A prior finding is restated as a one-line scalar, never the
+    original `- severity:` block -- `_FINDING_RE`
+    (`loom_gate_markers.py`) matches `- severity:` at ANY indent, so a
+    verbatim block nested under `finding:` would land in the origin
+    ledger a second time as a later-round finding, contaminating the
+    population partition the ledger exists to keep clean (I2)."""
+    raw = _prior_findings_check_window(_text())
+    norm = _norm(raw).lower()
+    assert "one-line" in norm and "scalar" in norm, (
+        "the restatement instruction must tell the reviewer to restate "
+        "the prior finding as a one-line scalar summary"
+    )
+    assert not re.search(r"(?m)^\s*-\s*severity\s*:", raw), (
+        "the prior_findings_check fence must not itself carry a "
+        "`- severity:` finding-block line (the exact pattern "
+        "loom_gate_markers.py's _FINDING_RE matches at any indent) -- "
+        "a nested one would double-count the finding in the origin "
+        "ledger as a new later-round finding"
+    )
+
+
+def test_directive2_states_invocation_semantics():
+    """Directive 2's session-boundary paragraph must state invocation
+    semantics: the ledger appends on every `review-pass` INVOCATION,
+    including the NEEDS_REVISION (exit 3) and schema-failure (exit 4)
+    paths that mint no marker -- not only on a "minted" round. An
+    entry can still be stale, but for the correct reason: a round
+    that never invokes the CLI (a mixed-branch docs round; a round
+    nobody bothered to invoke) appends nothing (D2). The paragraph
+    must also name the `unresolved` sentinel and treat it exactly as
+    "no prior reviewed_sha", never as a literal string to build a
+    range from (folded-in from Task 3's review)."""
+    conv = _norm(_convergence_window(_text())).lower()
+    assert "last minted round" not in conv, (
+        "Directive 2 must not claim the ledger holds only the last "
+        "minted round -- the ledger appends on every invocation, not "
+        "only on a mint"
+    )
+    assert "invocation" in conv, (
+        "Directive 2 must state the ledger appends on every "
+        "review-pass invocation"
+    )
+    assert "needs_revision" in conv and (
+        "exit 3" in conv or "exit-3" in conv
+    ), (
+        "Directive 2 must name the NEEDS_REVISION (exit 3) path as one "
+        "that still appends a ledger entry despite minting no marker"
+    )
+    assert "schema" in conv and ("exit 4" in conv or "exit-4" in conv), (
+        "Directive 2 must name the schema-failure (exit 4) path as one "
+        "that still appends a ledger entry despite minting no marker"
+    )
+    assert "unresolved" in conv and "not a sha" in conv, (
+        "Directive 2 must name the `unresolved` sentinel and state it "
+        "is not a sha"
+    )
+    assert "no prior `reviewed_sha`" in conv, (
+        "Directive 2 must state the `unresolved` sentinel is treated "
+        "exactly as no prior reviewed_sha found, so the next round "
+        "runs unbounded"
+    )
+
+
+def test_round_accounting_is_session_scoped():
+    """The already-reviewed-branch bullet in `## When NOT to use` must
+    retract the false claim that round accounting persists across a
+    session boundary. Nothing restores an orchestrator's round count
+    when a new session resumes review -- the count restarts, so the
+    2-round cap guards each session independently, weaker than
+    continuous accounting would be. Directive 2's surrounding prose
+    already covers the ledger/sha carrier gap (D2, Task 4); this bullet
+    stays scoped to the round-COUNT truth, not a restatement of that
+    (D3)."""
+    window = _norm(_heading_window(_text(), "When NOT to use")).lower()
+    assert "round accounting continues, it does not reset" not in window, (
+        "must retract the false cross-session round-accounting "
+        "continuity claim"
+    )
+    assert "session-scoped" in window, (
+        "must state round accounting is session-scoped"
+    )
+    assert "restarts" in window, (
+        "must state the round count restarts across a session boundary"
+    )
+
+
+def _out_of_scope_fence_window(text: str) -> str:
+    """The `out_of_scope:` fence entry inside `## Verdict structure` --
+    from the `out_of_scope:` line to the next top-level key line, or to
+    the end of the heading window (it is the fence's last key, so there
+    normally is no next key)."""
+    verdict = _heading_window(text, "Verdict structure")
+    lines = verdict.splitlines(keepends=True)
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("out_of_scope:"):
+            start = i
+            break
+    assert start is not None, (
+        "`## Verdict structure` carries no `out_of_scope:` fence"
+    )
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r"^[a-z_]+:", lines[j]):
+            end = j
+            break
+    return "".join(lines[start:end])
+
+
+def test_out_of_scope_not_claimed_persisted():
+    """`out_of_scope:` entries carry no `severity:`, never match the
+    ledger's finding regex (`_FINDING_RE`, loom_gate_markers.py), and
+    nothing re-injects them into round N+1 -- the panel verdict text
+    goes to an unspecified temp file. "Deferred on the record" overclaims
+    a persistence the mechanism does not provide. State the honest fact
+    instead: surfaced to the user with the verdict, persisted nowhere --
+    deferral survives only if the user or orchestrator acts on it (D5).
+    Both copies of the claim must retract: the Aggregation rule's
+    out_of_scope prose bullet, and the Verdict structure fence's own
+    comment."""
+    agg = _norm(_heading_window(_text(), "Aggregation rule")).lower()
+    assert "deferred on the record" not in agg, (
+        "the Aggregation rule's out_of_scope bullet must not claim a "
+        "deferred defect is 'deferred on the record' -- nothing "
+        "persists it"
+    )
+    assert "persisted nowhere" in agg, (
+        "the Aggregation rule's out_of_scope bullet must state the "
+        "honest fact: surfaced to the user with the verdict, persisted "
+        "nowhere"
+    )
+
+    fence = _norm(_out_of_scope_fence_window(_text())).lower()
+    assert "deferred on the record" not in fence, (
+        "the Verdict structure out_of_scope fence comment must not "
+        "claim a suppressed defect is 'deferred on the record'"
+    )
+    assert "persisted nowhere" in fence, (
+        "the Verdict structure out_of_scope fence comment must state "
+        "the honest fact: persisted nowhere"
     )
 
 

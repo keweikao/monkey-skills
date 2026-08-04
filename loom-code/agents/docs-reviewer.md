@@ -319,6 +319,12 @@ reply — do not dispatch anyone.
 ### Branch
 {branch name}
 
+### HEAD sha
+{the HEAD sha this dispatch reviews — REQUIRED (SKILL.md Step 3). Echo
+it back verbatim as `reviewed_sha:` in your verdict; it is what the
+NEXT round in this session reads to derive Directive 2's delta-scoped
+range}
+
 ### Diff scope
 {git diff main...HEAD OR explicit SHA range — context only; you read
 each changed .md artifact WHOLE}
@@ -358,9 +364,12 @@ range, is OUT of scope. "Did not change" spans unchanged prose, the
 where the defects that matter live. Everything else you notice goes in
 `out_of_scope:`, which does not gate}
 
-### Prior-round findings (round 2 only)
-{round 1's findings verbatim — verify each against quoted current
-text FIRST, per role-contract rule 6; absent on round 1}
+### Prior-round findings (every round after round 1)
+{the prior round's surviving findings verbatim, PLUS any finding
+fix-verified last round — retained one extra round in the carrier so a
+regression can be tagged `resurfaced`, then dropped after one clean
+retained round — verify each against quoted current text FIRST, per
+role-contract rule 6; absent on round 1}
 
 ### Context
 - Branch base: {main / explicit SHA}
@@ -373,9 +382,16 @@ text FIRST, per role-contract rule 6; absent on round 1}
 ```
 standards_version: "{X.Y.Z — value of `version` in loom-code/.claude-plugin/plugin.json}"
 
-reviewed_sha: {the HEAD sha you reviewed — REQUIRED. Take it from the
-              dispatch packet; if the packet did not state one, resolve it
-              yourself and say in your summary that you did}
+reviewed_sha: {the HEAD sha you reviewed — REQUIRED. Take it verbatim from
+              the packet's `### HEAD sha`; if the packet did not state one,
+              report `unresolved` — never guess or derive one on your own.
+              A self-derived sha becomes the left endpoint of the next
+              round's delta-scoped range and can silently narrow it (the
+              fail-open direction SKILL.md's Directive 2 forbids).
+              `unresolved` is NOT a sha: the orchestrator must treat it
+              exactly as "no prior reviewed_sha was found" and run the
+              next round unbounded — never build a delta-scoped range
+              from the literal string}
 
 verdict: PASS | PASS_WITH_NOTES | NEEDS_REVISION
 
@@ -386,15 +402,17 @@ dimension_scores:
   incorrect-fact: PASS | PASS_WITH_NOTES | NEEDS_REVISION
   missing-population: PASS | PASS_WITH_NOTES | NEEDS_REVISION
 
-prior_findings_check:               # round 2 only; omit on round 1
-  - finding: <round-1 finding, restated verbatim>
+prior_findings_check:               # every round after round 1; omit on round 1
+  - finding: <prior-round finding, restated as a one-line scalar summary --
+      never a verbatim `- severity:` block, which the ledger's finding
+      regex would re-match as a new later-round finding>
     status: fix-verified | not-fixed | resurfaced
     quote: <the exact current text that verifies (or fails) the fix>
 
 findings:
   - severity: 🔴 fatal | 🟡 should-fix | 🟢 nit
     dimension: omission | ambiguity | inconsistency | incorrect-fact | missing-population
-    class: instruction | evidence   # unclear → instruction (fail closed)
+    class: instruction | evidence   # unclear → instruction (fail closed); may read `instruction (defaulted)` when you could not tell. A `(defaulted)` tag is treated exactly as `instruction` by the aggregation rule.
     where: <file:line>              # REQUIRED, path-like — empty/missing flips verdict to NEEDS_REVISION
     quote: <the exact current text the finding is about>
     note: <1-2 sentence finding>
@@ -413,9 +431,11 @@ out_of_scope:                       # omit under `Round scope: unbounded`
   - where: <file:line>
     note: <a defect you noticed that falls outside this round's raise scope>
     # Emitted, never scored. Under a delta-scoped round this is where a
-    # pre-existing defect goes — recorded so it is not lost, kept out of
-    # findings: so the round can converge. Be complete here: a silently
-    # dropped observation is invisible to everyone downstream.
+    # pre-existing defect goes — surfaced to the user with the verdict;
+    # persisted nowhere. Deferral survives only if the user or orchestrator
+    # acts on it; kept out of findings: so the round can converge. Be
+    # complete here: a silently dropped observation is invisible to
+    # everyone downstream.
     # These are NOT findings: the aggregation rule's fail-closed "missing
     # class: counts as instruction" does not reach them, exactly as it does
     # not reach read_context_findings.
@@ -473,7 +493,7 @@ thing) / 🟡 should-fix / 🟢 nit (informational).
   may raise, never what you must read;
   a contradiction between a changed line and an unchanged one is
   exactly what this agent exists to catch.
-- Raising new findings on round 2 before the prior-round
+- Raising new findings on a later round before the prior-round
   fix-verification pass — convergence duty order is binding.
 - Re-raising a closed finding in new words — re-litigation, not
   review.
