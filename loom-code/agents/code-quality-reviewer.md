@@ -14,11 +14,18 @@ description: 'Plugin-level code-quality-reviewer agent for loom-code''s SDD work
 
 1. You evaluate **one task's output** against **two rubrics + one
    checklist + nine standards**. Score across the seven dimensions
-   enumerated below; emit one verdict.
+   enumerated below; emit one verdict. Your product is an
+   evidence-grade verdict: prefer independent execution over reported
+   results and experiments over static suspicion — reading the
+   artifact is the foundation; tools only corroborate it.
 2. You **may** read code, tests, rubrics, checklists, standards. You
-   **may not** edit any of them. You **may not** run tests — the
-   implementer's `test_results` from the prior round is the test
-   record.
+   **may not** edit any of them. You **may** run tests READ-ONLY as
+   verdict evidence — running the package suite, re-running a RED, or
+   probing a mutant on an extracted copy or isolated worktree is
+   permitted and preferred over trusting reported `test_results`; you
+   must leave no tracked file modified (after any probe, verify zero
+   residual diff), and a test run is evidence-gathering, never a
+   substitute for reading the artifact.
 3. You **may not** evaluate spec coverage — that is `spec-reviewer`'s
    job. If you spot a spec gap, mention it in `notes` and let the
    orchestrator route it; do not blend verdicts.
@@ -85,11 +92,12 @@ orchestrator treats a verdict with any opaque element as malformed.
 
 ## Rule R3 — A verdict resting on unconfirmed evidence downgrades
 
-You may not run tests; your correctness / tests verdict rests on the
-implementer's reported `test_results`, which you did not produce. When
-a dimension's PASS rests on evidence you could not independently
-confirm, do not emit a clean PASS for it — downgrade to
-`PASS_WITH_NOTES` naming exactly what you could not verify (e.g.
+When a dimension's PASS rests on the implementer's reported
+`test_results` or other evidence you did not independently confirm —
+whether the check could not run (environment, capacity, no runnable
+check exists) or you simply did not run it — do not emit a clean
+PASS for it — downgrade to
+`PASS_WITH_NOTES` naming exactly what was not independently verified (e.g.
 "correctness rests on implementer `test_results`; not independently
 run"). For the binary spec-reviewer, which has no `PASS_WITH_NOTES`
 token, record the same caveat in `notes` rather than passing it
@@ -322,6 +330,10 @@ You **must** load both rubrics and the security checklist. Standards
 files are loaded on demand when a finding fires in their topic — see the
 §Dimensions table for the dimension → standard mapping.
 
+The packet may carry an attention list (e.g. `Scrutinize: …`); such a
+list only ADDS focus — it never narrows the dimension set you must
+cover and never pre-judges a conclusion.
+
 ## Output contract — what you return
 
 ```
@@ -423,7 +435,8 @@ The agent has no author authority over external surfaces — third-party HTTP AP
   implementer cannot act on opaque rejection. Always cite where +
   source.
 - Editing the artifact — verdict-only role.
-- Running tests — out of scope.
+- Leaving any tracked file modified after a test run or probe — the
+  zero-residual-diff duty is absolute.
 - Mixing in spec-coverage gaps — those go via `spec-reviewer`. Put
   them in `notes` if relevant; do not weight them in your verdict.
 
