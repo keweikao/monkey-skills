@@ -728,3 +728,98 @@ provenance guard requires the field, and deliberately loud for the
 hand-fed case). The library caller still sees the exception; only the CLI
 reports instead of tracebacking. A missing subcommand is handled by
 argparse itself and exits **2**.
+
+## Pack verb (data-markets): `quarterly-series`
+
+`../data-markets/scripts/pack.py --pack quarterly-series` — the CLI entry
+point for `scripts/kpi_us_quarterly_series.py`, which has **no CLI of its
+own**. The verb lives in `pack_us.py` because it must ACQUIRE filings,
+and it is documented here because everything it computes
+(`stitch_quarterly_statements`, `derive_discrete_quarters`,
+`project_quarterly_series`) is this skill's.
+
+One company's income statement, balance sheet and cash-flow statement as a
+**discrete-quarter series over ALL available history**, with **every period
+stating what it is**. US-only (SEC EDGAR 10-Q/10-K); any other market is
+refused at the facade with exit **64**.
+
+```
+# all available history (ten years is the FLOOR, not the target)
+uv run --with edgartools --with requests \
+  ../data-markets/scripts/pack.py --market us --pack quarterly-series --ticker MSFT
+
+# capped for a quick look — a capped run does NOT witness "all history"
+uv run --with edgartools --with requests \
+  ../data-markets/scripts/pack.py --market us --pack quarterly-series \
+  --ticker MSFT --years 3
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--ticker` | yes | exactly one (single, heavy) |
+| `--years N` | no | upper bound on the span. Omit for all available history. Refused (exit 64) on any other pack, and on `N < 1` |
+
+**COLD RUNS ARE SLOW, AND THAT IS NOT A HANG.** The brief's planning figure
+was ~77 filings at **20-37 minutes uncached** (§Boundary). The first live
+run says that is low: an uncapped MSFT span listed **131 filings and used
+129** (`MEASURED-not-repo`, 2026-08-06 — the payload is a session artifact,
+not in the tree). At the brief's own per-filing rate that puts a
+full-history filer nearer **35-60 minutes** — scaled from the measured
+count, not separately timed. Budget for the larger number; a filer with
+less history costs proportionally less.
+
+Filings are immutable, so the disk cache behind `_acquire_raw_filing` has
+no TTL and re-runs are cheap; the FIRST one is not. Use `--years` while
+iterating.
+
+**stdout stays a single JSON document, so `| jq` is safe.** A long span
+draws warnings out of `edgartools` for accessions it cannot resolve, and
+it prints them through a console that writes to stdout; the facade
+redirects that channel for the duration of the fetch, so the chatter
+appears on **stderr** beside the progress log instead of in the middle of
+the payload.
+
+**The envelope** — the existing pack envelope, plus one count and one
+section:
+
+| key | meaning |
+|---|---|
+| `pack` / `ticker` / `fetched_at` | as every other pack |
+| `_status` | `ok` / `partial` / `failed`. **Overwritten by the facade's own `_status` block on the way out** — read `acquisition._status` on the far side of the CLI |
+| `n_filings_used` | how many filings the series was BUILT from — never how many were requested |
+| `statements.<income\|balance_sheet\|cash_flow>` | `{lines, periods}` |
+| `acquisition` | `{failed_items, requested, succeeded, failed, _status}` |
+
+Each period is `{key, kind, derived, start, end}`. `kind` is
+`discrete_quarter` / `ytd` / `annual` / `instant` / `unknown`, and `derived`
+is a **separate boolean** beside it, never a sixth kind: a derived Q4 is
+both a discrete quarter AND derived, and collapsing the two axes makes
+"every discrete quarter regardless of provenance" unaskable. An
+out-of-window span answers `unknown` rather than being bucketed into its
+nearest neighbour.
+
+**WHY ANY PERIOD IS `derived` AT ALL.** A US filer states no fourth
+quarter — there is no Q4 10-Q — and a 10-Q's cash-flow statement is
+cumulative where its income statement is discrete. So `Q2 = YTD6 − Q1`,
+`Q3 = YTD9 − YTD6`, `Q4 = FY − YTD9` are computed here, on the cumulative
+columns AS FILED, and a filed column is never overwritten. A fiscal year
+missing an input column yields NO derived period for it — never a partial
+subtraction and never a fabricated zero.
+
+**Money is emitted as exact TEXT, not JSON numbers** — the derived cells
+only; filed cells ride through as the stitcher gave them. A float
+round-trip is how this module family once manufactured a false
+restatement.
+
+**A ZERO-FILING SPAN IS A FAILURE, NOT AN EMPTY SERIES.** A foreign
+private issuer files 20-F rather than 10-Q/10-K, so an empty span is a
+real answer to a real request; it comes back as `error` +
+`error_class: "empty_span"` with the counts, and exits non-zero. A span
+that lost SOME filings is `partial` (exit **2**) with each unacquirable
+accession named in `acquisition.failed_items` — never a shorter series
+shaped like a complete one.
+
+**`reconstruct` SURVIVES UNCHANGED.** The two verbs differ in shape
+(single-filing reconstruction vs multi-filing stitched series) and in
+dependency (`statements_for` vs `XBRLS`); this one neither replaces nor
+deprecates it.

@@ -403,6 +403,65 @@ asking the dependency for discrete cash-flow quarters.
 - **Brief item covered**: "A verb that, given a ticker, returns the three statements as a discrete-quarter series over **ALL available history**, where **every period states what it is**."
 - **Note on the annual verb**: `pack_reconstruct` SURVIVES unchanged. The brief's What-Becomes-Obsolete asks this to be stated rather than left implicit: the two paths differ in shape (single-filing reconstruction vs multi-filing stitched series) and in dependency (`statements_for` vs `XBRLS`), so this task neither replaces nor deprecates it. Revisit only if the series verb proves able to answer every annual question.
 
+## FINDING 2026-08-07 — "already filed" is not the same as "populated", and the live run proved it
+
+**Status: OPEN. Found by Task H's live run, which is the first thing on this branch
+to look at more than one filer-year at once.** A spec reviewer questioned the
+derived count; chasing that number found a real defect one layer up, in Task E.
+
+**What the live MSFT run actually contains** (measured from the uncapped payload,
+`MEASURED-not-repo` — the payload is in the session scratchpad, not the tree):
+
+| fiscal year | Q4 column | cash-flow lines carrying a value |
+|---|---|---|
+| 2010–2020 | present, `derived=False` | **1–2 of 69** |
+| 2021–2026 | present, `derived=True` | **30–32 of 69** |
+
+The income statement is the same shape: 5–8 of 42 filed, 15 of 42 derived. Spot
+check, FY2015 operating cash flow at `duration_2015-04-01_2015-06-30`: **`None`**.
+
+**So eleven fiscal years carry a Q4 column that classifies as `discrete_quarter`,
+is marked `derived: false`, and is almost entirely empty.** That is exactly the
+shape this arc exists to remove — a short answer wearing the shape of a complete
+one — and it is the arc's own output producing it.
+
+**The cause is Task E's skip guard doing precisely what it was built to do.**
+`derive_discrete_quarters` refuses to write over a period the filer stated
+(`if key in filed_keys: continue`), which is right: a filed figure is a primary
+source and a derived one is a subtraction. But the guard tests for the KEY's
+presence, not for whether that key carries anything. A 10-Q contributes a sparse
+Q4-shaped column for its own fiscal year, so the key exists, so the derivation is
+skipped — and the two-or-three populated cells stand in for a quarter.
+
+**The inputs were there the whole time.** Verified for FY2015, FY2018 and FY2021:
+the annual column and the nine-month column are both present, so `FY − YTD9` was
+computable for every one of those years. Nothing was missing; the guard simply
+never asked.
+
+**Why 2021 is the boundary**: it is the oldest fiscal year this capture's 10-K set
+covers. Older years reach the payload only through 10-Qs, which supply the sparse
+column but no annual column of their own to be skipped against.
+
+**NOT Task H's defect, and not to be fixed there.** Task H composes; the judgement
+lives in Task E's guard. Recorded here rather than in Task E's entry because Task E
+is committed (`b5b92c34`) and this is the plan's live-finding log.
+
+**The shape of the fix is a decision, not a mechanic** — it is the same
+filed-versus-derived precedence question the arc has already answered once, now at
+cell granularity instead of column granularity, and it belongs to the user:
+- **Per-cell fill** — derive the column, then write only into cells the filer left
+  empty. Keeps every filed figure authoritative; produces a column that is part
+  primary-source and part subtraction, which the current `derived` boolean cannot
+  express (it is per-period, not per-cell).
+- **Populated-threshold skip** — treat a column below some fill ratio as absent and
+  derive it wholesale. Simple and uniform; needs a threshold, and a threshold is a
+  number nobody can defend from first principles.
+- **Leave it and mark it** — emit the sparse column as-is but flag it, so a
+  consumer can tell "this quarter is thin" from "this quarter is complete".
+  Cheapest, and the only option that adds no new way to be wrong.
+
+---
+
 ## Task I — Verify the oldest available filings still parse
 
 - **Description**: The span now reaches back to the start of XBRL mandate

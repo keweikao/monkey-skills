@@ -23,6 +23,7 @@ import datetime as _dt
 import json
 import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
@@ -142,6 +143,7 @@ def test_us_migration_contract():
     assert pack_us.SUPPORTED_PACKS == (
         "snapshot", "memo-fetch", "comps-multiples", "screener-batch", "regime-pack",
         "kpi-quarterly", "kpi-topline-backfill", "statement-backfill", "reconstruct",
+        "quarterly-series",
     ), f"SUPPORTED_PACKS diverges from data-us pack.py --pack choices: {pack_us.SUPPORTED_PACKS}"
 
     # --- (b) build_pack("snapshot", ...) section keys match fixture (fixture-fed, mocked subprocess) ---
@@ -2172,3 +2174,945 @@ def test_an_empty_span_returns_two_empty_lists_and_fabricates_no_failure():
     assert pack_us._acquire_filing_span([]) == ([], []), (
         "an empty span is not a failure and must not be reported as one"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task H — the quarterly-series pack verb
+# (docs/loom/plans/2026-07-28-us-quarterly-statement-series.md)
+# ---------------------------------------------------------------------------
+
+# One fiscal year of a June-year-end filer, in the four cumulative columns the
+# stitched result actually carries. Their day spans are what Task C's committed
+# windows bucket into the four roles Task E pairs (measured, not assumed:
+# `span_windows()` is q1 80-100 / ytd 175-190 + 260-285 / annual 350-380, and
+# these keys span 91 / 183 / 273 / 364 days).
+_SPAN_Q1 = "duration_2024-07-01_2024-09-30"
+_SPAN_YTD6 = "duration_2024-07-01_2024-12-31"
+_SPAN_YTD9 = "duration_2024-07-01_2025-03-31"
+_SPAN_FY = "duration_2024-07-01_2025-06-30"
+# ...and the three quarters no filing states, which Task E subtracts out of them.
+_DERIVED_Q2 = "duration_2024-10-01_2024-12-31"
+_DERIVED_Q3 = "duration_2025-01-01_2025-03-31"
+_DERIVED_Q4 = "duration_2025-04-01_2025-06-30"
+
+
+def _quarterly_series_stub_statements() -> dict:
+    """The three statements as `XBRLS.get_statement` returns them, keyed by the
+    library's own statement-type token.
+
+    FLOAT-VALUED CELLS, because that is what the stitched surface really
+    carries -- measured on this arc's own committed capture
+    (`us_quarterly_stitched_msft.json`: all 255 income-statement cells are
+    `float`). The figures are shaped after that filer's real FY2025 columns so
+    the stub is recognisable, but nothing here is an oracle for them: every
+    expectation below is recomputed from these literals.
+
+    TWO LINES GUARD TWO DIFFERENT LANES, and neither one covers the other.
+    Both were checked by running them, not reasoned about:
+
+      * the DIVIDENDS line is the one that guards SERIALISATION -- the lane
+        `_project_series_money_to_text` owns. Its cells carry a filed scale
+        (`1.6600` / `2.4900`) that binary float cannot: `str(Decimal("0.8300"))`
+        is `"0.8300"` and `str(float(Decimal("0.8300")))` is `"0.83"`. **It is
+        the only line in this stub that can tell those two apart**, so trimming
+        it silently disarms the assertion the money test exists for.
+      * the DILUTED-EPS line guards the ARITHMETIC lane instead: a subtraction
+        performed in binary float gives `13.64 - 9.99 == 3.6500000000000004`,
+        which its assertion catches. It is TRANSPARENT to the serialisation
+        lane -- `str(float(Decimal("3.65")))` is `"3.65"`, unchanged -- so it
+        proves nothing about `_decimal_text`. (Total revenue is transparent to
+        both: `76441000000.0` survives either route.)
+
+    The EPS line carries only two of the four columns, which also exercises the
+    per-line skip -- Q2 and Q4 need columns this line does not have.
+    """
+    duration_periods = [
+        [_SPAN_Q1, "Q1 Sep 30, 2024"],
+        [_SPAN_YTD6, "Q2 YTD Dec 31, 2024"],
+        [_SPAN_YTD9, "Q3 YTD Mar 31, 2025"],
+        [_SPAN_FY, "FY Jun 30, 2025"],
+    ]
+    return {
+        "IncomeStatement": {
+            "periods": duration_periods,
+            "statement_data": [
+                {
+                    "concept": "us-gaap_Revenues",
+                    "label": "Total revenue",
+                    "values": {
+                        _SPAN_Q1: 65585000000.0,
+                        _SPAN_YTD6: 135190000000.0,
+                        _SPAN_YTD9: 205283000000.0,
+                        _SPAN_FY: 281724000000.0,
+                    },
+                },
+                {
+                    "concept": "us-gaap_EarningsPerShareDiluted",
+                    "label": "Diluted earnings per share",
+                    "values": {_SPAN_YTD6: 9.99, _SPAN_YTD9: 13.64},
+                },
+                {
+                    # STRING-valued cells, which `_cell_decimal` documents as
+                    # accepted ("a cell holding a numeric STRING is accepted:
+                    # `Decimal('30')` is exactly 30"). They carry a SCALE that
+                    # binary float cannot: `2.4900 - 1.6600` is `0.8300` in
+                    # Decimal and `0.83` once it has been through a float, so
+                    # this line is what separates `str(Decimal)` from
+                    # `str(float(Decimal))` -- two conversions the arc's other
+                    # figures agree on.
+                    "concept": "us-gaap_CommonStockDividendsPerShareDeclared",
+                    "label": "Dividends declared per share",
+                    "values": {_SPAN_YTD6: "1.6600", _SPAN_YTD9: "2.4900"},
+                },
+            ],
+        },
+        "BalanceSheet": {
+            "periods": [
+                ["instant_2024-09-30", "Sep 30, 2024"],
+                ["instant_2025-06-30", "Jun 30, 2025"],
+            ],
+            "statement_data": [
+                {
+                    "concept": "us-gaap_Assets",
+                    "label": "Total assets",
+                    "values": {
+                        "instant_2024-09-30": 523013000000.0,
+                        "instant_2025-06-30": 619003000000.0,
+                    },
+                },
+            ],
+        },
+        "CashFlowStatement": {
+            "periods": duration_periods,
+            "statement_data": [
+                {
+                    "concept": "us-gaap_NetCashProvidedByUsedInOperatingActivities",
+                    "label": "Net cash from operations",
+                    "values": {
+                        _SPAN_Q1: 34180000000.0,
+                        _SPAN_YTD6: 56471000000.0,
+                        _SPAN_YTD9: 93515000000.0,
+                        _SPAN_FY: 136162000000.0,
+                    },
+                },
+            ],
+        },
+    }
+
+
+class _FakeXBRLS:
+    """`XBRLS.from_filings`' return value, reduced to the one method
+    `stitch_quarterly_statements` calls. Records every call so a test can see
+    what the real stitching function derived from the filings it was handed."""
+
+    def __init__(self, statements: dict) -> None:
+        self._statements = statements
+        self.calls: list[tuple] = []
+
+    def get_statement(self, statement_type, **kwargs):
+        self.calls.append((statement_type, kwargs))
+        return self._statements[statement_type]
+
+
+def _empty_stub_statements() -> dict:
+    """What the stitcher returns for a filer whose filings carry no statement
+    this projection can read: three well-formed EMPTY statements.
+
+    Not a hypothetical shape -- `get_statement` answers with an empty
+    `periods`/`statement_data` pair rather than raising, and
+    `_projection_status` exists precisely because
+    `{"lines": [], "periods": []}` is as well-formed as a complete statement
+    and as easy to read straight past.
+    """
+    empty = {"periods": [], "statement_data": []}
+    return {
+        "IncomeStatement": dict(empty),
+        "BalanceSheet": dict(empty),
+        "CashFlowStatement": dict(empty),
+    }
+
+
+def _stub_quarterly_series_producers(
+    monkeypatch, *, rows, failing=(), statements=None, resolved=None
+):
+    """Stub the verb's three producers and the stitcher's library boundary.
+
+    STUBBED AT THE PRODUCERS, NOT AT THE COMPOSED FUNCTIONS. `_acquire_filing_span`
+    (Task J), `stitch_quarterly_statements` (Task D), `derive_discrete_quarters`
+    (Task E) and `project_quarterly_series` (Task F) all run for real, so what
+    these tests exercise is the WIRING this task owns rather than a chain of
+    doubles agreeing with each other. In particular `n_filings_used` is
+    computed by the real `stitch_quarterly_statements` from the list the real
+    acquire loop returned -- stubbing the stitcher would have made that
+    assertion a statement about the stub.
+
+    `sec_edgar_client._acquire_raw_filing` is the acquisition boundary this
+    file already stubs everywhere (see `_stub_xval_producers_for_memo_fetch`
+    and Task J's own test for why the LOWER `edgar.get_by_accession_number`
+    boundary would let Task B's disk cache answer instead).
+
+    `kpi_us_quarterly_series._build_xbrls` is that module's own declared
+    monkeypatch seam ("the LOCAL import boundary a test monkeypatches"), which
+    is what keeps `import edgar` out of an offline run.
+
+    `statements` overrides what the stitcher's library boundary answers with
+    (default: the four-column fiscal year below); `resolved` overrides what
+    `resolve_cik` answers with, so a test can drive the resolver's own failure
+    shape rather than only its success.
+
+    Returns a record dict: `span_calls` (the `(cik, years)` the assembler saw),
+    `attempted` (every accession the acquire loop reached), `filings` (the
+    exact objects handed to the stitcher) and `xbrls` (the fake).
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack_us  # noqa: E402
+    import sec_edgar_client  # noqa: E402
+
+    pack_us._ensure_analysis_kpi_importable()
+    import kpi_us_quarterly_series  # noqa: E402
+
+    record: dict = {"span_calls": [], "attempted": [], "filings": []}
+
+    monkeypatch.setattr(
+        sec_edgar_client, "resolve_cik",
+        lambda ticker: (
+            {"cik": 789019, "title": "MICROSOFT CORP"} if resolved is None
+            else resolved
+        ),
+    )
+
+    def _fake_span(cik, years=None):
+        record["span_calls"].append((cik, years))
+        return rows
+
+    monkeypatch.setattr(
+        sec_edgar_client, "assemble_quarterly_filing_span", _fake_span
+    )
+
+    def _fake_acquire(accession):
+        record["attempted"].append(accession)
+        if accession in failing:
+            return {
+                "error": (
+                    f"SEC EDGAR filing acquisition failed: accession "
+                    f"{accession!r} did not resolve to a filing"
+                ),
+                "error_class": "resolution",
+            }
+        return _AcquiredFiling(accession)
+
+    monkeypatch.setattr(sec_edgar_client, "_acquire_raw_filing", _fake_acquire)
+
+    fake = _FakeXBRLS(
+        _quarterly_series_stub_statements() if statements is None else statements
+    )
+
+    def _fake_build(filings):
+        record["filings"] = list(filings)
+        return fake
+
+    monkeypatch.setattr(kpi_us_quarterly_series, "_build_xbrls", _fake_build)
+    record["xbrls"] = fake
+    return record
+
+
+def _quarterly_series_rows(*accessions) -> list[dict]:
+    """The oldest-first row shape `assemble_quarterly_filing_span` returns."""
+    return [
+        {"form": "10-Q", "filingDate": f"2024-10-{30 - i:02d}", "accessionNumber": a}
+        for i, a in enumerate(accessions)
+    ]
+
+
+def _periods_of(payload: dict, kind: str) -> dict:
+    """`{period_key: period_entry}` for one statement kind of a projection."""
+    return {p["key"]: p for p in payload["statements"][kind]["periods"]}
+
+
+def _cell(payload: dict, kind: str, concept: str, period_key: str):
+    """One projected cell, or `KeyError`."""
+    for line in payload["statements"][kind]["lines"]:
+        if line["concept"] == concept:
+            return line["values"][period_key]
+    raise KeyError(f"{concept} is not a line of {kind}")
+
+
+def test_quarterly_series_verb_is_registered_and_us_only(monkeypatch, capsys):
+    """Plan Task H's first RED: the verb is REACHABLE from the pack CLI, is
+    reachable ONLY for US filers, and answers with the LABELLED projection.
+
+    Four claims, because each can hold while the next silently does not:
+
+      1. `quarterly-series` is in `pack_us.SUPPORTED_PACKS` -- without it
+         `build_pack` raises the generic `unknown pack` ValueError.
+      2. It DISPATCHES. Registration is not dispatch: `statement-backfill`
+         shipped registered-but-undispatched in this very module
+         (`test_build_pack_dispatches_statement_backfill`).
+      3. It is REFUSED (exit 64) for a non-US market by the facade's
+         `US_ONLY_PACKS` guard -- and NOT refused for a US ticker, which is
+         what proves the guard is market-scoped rather than blanket.
+      4. The payload is the LABELLED projection: every period states its kind
+         and its provenance, the balance sheet's instants come back
+         `kind: "instant"`, and the three quarters no filing states are
+         present and marked `derived`.
+
+    Claim 4 also pins the CLEAN run's classification. `failed_items` is nested
+    inside an `acquisition` section rather than sitting at the pack's top
+    level, and that is not stylistic: `pack.py`'s `_list_section_status` reads
+    an EMPTY top-level list as `"failed"` (right for a ticker fan-out, wrong
+    for a `failed_items: []` that means success), which is the measured defect
+    `pack_reconstruct`'s docstring records from a live KO run that
+    reconstructed 4 of 4 filings and still reported partial. So a clean run
+    classifying `ok` is a real assertion about placement, not a formality.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    # --- 1. registered ---
+    assert "quarterly-series" in pack_us.SUPPORTED_PACKS, (
+        f"quarterly-series is not registered: {pack_us.SUPPORTED_PACKS}"
+    )
+
+    # The projection's own `pack` token and the registry name must read the
+    # same -- `kpi_us_quarterly_series._PACK_NAME`'s own comment requires it,
+    # and a payload naming a verb the CLI does not have is unreachable prose.
+    pack_us._ensure_analysis_kpi_importable()
+    import kpi_us_quarterly_series  # noqa: E402
+
+    assert kpi_us_quarterly_series._PACK_NAME == "quarterly-series", (
+        f"the projection's pack token and the CLI verb must read the same: "
+        f"{kpi_us_quarterly_series._PACK_NAME!r}"
+    )
+
+    # --- 2. dispatches through build_pack ---
+    calls: list = []
+
+    def fake_pack_quarterly_series(ticker, years=None):
+        calls.append((ticker, years))
+        return {"pack": "quarterly-series", "ticker": ticker}
+
+    # A SCOPED patch, not `monkeypatch.undo()`: this file's autouse fixtures
+    # share the one function-scoped `monkeypatch`, so undoing would also drop
+    # the `requests` stub every later import in this test depends on. Narrow
+    # `mock.patch.object` is the override this file already documents.
+    with mock.patch.object(
+        pack_us, "pack_quarterly_series", fake_pack_quarterly_series
+    ):
+        result = pack_us.build_pack("quarterly-series", ["MSFT"])
+        assert calls == [("MSFT", None)]
+        assert result == {"pack": "quarterly-series", "ticker": "MSFT"}
+
+        with pytest.raises(
+            ValueError, match=r"requires exactly one ticker \(single, heavy\)"
+        ):
+            pack_us.build_pack("quarterly-series", ["MSFT", "AAPL"])
+
+        # --- 3. refused for a non-US market, at the facade ---
+        assert "quarterly-series" in pack.US_ONLY_PACKS, (
+            f"quarterly-series is not declared US-only: "
+            f"{sorted(pack.US_ONLY_PACKS)}"
+        )
+        exit_code = pack.main(["--ticker", "2330.TW", "--pack", "quarterly-series"])
+        assert exit_code == pack.EXIT_USAGE_ERROR
+        refusal = json.loads(capsys.readouterr().out)["_status"]
+        assert refusal["status"] == "usage_error"
+        assert "US-only" in refusal["message"], (
+            f"refusal must name market availability, not a pack-name typo: "
+            f"{refusal}"
+        )
+
+        calls.clear()
+        us_exit = pack.main(
+            ["--ticker", "MSFT", "--pack", "quarterly-series", "--quiet"]
+        )
+        capsys.readouterr()
+        assert calls == [("MSFT", None)], "the US arm must reach the producer"
+        assert us_exit != pack.EXIT_USAGE_ERROR
+
+    # --- 4. the labelled projection, over a stubbed series ---
+    rows = _quarterly_series_rows("0000789019-24-000023", "0000789019-25-000082")
+    _stub_quarterly_series_producers(monkeypatch, rows=rows)
+
+    payload = pack_us.pack_quarterly_series("msft")
+
+    assert payload["pack"] == "quarterly-series"
+    assert payload["ticker"] == "MSFT", "the ticker is normalised, as everywhere else"
+    assert payload["_status"] == "ok"
+
+    income = _periods_of(payload, "income")
+    assert income[_SPAN_FY] == {
+        "key": _SPAN_FY, "kind": "annual", "derived": False,
+        "start": "2024-07-01", "end": "2025-06-30",
+    }, f"a filed annual column must say so: {income[_SPAN_FY]}"
+    assert income[_DERIVED_Q4] == {
+        "key": _DERIVED_Q4, "kind": "discrete_quarter", "derived": True,
+        "start": "2025-04-01", "end": "2025-06-30",
+    }, f"the derived Q4 must be labelled as both: {income.get(_DERIVED_Q4)}"
+
+    # The COUNT, not just the presence: a projection that dropped one derived
+    # quarter satisfies every per-period assertion above.
+    assert sorted(k for k, p in income.items() if p["derived"]) == [
+        _DERIVED_Q2, _DERIVED_Q3, _DERIVED_Q4
+    ], f"all three unstated quarters must be derived: {sorted(income)}"
+    assert not any(p["derived"] for p in _periods_of(payload, "balance_sheet").values())
+    assert all(
+        p["kind"] == "instant" for p in _periods_of(payload, "balance_sheet").values()
+    ), "the balance sheet is instant-based and must be labelled so"
+
+    # ...and a clean run is not misreported as degraded by the facade.
+    assert pack._classify_result(payload) == ("ok", []), (
+        f"a run in which every filing acquired must classify ok -- an empty "
+        f"`failed_items` at the pack's TOP level would read as failed: "
+        f"{pack._classify_result(payload)}"
+    )
+
+
+def test_a_partial_span_reports_partial_and_counts_only_the_filings_it_used(
+    monkeypatch,
+):
+    """Plan Task H's second RED, clause 1 -- the obligation Task J's return
+    shape creates. `_acquire_filing_span` returns `(filings, failed_items)` and
+    NO status; building `{requested, succeeded, failed}` is this verb's job.
+
+    Three things, and the third is the one this arc keeps shipping wrong:
+
+      1. `_status` is `"partial"`, never `"ok"`.
+      2. The accession that failed is named in `failed_items`.
+      3. **`n_filings_used` is `len(filings)`, never `len(rows)`.** A short
+         answer must not be shaped like a complete one: a reader who sees the
+         requested count there believes the series covers filings it never
+         read. It is asserted against `requested` in the same breath, so a
+         verb that reported either count for both fails.
+
+    The classification is asserted too -- degradation the facade cannot see is
+    degradation the caller never learns about, and `main()` OVERWRITES the
+    payload's own top-level `_status` with its own block before anything is
+    emitted (`pack.py` `main`), so the top-level string is invisible on the
+    far side of the CLI. The `acquisition` section's own `_status` is what
+    `_section_status` honours.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    first = "0000789019-24-000023"
+    bad = "0000789019-25-000010"
+    last = "0000789019-25-000082"
+    rows = _quarterly_series_rows(first, bad, last)
+    record = _stub_quarterly_series_producers(monkeypatch, rows=rows, failing={bad})
+
+    payload = pack_us.pack_quarterly_series("MSFT")
+
+    assert record["attempted"] == [first, bad, last], (
+        f"one unacquirable accession must not abort the span: "
+        f"{record['attempted']}"
+    )
+    assert payload["_status"] == "partial", (
+        f"a span that lost a filing is not an `ok` run: {payload['_status']}"
+    )
+    assert payload["acquisition"]["_status"] == "partial"
+    assert [item["accession"] for item in payload["acquisition"]["failed_items"]] == [
+        bad
+    ], f"the failed accession must be named: {payload['acquisition']}"
+    assert (payload["acquisition"]["requested"], payload["acquisition"]["succeeded"],
+            payload["acquisition"]["failed"]) == (3, 2, 1), (
+        f"the triple must reconcile against the span: {payload['acquisition']}"
+    )
+    # `requested` is pinned at 3 on the line above, so this pins the two counts
+    # apart as well as pinning the value -- reporting `len(rows)` here fails.
+    # (A separate `n_filings_used != requested` assertion would be one no
+    # mutation could reach on its own, which this file's Task J neighbour
+    # already had to fix once.)
+    assert payload["n_filings_used"] == 2, (
+        f"the series was built from 2 filings, not the 3 that were requested; "
+        f"reporting the requested count makes a short answer look complete: "
+        f"{payload.get('n_filings_used')}"
+    )
+    assert len(record["filings"]) == 2, (
+        f"only the acquired filings may reach the stitcher: {record['filings']}"
+    )
+
+    assert pack._classify_result(payload) == ("partial", ["acquisition"]), (
+        f"the degradation must be visible to the facade, which never reads "
+        f"the payload's own top-level `_status`: {pack._classify_result(payload)}"
+    )
+
+
+def test_an_empty_span_is_a_named_failure_never_ok(monkeypatch):
+    """Plan Task H's second RED, clause 2. An EMPTY span (`requested == 0`)
+    must NOT report `ok`.
+
+    `pack_reconstruct`'s status formula answers `requested == 0` with `"ok"`
+    (`pack_us.pack_reconstruct`, the `status = ("failed" if requested and ...`
+    expression) -- correct THERE, where zero means the caller asked for
+    nothing, and a defect the brief records (§Error). Here zero filings is a
+    real answer to a real request: a foreign private issuer files 20-F, not
+    10-Q/10-K, and a well-formed empty series would tell its reader that
+    company published no quarterly statements at all.
+
+    So the verb names the refusal instead. The count is IN the message rather
+    than only in the section, because the same door covers the other way to
+    reach zero filings -- a span whose every accession failed to acquire --
+    and the two are distinguishable only by those numbers.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    _stub_quarterly_series_producers(monkeypatch, rows=[])
+
+    payload = pack_us.pack_quarterly_series("BABA")
+
+    assert payload["_status"] == "failed", (
+        f"an empty span is not a successful run: {payload}"
+    )
+    assert payload["error_class"] == "empty_span"
+    assert "0 filing(s) listed, 0 failed to acquire, 0 acquired" in payload[
+        "error"
+    ] and "20-F" in payload["error"], (
+        f"the refusal must say what came back -- the whole reconciling clause, "
+        f"since a bare `0` somewhere in the sentence is satisfied by a "
+        f"hardcoded literal -- and name the ordinary reason a US-listed filer "
+        f"has no 10-Q/10-K: {payload.get('error')}"
+    )
+    assert "statements" not in payload, (
+        "a refusal must not also ship a well-formed empty series -- that is "
+        "the shape it exists to avoid"
+    )
+    assert pack._classify_result(payload)[0] == "failed", (
+        f"the facade must exit non-zero on it: {pack._classify_result(payload)}"
+    )
+
+
+def test_an_unresolvable_ticker_is_answered_by_the_resolver_not_by_an_empty_span(
+    monkeypatch,
+):
+    """A ticker SEC EDGAR has never heard of -- a typo, a delisted symbol, a
+    foreign listing -- is the likeliest thing a real caller does wrong, and the
+    verb must stop at the resolver.
+
+    Two failures this pins apart:
+
+      1. **Carrying on regardless.** `resolve_cik`'s error dict has no `cik`
+         key, so a verb that does not check it raises `KeyError: 'cik'` on the
+         next line -- a bare traceback where the resolver had already written a
+         usable sentence.
+      2. **Answering in the wrong voice.** The refusal must still be a PACK
+         envelope: `pack` / `ticker` / `fetched_at`, so a caller reading a
+         directory of pack outputs can tell whose failure this is and when.
+         The ticker is normalised here for the same reason it is everywhere
+         else -- `msft` and `MSFT` must not file two different-looking answers.
+
+    And the span assembler must never be reached: asking EDGAR for the filing
+    history of a company that does not exist is a network round trip spent to
+    learn what the resolver already said.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    refusal = {
+        "error": "ticker 'msftt' not found in SEC company_tickers.json",
+        "error_class": "not_found",
+    }
+    record = _stub_quarterly_series_producers(
+        monkeypatch, rows=_quarterly_series_rows("0000789019-25-000082"),
+        resolved=refusal,
+    )
+
+    payload = pack_us.pack_quarterly_series("msftt")
+
+    assert payload["pack"] == "quarterly-series"
+    assert payload["ticker"] == "MSFTT", (
+        f"a refusal is still attributed, and normalised as everywhere else: "
+        f"{payload.get('ticker')!r}"
+    )
+    assert "fetched_at" in payload
+    assert payload["error"] == refusal["error"], (
+        f"the resolver's own sentence must survive, not be replaced by this "
+        f"layer's guess at what went wrong: {payload.get('error')!r}"
+    )
+    assert payload["error_class"] == "not_found"
+
+    assert record["span_calls"] == [], (
+        f"the filing history of a company that does not exist must never be "
+        f"requested: {record['span_calls']}"
+    )
+    assert record["attempted"] == []
+    assert "statements" not in payload and "acquisition" not in payload, (
+        f"an unresolvable ticker has no span to report on -- a well-formed "
+        f"empty series or a 0/0/0 acquisition report would both invent one: "
+        f"{sorted(payload)}"
+    )
+    assert pack._classify_result(payload)[0] == "failed", (
+        f"the facade must exit non-zero on it: {pack._classify_result(payload)}"
+    )
+
+
+def test_a_partial_acquisition_never_promotes_a_projection_that_already_failed(
+    monkeypatch,
+):
+    """The fold is one-directional: the acquisition's own degradation may DEMOTE
+    an `ok` projection to `partial`, never PROMOTE a projection that already
+    failed on its own terms.
+
+    The state is reachable, not theoretical. `_projection_status` answers
+    `"failed"` when NO statement kind came back with a period, and a filer whose
+    filings stitch to three empty statements while part of the span failed to
+    acquire is in exactly that state -- both conditions at once. Without the
+    guard the fold overwrites `"failed"` with `"partial"`, and the run reports
+    a partly-successful series when what it actually holds is no series at all.
+    A short answer is bad news; an EMPTY answer wearing a short answer's status
+    is worse.
+
+    The `acquisition` section is asserted in the same breath, because it must
+    NOT be demoted in sympathy: the acquisition really was partial (one filing
+    of two came back), and flattening the two verdicts into one would lose the
+    fact that the acquisition is not what went wrong here.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack_us  # noqa: E402
+
+    good = "0000789019-25-000082"
+    bad = "0000789019-94-000010"
+    record = _stub_quarterly_series_producers(
+        monkeypatch,
+        rows=_quarterly_series_rows(bad, good),
+        failing={bad},
+        statements=_empty_stub_statements(),
+    )
+
+    payload = pack_us.pack_quarterly_series("MSFT")
+
+    # The premise, checked rather than assumed: this really is the both-at-once
+    # state, so the assertion below is about the fold and not about a projection
+    # that was never `failed` to begin with.
+    assert len(record["filings"]) == 1, (
+        f"the premise needs a NON-empty span, or the zero-filing door answers "
+        f"first and the fold is never reached: {record['filings']}"
+    )
+    assert payload["acquisition"]["failed"] == 1, (
+        f"the premise needs a failed acquisition too: {payload['acquisition']}"
+    )
+    assert all(
+        not view["periods"] for view in payload["statements"].values()
+    ), f"the premise needs a projection with no periods at all: {payload}"
+
+    assert payload["_status"] == "failed", (
+        f"a projection that failed on its own terms must not be promoted to "
+        f"`partial` by the acquisition fold: {payload['_status']}"
+    )
+    assert payload["acquisition"]["_status"] == "partial", (
+        f"...and the acquisition keeps its own verdict, which is a different "
+        f"question: {payload['acquisition']}"
+    )
+
+
+def test_a_span_whose_every_accession_failed_is_a_failure_naming_the_counts(
+    monkeypatch,
+):
+    """The OTHER route to a zero-filing span, and the one the docstring claims
+    the same door covers: the assembler listed filings, and not one of them
+    could be acquired.
+
+    Kept apart from the `rows == []` test above because the two are reached by
+    different predicates and mean different things to a reader. A verb keyed on
+    the REQUEST (`if not rows:`) sails past this state entirely and hands an
+    empty list to `stitch_quarterly_statements`, which refuses it -- so what
+    would reach the caller is a raw `ValueError` traceback about an empty
+    filings list rather than the answer that three filings were listed and none
+    of them could be read.
+
+    The COUNTS are what tell the two routes apart -- that is the whole reason
+    the message carries them, and asserting merely that a `0` appears in it is
+    satisfied by the hardcoded `0 acquired` whatever the computed numbers say.
+    So the reconciling clause is pinned whole, against a span where `requested`
+    is 3 rather than 0.
+
+    (`requested` and `failed` READ THE SAME on both routes and always will:
+    `_acquire_filing_span` puts every row in exactly one of its two lists, so
+    an empty `filings` forces `failed == requested`. Swapping the two in the
+    message is an EQUIVALENT mutation, not a gap -- the pair is kept because a
+    human reading the refusal should not have to know that invariant to trust
+    the arithmetic.)
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    accessions = (
+        "0000789019-94-000010",
+        "0000789019-94-000031",
+        "0000789019-25-000082",
+    )
+    rows = _quarterly_series_rows(*accessions)
+    record = _stub_quarterly_series_producers(
+        monkeypatch, rows=rows, failing=set(accessions)
+    )
+
+    payload = pack_us.pack_quarterly_series("msft")
+
+    assert list(record["attempted"]) == list(accessions), (
+        f"every listed accession must still be attempted: {record['attempted']}"
+    )
+    assert payload["_status"] == "failed", (
+        f"three filings listed and none acquired is not an `ok` run: {payload}"
+    )
+    assert payload["error_class"] == "empty_span"
+    assert "3 filing(s) listed, 3 failed to acquire, 0 acquired" in payload["error"], (
+        f"the refusal must reconcile against the span it was asked for -- "
+        f"these counts are the only thing separating this route from a filer "
+        f"that simply lists no 10-Q/10-K: {payload['error']}"
+    )
+    assert "MSFT" in payload["error"], (
+        f"the ticker is normalised here as everywhere else: {payload['error']}"
+    )
+    assert payload["ticker"] == "MSFT"
+    assert "statements" not in payload, (
+        "a refusal must not also ship a well-formed empty series"
+    )
+
+    acquisition = payload["acquisition"]
+    assert acquisition["_status"] == "failed", (
+        f"the section's own status is the ONLY degradation signal that "
+        f"survives `main()`, which overwrites the payload's top-level "
+        f"`_status` with its own block: {acquisition}"
+    )
+    assert (
+        acquisition["requested"], acquisition["succeeded"], acquisition["failed"]
+    ) == (3, 0, 3), f"the triple must reconcile against the span: {acquisition}"
+    assert [item["accession"] for item in acquisition["failed_items"]] == list(
+        accessions
+    ), f"every accession that failed must be named: {acquisition['failed_items']}"
+
+    assert pack._classify_result(payload)[0] == "failed", (
+        f"the facade must exit non-zero on it: {pack._classify_result(payload)}"
+    )
+
+
+def test_derived_money_is_exact_text_and_never_the_facade_fallback(monkeypatch):
+    """Plan Task H's third RED -- this task's likeliest silent defect.
+
+    Task F's projection returns derived line values as `Decimal`. `pack.py`'s
+    `_emit` is `json.dumps(obj, indent=2, default=str)` (opened and read), so
+    a `Decimal` left in the payload SERIALISES SILENTLY -- and so would a
+    binary float, which is the whole point. The verb must therefore project
+    money to exact text ITSELF, through `pack_us._decimal_text`, and this test
+    pins that with a BARE `json.dumps` (no `default=`), which is the only form
+    that can tell the two apart.
+
+    THE PREMISE IS CHECKED, NOT ASSUMED. The first assertion runs the
+    projection directly and asserts a `Decimal` is really there: without it,
+    this whole test would go green on a stub that happens to carry none while
+    the live run inherits the fallback -- a test correct in every line and
+    incapable of failing
+    (docs/loom/memory/a-test-can-be-correct-and-still-unable-to-fail.md).
+
+    THE DISCRIMINATING ASSERTION IS `dividends_q3`, NOT `eps_q3`. Measured, by
+    routing the projection through `float` and re-running: `eps_q3` still reads
+    `"3.65"` -- `str(float(Decimal("3.65")))` is `"3.65"`, so an exact figure
+    with no trailing scale is INVISIBLE to that mutation -- and `revenue` is
+    invisible for the same reason. Only the dividends line fails, because it
+    keeps the scale its filed inputs carried: `2.4900 - 1.6600` is `0.8300`
+    through `Decimal` and `0.83` once it has been through a binary float.
+
+    The `eps_q3` assertion is kept, and guards a DIFFERENT lane: an arithmetic
+    performed in float rather than a serialisation performed in float
+    (`13.64 - 9.99 == 3.6500000000000004`). Neither assertion substitutes for
+    the other, and deleting the dividends line -- or the string-valued cells it
+    is built from -- would leave this test unable to fail for the defect it is
+    named after.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack_us  # noqa: E402
+
+    rows = _quarterly_series_rows("0000789019-24-000023", "0000789019-25-000082")
+    _stub_quarterly_series_producers(monkeypatch, rows=rows)
+
+    pack_us._ensure_analysis_kpi_importable()
+    import kpi_us_quarterly_series  # noqa: E402
+
+    # --- the premise: the projection really does hand this verb a Decimal ---
+    unprojected = kpi_us_quarterly_series.project_quarterly_series(
+        kpi_us_quarterly_series.stitch_quarterly_statements(
+            [_AcquiredFiling("0000789019-25-000082")]
+        ),
+        "MSFT",
+    )
+    assert isinstance(
+        _cell(unprojected, "income", "us-gaap_EarningsPerShareDiluted", _DERIVED_Q3),
+        Decimal,
+    ), "premise broken: the projection no longer returns Decimal money"
+
+    payload = pack_us.pack_quarterly_series("MSFT")
+
+    eps_q3 = _cell(payload, "income", "us-gaap_EarningsPerShareDiluted", _DERIVED_Q3)
+    assert eps_q3 == "3.65", (
+        f"a derived cell must be EXACT TEXT: 13.64 - 9.99 is 3.65 in Decimal "
+        f"and 3.6500000000000004 in binary float; got {eps_q3!r}"
+    )
+    assert _cell(payload, "income", "us-gaap_Revenues", _DERIVED_Q4) == "76441000000.0"
+
+    # The SCALE the arithmetic produced, kept. This is the assertion that
+    # separates `str(Decimal)` from `str(float(Decimal))`: the two agree on
+    # every other figure in this stub, so without this line a conversion that
+    # routes through float passes the whole test.
+    dividends_q3 = _cell(
+        payload, "income", "us-gaap_CommonStockDividendsPerShareDeclared", _DERIVED_Q3
+    )
+    assert dividends_q3 == "0.8300", (
+        f"2.4900 - 1.6600 is 0.8300 in Decimal and 0.83 once it has been "
+        f"through a binary float; got {dividends_q3!r}"
+    )
+
+    # A FILED cell is passed through as the library gave it, untouched. Only
+    # OUR arithmetic is re-typed: converting the filer's own numbers to text
+    # here would mask a non-serialisable value the bare dump below must catch.
+    assert _cell(payload, "income", "us-gaap_Revenues", _SPAN_FY) == 281724000000.0
+
+    # The bare dump: no `default=`, so a Decimal this verb failed to reach
+    # raises here instead of being quietly stringified by the facade.
+    json.dumps(payload)
+
+
+def test_the_years_cap_is_optional_reaches_the_assembler_and_is_verb_scoped(
+    monkeypatch, capsys
+):
+    """The verb takes a ticker and an OPTIONAL years cap, defaulting to ALL
+    available history (plan Task H Description; Task A's
+    `assemble_quarterly_filing_span(cik, years=None)` is what "all available"
+    means, and ten years is the user's FLOOR rather than the target).
+
+    Four claims:
+
+      1. Called with no cap, the assembler is asked for `years=None` -- the
+         default must not be a number this layer invented, which is the exact
+         defect `assemble_quarterly_filing_span`'s own docstring records for a
+         guessed `limit`.
+      2. `--years N` reaches it, through the facade, as `N`.
+      3. `--years` on any OTHER pack is a usage error rather than a silently
+         ignored flag -- no other market module's `build_pack` accepts it, so
+         a flag that looked accepted would be a lie on four of five markets.
+      4. A non-positive cap is refused. Left through, it would resolve to a
+         cutoff at or after today and come back as an EMPTY span, reported as
+         a failure attributed to the FILER -- a usage error wearing a
+         data-availability costume.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    rows = _quarterly_series_rows("0000789019-24-000023", "0000789019-25-000082")
+    record = _stub_quarterly_series_producers(monkeypatch, rows=rows)
+
+    pack_us.pack_quarterly_series("MSFT")
+    assert record["span_calls"] == [(789019, None)], (
+        f"the uncapped default must ask for ALL available history: "
+        f"{record['span_calls']}"
+    )
+
+    record["span_calls"].clear()
+    rc = pack.main(
+        ["--ticker", "MSFT", "--pack", "quarterly-series", "--years", "5", "--quiet"]
+    )
+    capsys.readouterr()
+    assert record["span_calls"] == [(789019, 5)], (
+        f"--years must reach the assembler, not be dropped by the facade: "
+        f"{record['span_calls']}"
+    )
+    assert rc != pack.EXIT_USAGE_ERROR
+
+    assert pack.main(["--ticker", "MSFT", "--pack", "snapshot", "--years", "5"]) == (
+        pack.EXIT_USAGE_ERROR
+    ), "--years is meaningless outside quarterly-series and must be refused"
+    assert "--years" in json.loads(capsys.readouterr().out)["_status"]["message"]
+
+    assert pack.main(
+        ["--ticker", "MSFT", "--pack", "quarterly-series", "--years", "0"]
+    ) == pack.EXIT_USAGE_ERROR, "a non-positive cap is a usage error, not an empty span"
+    capsys.readouterr()
+
+
+def test_a_client_printing_to_stdout_cannot_corrupt_the_emitted_json(
+    monkeypatch, capsys
+):
+    """The facade's output contract is ONE JSON document on stdout, and a
+    dependency that prints is what breaks it.
+
+    MEASURED, NOT HYPOTHETICAL. On this branch's live `--pack
+    quarterly-series` run against MSFT, edgartools' `get_filings` emitted
+    `print_warning(...)` through a rich console -- which writes to STDOUT -- for
+    two 1994 accessions it could not resolve, and the emitted document was no
+    longer parseable JSON. The verb itself is innocent: `pack_us` logs through
+    `_log` to stderr and contains no `print(` or `sys.stdout` at all. The noise
+    comes from inside `build_pack`, from a library neither file owns.
+
+    So the guard belongs at the facade's own boundary, around the ONE call that
+    runs third-party code, and nowhere else: every `_emit` in `pack.py` sits
+    strictly before or after that call, so redirecting for its duration cannot
+    swallow the payload it is protecting. Any market module and any pack is
+    covered by the same three lines -- `quarterly-series` is merely where it was
+    measured.
+
+    The noise must still be READABLE, on stderr next to the progress log, not
+    discarded: a warning naming an accession that would not resolve is exactly
+    what a reader needs when the span comes back short.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack  # noqa: E402
+    import pack_us  # noqa: E402
+
+    noise = "WARNING: no XBRL data found for accession 0000789019-94-000010"
+
+    def noisy_build_pack(pack_name, tickers, **kwargs):
+        # What a rich console does inside the dependency: plain `print`.
+        print(noise)
+        return {"pack": pack_name, "ticker": tickers[0]}
+
+    with mock.patch.object(pack_us, "build_pack", noisy_build_pack):
+        rc = pack.main(["--ticker", "MSFT", "--pack", "quarterly-series", "--quiet"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)  # the whole point: this must not raise
+    assert payload["_status"]["pack"] == "quarterly-series"
+    assert payload["ticker"] == "MSFT"
+    assert rc == pack.EXIT_OK
+
+    assert noise not in captured.out, (
+        f"library chatter must not reach the JSON channel: {captured.out!r}"
+    )
+    assert noise in captured.err, (
+        f"...and must not be discarded either -- it belongs on stderr with the "
+        f"progress log: {captured.err!r}"
+    )
+
+    # ...AND THE GUARD MUST NOT SWALLOW THE FAILURE ENVELOPE. A redirect placed
+    # one level coarser -- around the whole `try`/`except` rather than around
+    # the call -- passes every assertion above and sends the fail-loud JSON to
+    # stderr with an EMPTY stdout, which is a worse failure than the one being
+    # fixed: a caller piping to `jq` would see nothing at all on the runs that
+    # most need explaining.
+    def noisy_then_crash(pack_name, tickers, **kwargs):
+        print(noise)
+        raise RuntimeError("boom-after-the-noise")
+
+    with mock.patch.object(pack_us, "build_pack", noisy_then_crash):
+        rc = pack.main(["--ticker", "MSFT", "--pack", "quarterly-series", "--quiet"])
+
+    captured = capsys.readouterr()
+    failure = json.loads(captured.out)["_status"]
+    assert rc == pack.EXIT_FAILED
+    assert failure["status"] == "failed"
+    assert "boom-after-the-noise" in failure["traceback"]
+    assert noise not in captured.out
