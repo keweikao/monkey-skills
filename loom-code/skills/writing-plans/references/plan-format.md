@@ -29,6 +29,11 @@ Free-form plans force SDD to re-parse; this schema makes the parse trivial.
 # Plan: <topic>
 
 **Source brief**: <path to brief, e.g. docs/loom/specs/2026-05-16-csv-export.md>
+Goal: <one sentence transcribed from the brief's Smallest End State at
+    plan time — frozen with the plan; never edited afterward>
+Stage: <planning | sdd:wave-N | review:round-N | finishing — updated by
+    the orchestrator at each transition, committed with the nearest
+    ledger or close-out commit>
 **Total tasks**: <N>
 **Critical-path depth**: <D> (must be ≤5; if >5 route back to brainstorming)
 **Execution order**: sequential | parallel-where-possible
@@ -65,10 +70,11 @@ If `Plan-document-reviewer verdict` is `PENDING`, the plan has not been self-rev
     à la Kiro `_Requirements:` / Spec-Kit `FR-###`). This is the SAME field with a broadened
     referent — do NOT add a second field; point at the source `### Requirement:` / `#### Scenario:`
     names rather than copying their prose.>
-- **Status**: <OPTIONAL runtime ledger field — see §Progress ledger. One of:
-    "pending" | "claimed(@<agent>)" | "done(<sha>)" | "blocked". Default OMITTED (a plan with no
-    Status fields behaves exactly as before — fully backward compatible). NOT authoring content;
-    SDD writes it, the plan-document-reviewer ignores it.>
+- **Status**: <runtime ledger field, DEFAULT-ON — see §Progress ledger. One of:
+    "pending" | "claimed(@<agent>)" | "done(<sha>)" | "blocked". writing-plans emits
+    "pending" at plan time; an old plan without Status fields behaves exactly as
+    before — fully backward compatible. NOT authoring content beyond the initial
+    "pending"; SDD writes the transitions, the plan-document-reviewer ignores it.>
 ```
 
 #### `Files touched` and `Independent` (v0.8.0+)
@@ -90,18 +96,18 @@ One named category worth calling out explicitly (see the worked example below): 
 
 Eligibility is narrow — transcribed from that same SSOT wording: this may ONLY be set when **all files listed in the task's `Files touched` are `.md` authored prose — never code, never config, never a generated/sync artifact**. Fail-closed, mirroring the mechanical exemption above: if any touched or diffed file is not `.md` authored prose, the orchestrator falls back to the full triad rather than silently narrowing review. `plan-document-reviewer` Check 16 gates this marker at plan review — a plan setting it without satisfying Check 16's eligibility test never reaches SDD.
 
-#### Progress ledger — the `Status` field (v0.10.0+, optional)
+#### Progress ledger — the `Status` field (v0.10.0+; default-on v0.60.0+)
 
-The optional per-task `Status` field turns the plan into a **run-scoped, durable, shared progress
-ledger**. It is **runtime state**, not plan-authoring content: `writing-plans` never sets it (a fresh
-plan has no `Status` fields), `subagent-driven-development` **maintains** it as it executes, and
-`plan-document-reviewer` **ignores** it.
+The per-task `Status` field turns the plan into a **run-scoped, durable, shared progress
+ledger**. It is **runtime state**, not plan-authoring content: `writing-plans` emits its initial
+value (`Status: pending` on every task at plan time — see below), `subagent-driven-development`
+**maintains** it as it executes, and `plan-document-reviewer` **ignores** it.
 
 Vocabulary (exactly these four):
 
 | Value | Meaning | Set by SDD when |
 |---|---|---|
-| `pending` | not started (or simply omitted) | — (default / omitted) |
+| `pending` | not started (omission = old-plan opt-in only; new plans write it) | — |
 | `claimed(@<agent>)` | an agent is working it; `<agent>` is the worktree branch name (unique per agent) | the implementer is dispatched |
 | `done(<sha>)` | resolved + committed; `<sha>` is the task's commit | reviewers PASS and the task is committed |
 | `blocked` | stuck (NEEDS_CONTEXT / BLOCKED / 3-round cap) | the task cannot proceed |
@@ -114,8 +120,10 @@ Why it earns its place:
   agents (see `dispatching-parallel-agents` §Multiple concurrent sessions) — worktrees isolate files,
   the ledger coordinates *who does what*.
 
-**Backward compatibility is total:** omit `Status` and nothing changes. The field is opt-in by presence,
-exactly like `External surfaces`.
+The ledger is DEFAULT-ON: writing-plans emits `Status: pending` on
+every task at plan time. A plan without `Status` fields (written
+before this default) behaves exactly as before — the ledger stays
+opt-in-by-presence for old plans.
 
 #### `External surfaces` (v0.9.0+)
 
@@ -246,6 +254,8 @@ For a brief at `docs/loom/specs/2026-05-16-csv-export.md` whose Smallest End Sta
 # Plan: CSV export query param
 
 **Source brief**: docs/loom/specs/2026-05-16-csv-export.md
+Goal: users can export the orders list as CSV with the same filters the list view applies
+Stage: planning
 **Total tasks**: 3
 **Critical-path depth**: 2 (≤5 ✓)
 **Execution order**: sequential
@@ -265,6 +275,7 @@ For a brief at `docs/loom/specs/2026-05-16-csv-export.md` whose Smallest End Sta
 - **Dependencies**: none
 - **Independent**: true
 - **Brief item covered**: "minimum shippable change: `?format=csv` query param to existing report URL (no UI work)"
+- **Status**: pending
 
 ## Task 2 — Implement CSV renderer for report payload
 
@@ -280,6 +291,7 @@ For a brief at `docs/loom/specs/2026-05-16-csv-export.md` whose Smallest End Sta
 - **Dependencies**: none (parallel with Task 1)
 - **Independent**: true
 - **Brief item covered**: "minimum shippable change: CSV output that downstream pipeline can ingest"
+- **Status**: pending
 
 ## Task 3 — Wire renderer into handler + set Content-Type
 
@@ -295,6 +307,7 @@ For a brief at `docs/loom/specs/2026-05-16-csv-export.md` whose Smallest End Sta
 - **Dependencies**: Tasks 1, 2 complete first
 - **Independent**: false  # touches files Task 1 also touches; must run after Task 1
 - **Brief item covered**: "minimum shippable change: end-to-end CSV download path"
+- **Status**: pending
 
 ## Notes
 
@@ -309,6 +322,8 @@ A high `Total tasks` count is **not** a discovery failure when the tasks fan out
 # Plan: backfill renderer module docstrings
 
 **Source brief**: docs/loom/specs/2026-05-20-renderer-docstrings.md
+Goal: every renderer file carries a one-line module docstring so the lint gate stops flagging them
+Stage: planning
 **Total tasks**: 8
 **Critical-path depth**: 2 (≤5 ✓)
 **Execution order**: parallel-where-possible
