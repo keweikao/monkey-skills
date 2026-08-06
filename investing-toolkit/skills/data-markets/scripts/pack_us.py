@@ -1630,6 +1630,95 @@ def pack_reconstruct(ticker: str) -> dict:
     }
 
 
+def _acquire_filing_span(rows: list[dict]) -> tuple[list, list[dict]]:
+    """Acquire every filing in an accession span, reporting partial failure.
+
+    Takes the rows `sec_edgar_client.assemble_quarterly_filing_span` returns
+    (oldest first) and returns `(filings, failed_items)`: the raw edgartools
+    `Filing` objects for the accessions that acquired, and one loud entry per
+    accession that did not.
+
+    WHY THIS LOOP LIVES HERE. `kpi_us_quarterly_series.stitch_quarterly_statements`
+    takes ALREADY-ACQUIRED filing objects and deliberately does not acquire
+    them: turning accession rows into filings from an `analysis-*` module would
+    make it import `data-markets` directly, and this repo crosses that boundary
+    by subprocess (see `kpi_us_statements.py`'s own docstring prohibition and
+    `etf_aggregator.py`'s subprocess call sites). So the seam is bridged from
+    the `data-markets` side, which is this file.
+
+    WHAT IT RETURNS IS WHAT THE PRODUCER RETURNED. The filings are passed
+    through untouched -- not projected, not re-wrapped, not turned back into
+    accession rows. That is the input contract the stitching function is
+    written against, and it is the reason this function does not build a JSON
+    payload the way `pack_reconstruct`'s loop does: the caller needs the live
+    objects, and only the caller knows what to project.
+
+    A FAILED ACQUISITION IS A LOUD SKIP, never a silent one -- the convention
+    `pack_reconstruct`'s docstring states and its own loop implements, followed
+    here rather than restated in a second shape. A span is often ~77 filings
+    and a cold run costs 20-37 minutes (brief §Boundary), so one unresolvable
+    accession aborting the request would throw away every filing that DID
+    acquire; and dropping it quietly would return a short span shaped exactly
+    like a complete one, which is the failure this whole arc exists to remove.
+    The caller reconciles `len(rows)` against the two returned lists.
+
+    A ROW CARRYING NO ACCESSION IS RECORDED HERE, neither attempted nor
+    filtered out. `list_filings` keeps rows whose columns were padded with
+    `None` (`_append_submission_block`), and `_acquire_raw_filing` cannot be
+    handed one: it computes its disk-cache key from
+    `_accession_nodash(accession)` BEFORE its `try`, and that helper calls
+    `accession.replace(...)` with no guard -- so a `None` raises
+    `AttributeError` straight out of this loop, aborting the span and
+    discarding every filing that already acquired. Filtering the row instead
+    (what `pack_reconstruct` does) is right THERE and silent HERE:
+    `pack_reconstruct` counts `requested` over its own already-filtered list,
+    while this function returns no count at all and leaves the caller to
+    reconcile `len(rows)` against the two returned lists. A dropped row makes
+    that reconciliation come up short with nothing recorded to explain it. So
+    the row gets its own `no_accession` slot, named by form + filing date
+    since there is no accession to name it by.
+
+    AN EMPTY `rows` RETURNS `([], [])`. Nothing was asked for, so nothing
+    failed, and no entry is fabricated to represent the emptiness -- an empty
+    quarterly span is a real answer for a foreign private issuer that files
+    20-F rather than 10-Q. What it MEANS is the caller's to decide.
+    """
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    # Lazy import, same as every other SEC pack in this module:
+    # `sec_edgar_client`'s top-level `import requests` must not become an
+    # import-time cost for packs that never reach SEC.
+    import sec_edgar_client
+
+    filings: list = []
+    failed_items: list[dict] = []
+    for row in rows:
+        accession = row.get("accessionNumber")
+        # `not accession`, not `is None` -- an empty string is as unacquirable
+        # as a missing one, and this is the predicate `list_filings` itself
+        # uses on these same padded columns.
+        if not accession:
+            _log("pack [acquire]", "row with no accession -- recorded, not sent")
+            failed_items.append({
+                "accession": accession,
+                **sec_edgar_client._acquire_error(
+                    "no_accession",
+                    f"a filing row carried no accessionNumber "
+                    f"(form={row.get('form')!r}, "
+                    f"filingDate={row.get('filingDate')!r}), "
+                    f"so there is nothing to acquire",
+                ),
+            })
+            continue
+        _log("pack [acquire]", f"{accession}")
+        filing = sec_edgar_client._acquire_raw_filing(accession)
+        if isinstance(filing, dict) and "error" in filing:
+            failed_items.append({"accession": accession, **filing})
+            continue
+        filings.append(filing)
+    return filings, failed_items
+
+
 def pack_comps_multiples(tickers: list[str]) -> dict:
     """Multiples-only fields. Single or batch."""
     _log("comps-multiples start", f"{len(tickers)} ticker(s)")

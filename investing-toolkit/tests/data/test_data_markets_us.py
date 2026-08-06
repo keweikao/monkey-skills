@@ -650,11 +650,20 @@ def test_latest_10k_accession_multi_10k_tiebreak_by_filing_date():
 
 def test_fetch_xval_source_a_no_10k_is_wholesale_failure_not_crash():
     """When `filings_rows` has NO 10-K row, `_latest_10k_accession` returns
-    None -- `_acquire_raw_filing(None)` still returns a loud resolution-error
-    slot (never a crash, sec_edgar_client.py:906-911), and `_fetch_xval_source_a`
-    must read that as a WHOLESALE failure (`_status: "failed"`, every
-    statement recorded in `failed_items`) -- never a vacuous/silent success
-    with an empty `statements` list passed off as `_status: "ok"`."""
+    None, and `_fetch_xval_source_a` must read the failed acquisition that
+    follows as a WHOLESALE failure (`_status: "failed"`, every statement
+    recorded in `failed_items`) -- never a vacuous/silent success with an empty
+    `statements` list passed off as `_status: "ok"`.
+
+    WHAT IS PINNED HERE IS THE READING, NOT THE BOUNDARY. `_acquire_raw_filing`
+    is mocked below with a resolution-error slot, so this test says nothing
+    about what the real function does with a `None` accession -- and it no
+    longer does what an earlier version of this docstring claimed. Since
+    `sec_edgar_client._acquire_raw_filing` began computing its disk-cache key
+    from `_accession_nodash(accession)` ahead of its own `try`, a `None`
+    accession raises `AttributeError` there rather than returning a slot
+    (verified by execution; `_accession_nodash` calls `accession.replace(...)`
+    unguarded). Nothing in this file exercises that real path."""
     if str(MARKETS_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(MARKETS_SCRIPTS))
     import pack_us  # noqa: E402
@@ -1922,3 +1931,244 @@ def test_build_pack_statement_backfill_requires_exactly_one_ticker():
 
     with pytest.raises(ValueError, match=r"requires exactly one ticker \(single, heavy\)"):
         pack_us.build_pack("statement-backfill", [])
+
+
+# ---------------------------------------------------------------------------
+# Task J (plan docs/loom/plans/2026-07-28-us-quarterly-statement-series.md) —
+# the acquire loop that turns Task A's accession rows into the already-acquired
+# filing objects Task D's stitching function takes. It lives HERE, on the
+# data-markets side, because an `analysis-*` module reaching this I/O by import
+# would cross the boundary this repo crosses by subprocess (Task D's
+# Description; CLAUDE.md §Cross-Plugin Delegation Contract).
+# ---------------------------------------------------------------------------
+
+class _AcquiredFiling:
+    """Stand-in for the raw edgartools ``Filing`` that `_acquire_raw_filing`
+    returns on success.
+
+    Deliberately NOT a `mock.MagicMock` and deliberately WITHOUT `__eq__`:
+
+      - no `__eq__` means every comparison against one of these is IDENTITY,
+        so an assertion can pin WHICH filing came back at each position rather
+        than merely how many did (a loop that returned the first filing three
+        times satisfies a count);
+      - a bare object with only the attribute it was built with means a loop
+        that reached INTO the filing — projecting it, re-wrapping it, reading
+        `.form` — raises instead of quietly producing a passable shape. This
+        loop's contract is pass-through, and pass-through is what that proves.
+    """
+
+    def __init__(self, accession: str) -> None:
+        self.accession_number = accession
+
+    def __repr__(self) -> str:  # pragma: no cover - failure messages only
+        return f"<_AcquiredFiling {self.accession_number}>"
+
+
+def test_partial_acquisition_failure_is_reported_not_silent(monkeypatch):
+    """One accession in the span fails to acquire. The loop must record THAT
+    accession as a failed item and still return the filings acquired from the
+    rest -- and what it returns must be the raw filing objects themselves.
+
+    Three ways this could go wrong, each pinned by its own assertion:
+
+      1. **A silently shorter span.** A loop that drops the unacquirable
+         accession without recording it returns a span that is shaped exactly
+         like a complete one -- this arc's recurring defect. Pinned by asserting
+         `failed_items` names the FAILED accession, not merely that it is
+         non-empty: an entry carrying the wrong accession is as unusable as no
+         entry, and points a reader at an innocent filing.
+      2. **An aborted request.** One bad accession in seventy-seven must not
+         cost the other seventy-six. Pinned by recording every accession the
+         loop attempted, so a `break`/`raise` on the failure is visible as a
+         short attempt list rather than only as a shorter result.
+      3. **The wrong OUTPUT SHAPE.** Task D's function takes ALREADY-ACQUIRED
+         filing objects; a loop yielding accession rows, or `_acquire_raw_filing`
+         error dicts, or re-wrapped projections would satisfy every count above
+         and fail at the seam. Pinned by identity against the exact objects the
+         stub returned, in order.
+
+    STUBBED AT `sec_edgar_client._acquire_raw_filing` -- this file's own
+    boundary (the PRODUCER'S OWN boundary, as the autouse
+    `_stub_xval_producers_for_memo_fetch` fixture's docstring puts it; that is
+    the fixture this test overrides), NOT at `edgar.get_by_accession_number`. That is not stylistic here: Task B put a
+    disk cache BEHIND the lower boundary, and this file pins no
+    `INVESTING_TOOLKIT_CACHE` directory, so a lower stub would write fake
+    filings into the developer's real cache. The second run would take a disk
+    HIT instead of reaching the stub, and this test would stop exercising the
+    failure it exists to pin -- without failing. (A lower stub, if one is ever
+    needed, wants an autouse cache-dir fixture first; `test_sec_narrative.py`
+    and `test_exhibit_fetch.py` are the pattern.)
+
+    Follows the already-established shape of this exact loop in
+    `pack_reconstruct` (`{"accession": accession, **filing}` appended to
+    `failed_items`, then `continue`), rather than inventing a second one.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack_us  # noqa: E402
+    import sec_edgar_client  # noqa: E402
+
+    first = "0000789019-24-000023"
+    bad = "0000789019-25-000010"
+    last = "0000789019-25-000082"
+
+    # The oldest-first row shape `assemble_quarterly_filing_span` returns.
+    rows = [
+        {"form": "10-Q", "filingDate": "2024-10-30", "accessionNumber": first},
+        {"form": "10-Q", "filingDate": "2025-01-29", "accessionNumber": bad},
+        {"form": "10-K", "filingDate": "2025-07-30", "accessionNumber": last},
+    ]
+
+    acquired_first = _AcquiredFiling(first)
+    acquired_last = _AcquiredFiling(last)
+    acquire_error = {
+        "error": (
+            f"SEC EDGAR filing acquisition failed: accession {bad!r} did not "
+            f"resolve to a filing"
+        ),
+        "error_class": "resolution",
+    }
+    by_accession = {first: acquired_first, bad: acquire_error, last: acquired_last}
+
+    attempted: list = []
+
+    def _fake_acquire(accession):
+        attempted.append(accession)
+        return by_accession[accession]
+
+    monkeypatch.setattr(sec_edgar_client, "_acquire_raw_filing", _fake_acquire)
+
+    filings, failed_items = pack_us._acquire_filing_span(rows)
+
+    # 2. the failure did not abort the request -- every accession was attempted
+    assert attempted == [first, bad, last], (
+        f"the loop must attempt every accession in the span; a failure at "
+        f"{bad} must not stop it: {attempted}"
+    )
+
+    # 3. the OUTPUT CONTRACT. The no-dict check is FIRST deliberately: placed
+    # after the identity assertion below it could never be the failing one --
+    # every dict that reached `filings` fails identity first -- which is a test
+    # line that cannot fail (docs/loom/memory/a-test-can-be-correct-and-still-
+    # unable-to-fail.md). Here it is the line that catches an accession row or
+    # an unrecognised error slot, and identity catches the rest.
+    assert not any(isinstance(f, dict) for f in filings), (
+        f"an accession row or an error slot must never be yielded as a "
+        f"filing -- Task D's function calls into these objects: {filings}"
+    )
+    # Exactly the objects `_acquire_raw_filing` returned, in order.
+    # `_AcquiredFiling` has no `__eq__`, so this is identity -- returning
+    # `acquired_first` twice, or a re-wrapped projection, fails here while
+    # satisfying any count-based assertion.
+    assert filings == [acquired_first, acquired_last], (
+        f"must yield the acquired filing objects themselves, in span order: "
+        f"{filings}"
+    )
+
+    # 1. the failure is LOUD and names the accession that actually failed
+    assert [item["accession"] for item in failed_items] == [bad], (
+        f"the unacquirable accession must be recorded by NAME -- a shorter "
+        f"span with nothing recorded, or an entry naming a filing that "
+        f"succeeded, are both silent failures: {failed_items}"
+    )
+    assert failed_items[0]["error_class"] == "resolution", (
+        f"the acquisition slot's own class must ride along, so a reader can "
+        f"tell a resolution failure from a form-unavailable one: {failed_items}"
+    )
+    assert failed_items[0]["error"] == acquire_error["error"], (
+        "the acquisition slot's own message must ride along verbatim, "
+        "matching `pack_reconstruct`'s `{'accession': accession, **filing}`"
+    )
+
+
+def test_a_row_with_no_accession_is_recorded_never_attempted_never_dropped(monkeypatch):
+    """A span row whose `accessionNumber` is `None` must be recorded as its own
+    failed item -- neither handed to the acquisition boundary (which crashes on
+    it) nor filtered out of the span (which loses it silently).
+
+    THE ROW IS REAL. `sec_edgar_client.list_filings` builds each row by index
+    across the submissions columns and pads a short column with `None`
+    (`_append_submission_block`); it filters no row on that account, so a span
+    assembled from its output can carry one.
+
+    Both wrong answers are pinned, because both are one edit away:
+
+      1. **Handing it to `_acquire_raw_filing`.** That function computes its
+         disk-cache key from `_accession_nodash(accession)` BEFORE its `try`,
+         and `_accession_nodash` calls `accession.replace("-", "")` with no
+         guard -- so `None` raises `AttributeError` out of this loop and takes
+         the whole span down, including every filing that already acquired.
+         The stub below reproduces that exact boundary behaviour rather than
+         tolerating `None`, so a loop that attempts the row fails here with the
+         production symptom instead of quietly passing on a forgiving mock.
+      2. **Filtering it out**, the way `pack_reconstruct` does. That is right
+         THERE and silent HERE: `pack_reconstruct` counts `requested` over its
+         own filtered list, while this function returns no count at all and
+         leaves the caller to reconcile `len(rows)` against the two returned
+         lists. A dropped row makes that arithmetic disagree with nothing
+         recorded -- a span shaped exactly like a complete one, which is the
+         defect this whole arc exists to remove. Pinned by asserting
+         `failed_items` carries the `None`-accession entry, not merely that the
+         good filing survived.
+    """
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack_us  # noqa: E402
+    import sec_edgar_client  # noqa: E402
+
+    good = "0000789019-25-000082"
+    rows = [
+        {"form": "10-Q", "filingDate": "2025-01-29", "accessionNumber": None},
+        {"form": "10-K", "filingDate": "2025-07-30", "accessionNumber": good},
+    ]
+    acquired = _AcquiredFiling(good)
+    attempted: list = []
+
+    def _fake_acquire(accession):
+        # Faithful to the real boundary: the disk cache key is computed first
+        # and `_accession_nodash` is not defensive, so a `None` accession
+        # raises here rather than returning a slot.
+        accession.replace("-", "")
+        attempted.append(accession)
+        return acquired
+
+    monkeypatch.setattr(sec_edgar_client, "_acquire_raw_filing", _fake_acquire)
+
+    filings, failed_items = pack_us._acquire_filing_span(rows)
+
+    assert attempted == [good], (
+        f"a row with no accession must never reach the acquisition boundary, "
+        f"and the rows after it must still be attempted: {attempted}"
+    )
+    assert filings == [acquired], (
+        f"the acquirable rows of the span must still come back, unaffected by "
+        f"the unusable row before them: {filings}"
+    )
+    assert [item["accession"] for item in failed_items] == [None], (
+        f"the row with no accession must be RECORDED as a failed item -- "
+        f"filtering it out returns a short span with nothing to explain the "
+        f"shortfall: {failed_items}"
+    )
+    assert failed_items[0]["error_class"] == "no_accession", (
+        f"the missing accession is its own failure mode, distinct from an "
+        f"accession that failed to resolve: {failed_items}"
+    )
+    assert "10-Q" in failed_items[0]["error"] and "2025-01-29" in failed_items[0]["error"], (
+        f"with no accession to name it by, the entry must name the row some "
+        f"other way or it points a reader at nothing: {failed_items}"
+    )
+
+
+def test_an_empty_span_returns_two_empty_lists_and_fabricates_no_failure():
+    """Nothing was asked for, so nothing failed. An empty `rows` must not
+    manufacture a `failed_items` entry to represent its own emptiness: an empty
+    quarterly span is a real answer for a foreign private issuer that files
+    20-F rather than 10-Q, and what it MEANS is the caller's to decide."""
+    if str(MARKETS_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(MARKETS_SCRIPTS))
+    import pack_us  # noqa: E402
+
+    assert pack_us._acquire_filing_span([]) == ([], []), (
+        "an empty span is not a failure and must not be reported as one"
+    )
