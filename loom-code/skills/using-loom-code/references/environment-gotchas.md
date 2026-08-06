@@ -42,6 +42,40 @@ it.
   `git commit -F /tmp/commit-msg.md`. The inline heredoc form is
   scanned and blocked.
 
+## S3 — Starting a new arc branch (the main-branch guard is operation-anchored, not phrase-anchored)
+
+**Why:** The repo bash-guard's deny regexes
+(`~/.claude/hooks/executable_bash-guard.sh:36-40`, the third hook in
+the dcg → safety-net → bash-guard chain) are operation-anchored —
+`git push .*(main|master)` and `git merge .*(main|master)` — so only
+push/merge commands that name main/master are blocked;
+checkout/switch/pull to main are allowed by that guard's own comment.
+(dcg itself is a compiled binary whose matching logic is not readable
+— the observed block messages below are bash-guard's verbatim
+strings.) The natural
+"update main then branch" chain (`git checkout main && git merge
+--ff-only origin/main && git checkout -b <name>`) still dies
+mid-recipe, but on the **merge** step (observed: "Blocked: do not
+merge into/from main/master without PR"), not because "main" appears
+anywhere in the chain. A plain `git checkout -b <name> origin/main`
+is **NOT** blocked (probed 2026-08-06 — the branch was created and
+upstream was set to `origin/main`); it just sets upstream tracking to
+`origin/main`, which the sha recipe below avoids by pinning to an
+explicit, fetched sha instead.
+
+- Don't: `git checkout main && git merge --ff-only origin/main &&
+  git checkout -b <name>`, or any standalone `git merge` naming
+  `main`/`master` — the merge step trips the guard (observed message
+  above).
+- Not blocked, but not the recommended form: `git checkout -b <name>
+  origin/main` succeeds and sets upstream tracking to `origin/main` —
+  an earlier session believed this tripped the guard; the 2026-08-06
+  probe showed otherwise.
+- Do: start a new arc branch with `git checkout -b <name>
+  <main-tip-sha>`, resolving the sha from origin/main after a fetch
+  (`git fetch origin`, then `git rev-parse origin/main`) and passing
+  the printed sha.
+
 ## B3 — Bash cwd persistence across calls
 
 **Why:** A `cd <subdir>` inside one Bash call persists into the next

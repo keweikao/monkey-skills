@@ -520,6 +520,67 @@ def test_steps_count_mismatch_exits_1_loudly(tmp_path):
     assert "goal:" not in result.stdout, "must never render a partial card"
 
 
+def test_inline_steps_declaration_fails_loud(tmp_path):
+    """Task 2 of
+    docs/loom/plans/2026-08-06-ledger-writer-and-plan-tooling-hardening.md:
+    a header `Steps:` line with content after the colon (the inline form
+    the 0.62.0 plan's author actually wrote) → exit 1 loud, with a
+    message naming the correct format — a bare `Steps:` line followed by
+    indented numbered titles. Before the fix, _parse_steps silently
+    ignored the line and rendered a titleless card at exit 0."""
+    text = (
+        "# Plan: widget fixture\n\n"
+        "Source brief: docs/loom/specs/fixture.md\n"
+        "Goal: Ship the widget pipeline end-to-end.\n"
+        "Stage: sdd:wave-1\n"
+        "Steps: 核心條款 / 鄰居同步 / 版本收束\n\n"
+        "## Task 1 — parser\n\n"
+        "- Description: fixture task body.\n"
+        "- Status: pending\n\n"
+        "## Notes\n\nFixture notes — never a task.\n"
+    )
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "Steps" in result.stdout
+    assert "bare" in result.stdout, "message must name the bare-line form"
+    assert "numbered" in result.stdout, (
+        "message must name the indented numbered-titles form"
+    )
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert "goal:" not in result.stdout, "must never render a partial card"
+
+
+def test_steps_mention_in_task_prose_does_not_trigger_inline_guard(tmp_path):
+    """Scope pin for the inline-Steps guard: a column-0 `Steps: ...` line
+    inside a section AFTER the first `## ` heading (task-block / prose
+    territory) is content, not a header declaration — the plan still
+    renders its flat card at exit 0. The guard is bounded to the
+    pre-first-`## ` header region, exactly like _parse_steps; a naive
+    whole-file scan would wrongly fail this plan."""
+    text = (
+        "# Plan: widget fixture\n\n"
+        "Source brief: docs/loom/specs/fixture.md\n"
+        "Goal: Ship the widget pipeline end-to-end.\n"
+        "Stage: sdd:wave-1\n\n"
+        "## Task 1 — parser\n\n"
+        "- Description: fixture task body.\n"
+        "- Status: pending\n\n"
+        "## Notes\n\n"
+        "Steps: a / b / c — a prose mention, never a declaration.\n"
+    )
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "goal: Ship the widget pipeline end-to-end.\n" in result.stdout
+    assert "[ ] T1 parser\n" in result.stdout
+
+
 def test_dependency_cycle_exits_1_naming_the_cycle(tmp_path):
     """T1 needs T2 and T2 needs T1 → no topological order exists; exit 1
     loud naming the cycle's tasks, never a hang or a partial card."""
@@ -634,3 +695,338 @@ def test_detail_unknown_task_number_exits_1_naming_it(tmp_path):
     assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
     assert "T9" in result.stdout
     assert result.stdout.count("\n") == 1, "message must be one line"
+
+
+# --- ledger writer: --set-status --------------------------------------------
+# Task 1 of docs/loom/plans/2026-08-06-ledger-writer-and-plan-tooling-hardening.md.
+# Status grammar (brief Smallest End State 1): exactly
+# pending | claimed(@<agent>) | done(<sha>) | blocked — parenthetical
+# REQUIRED for claimed/done, FORBIDDEN for pending/blocked.
+
+
+def test_set_status_rewrites_in_place(tmp_path):
+    """Happy path, done kind: `--set-status "T1=done(<sha>)"` rewrites the
+    task's `- Status:` line (here directly after the heading — the real
+    plans' dominant layout) in place, exits 0, and prints the old line
+    then the new line. The file's only change is that one line."""
+    text = (
+        "# Plan: widget fixture\n\n"
+        "Source brief: docs/loom/specs/fixture.md\n"
+        "Goal: Ship the widget pipeline end-to-end.\n"
+        "Stage: sdd:wave-1\n\n"
+        "## Task 1 — parser\n"
+        "- Status: pending\n"
+        "- Description: fixture task body.\n\n"
+        "## Notes\n\nFixture notes — never a task.\n"
+    )
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=done(abc1234)")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "old: - Status: pending\n"
+        "new: - Status: done(abc1234)\n"
+    )
+    assert plan_path.read_text(encoding="utf-8") == text.replace(
+        "- Status: pending", "- Status: done(abc1234)"
+    )
+
+
+def test_set_status_preserves_bold_field_markup(tmp_path):
+    """(F1, whole-branch review fix round) plan-format.md's per-task
+    schema writes the Status bullet bold (`- **Status**: value`) — the
+    writer must PRESERVE that markup on rewrite, not silently de-bold a
+    schema-conformant line. Before the fix, set_status always emitted
+    the plain `- Status:` prefix regardless of the matched line's own
+    markup; a bold-style plan lost its bold on the very first flip."""
+    text = (
+        "# Plan: widget fixture\n\n"
+        "Source brief: docs/loom/specs/fixture.md\n"
+        "Goal: Ship the widget pipeline end-to-end.\n"
+        "Stage: sdd:wave-1\n\n"
+        "## Task 1 — parser\n"
+        "- **Status**: pending\n"
+        "- Description: fixture task body.\n\n"
+        "## Notes\n\nFixture notes — never a task.\n"
+    )
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=done(abc1234)")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "old: - **Status**: pending\n"
+        "new: - **Status**: done(abc1234)\n"
+    )
+    assert plan_path.read_text(encoding="utf-8") == text.replace(
+        "- **Status**: pending", "- **Status**: done(abc1234)"
+    )
+
+
+def test_set_status_pending_kind(tmp_path):
+    """pending kind (bare word, no parenthetical) rewrites a done task
+    back to pending."""
+    plan_path = _write_plan(
+        tmp_path, _plan_text(tasks=[("parser", "done(abc1234)")])
+    )
+
+    result = _run_card(plan_path, "--set-status", "T1=pending")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "old: - Status: done(abc1234)\n"
+        "new: - Status: pending\n"
+    )
+    assert "- Status: pending" in plan_path.read_text(encoding="utf-8")
+
+
+def test_set_status_claimed_kind(tmp_path):
+    """claimed kind with its REQUIRED `(@<agent>)` parenthetical."""
+    plan_path = _write_plan(
+        tmp_path, _plan_text(tasks=[("parser", "pending")])
+    )
+
+    result = _run_card(plan_path, "--set-status", "T1=claimed(@implementer)")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "old: - Status: pending\n"
+        "new: - Status: claimed(@implementer)\n"
+    )
+    assert "- Status: claimed(@implementer)" in plan_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_set_status_blocked_kind(tmp_path):
+    """blocked kind (bare word — the writer's grammar FORBIDS a
+    parenthetical here, unlike the renderer's blocked(<why>) tolerance)."""
+    plan_path = _write_plan(
+        tmp_path, _plan_text(tasks=[("parser", "claimed(@implementer)")])
+    )
+
+    result = _run_card(plan_path, "--set-status", "T1=blocked")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "old: - Status: claimed(@implementer)\n"
+        "new: - Status: blocked\n"
+    )
+    assert "- Status: blocked" in plan_path.read_text(encoding="utf-8")
+
+
+def test_set_status_task_not_found_exits_1_naming_it(tmp_path):
+    """A task number with no `## Task <N>` heading → exit 1 loud naming
+    the missing heading; the file is not modified."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T9=blocked")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "T9" in result.stdout
+    assert "heading" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_wrong_kind_exits_1_naming_the_value(tmp_path):
+    """Malformed status, wrong kind: a value outside the four kinds →
+    exit 1 loud naming the bogus value; file untouched."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=wip-maybe")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "'wip-maybe'" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_missing_required_parenthetical_exits_1(tmp_path):
+    """Malformed status, missing REQUIRED parenthetical: bare `done` →
+    exit 1 loud naming the value and the parenthetical rule."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=done")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "'done'" in result.stdout
+    assert "parenthetical" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_forbidden_parenthetical_exits_1(tmp_path):
+    """Malformed status, FORBIDDEN parenthetical: `pending(oops)` →
+    exit 1 loud naming the value and the parenthetical rule."""
+    text = _plan_text(tasks=[("parser", "done(abc1234)")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=pending(oops)")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "'pending(oops)'" in result.stdout
+    assert "parenthetical" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_zero_status_lines_exits_1(tmp_path):
+    """A task block with no `- Status:` line at all → exit 1 loud naming
+    the absence (nothing to rewrite; the writer never inserts)."""
+    text = _plan_text(tasks=[("parser", None)])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=blocked")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "no '- Status:'" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_duplicate_status_lines_exits_1(tmp_path):
+    """More than one `- Status:` line in the task block (the 0.62.0
+    duplicate-field incident) → exit 1 loud; the writer refuses rather
+    than repairs, and the file is untouched."""
+    text = _plan_text(tasks=[("parser", "pending", ["- Status: pending"])])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=done(abc1234)")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "2 '- Status:' lines" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_rewrites_after_gloss_and_after_heading_layouts(tmp_path):
+    """Positional tolerance mirroring the real plans' two layouts: T1's
+    Status sits directly after its heading, T2's sits after its Gloss
+    bullet — both rewrite in place, wherever the line sits in the block."""
+    text = (
+        "# Plan: widget fixture\n\n"
+        "Source brief: docs/loom/specs/fixture.md\n"
+        "Goal: Ship the widget pipeline end-to-end.\n"
+        "Stage: sdd:wave-1\n\n"
+        "## Task 1 — parser\n"
+        "- Status: pending\n"
+        "- Description: fixture task body.\n\n"
+        "## Task 2 — renderer\n"
+        "- Description: fixture task body.\n"
+        "- Gloss: 讓卡片直接在終端機看得懂\n"
+        "- Status: pending\n\n"
+        "## Notes\n\nFixture notes — never a task.\n"
+    )
+    plan_path = _write_plan(tmp_path, text)
+
+    first = _run_card(plan_path, "--set-status", "T1=done(abc1234)")
+    second = _run_card(plan_path, "--set-status", "T2=claimed(@implementer)")
+
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert plan_path.read_text(encoding="utf-8") == (
+        "# Plan: widget fixture\n\n"
+        "Source brief: docs/loom/specs/fixture.md\n"
+        "Goal: Ship the widget pipeline end-to-end.\n"
+        "Stage: sdd:wave-1\n\n"
+        "## Task 1 — parser\n"
+        "- Status: done(abc1234)\n"
+        "- Description: fixture task body.\n\n"
+        "## Task 2 — renderer\n"
+        "- Description: fixture task body.\n"
+        "- Gloss: 讓卡片直接在終端機看得懂\n"
+        "- Status: claimed(@implementer)\n\n"
+        "## Notes\n\nFixture notes — never a task.\n"
+    )
+
+
+def test_set_status_file_byte_identical_outside_the_one_line(tmp_path):
+    """Full before/after equality modulo the single rewritten line: on a
+    multi-task plan, exactly ONE line differs after the flip, and every
+    other line — other tasks' Status lines included — is byte-identical."""
+    text = _plan_text(
+        tasks=[
+            ("parser", "done(abc1234)"),
+            ("renderer", "pending", ["- Dependencies: Task 1 completes first"]),
+            ("docs", "blocked"),
+        ]
+    )
+    plan_path = _write_plan(tmp_path, text)
+    before_lines = text.splitlines(keepends=True)
+
+    result = _run_card(plan_path, "--set-status", "T2=claimed(@implementer)")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    after_lines = plan_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    assert len(after_lines) == len(before_lines)
+    diffs = [
+        i for i, (b, a) in enumerate(zip(before_lines, after_lines)) if b != a
+    ]
+    assert len(diffs) == 1, f"exactly one line may change, got {diffs}"
+    assert before_lines[diffs[0]] == "- Status: pending\n"
+    assert after_lines[diffs[0]] == "- Status: claimed(@implementer)\n"
+
+
+def test_set_status_claimed_without_at_sign_exits_1(tmp_path):
+    """(F2 axis 1, whole-branch review fix round) `claimed(implementer)`
+    — missing the REQUIRED `@` sigil — must be refused. This test's RED
+    is only against a WEAKENED grammar: the current
+    `_SET_STATUS_GRAMMAR` already requires `claimed(@<agent>)`, so this
+    assertion PASSES against current code unchanged; it pins that a
+    future loosened grammar (dropping the `@` requirement) cannot
+    silently regress this axis."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=claimed(implementer)")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "'claimed(implementer)'" in result.stdout
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_blocked_with_parenthetical_exits_1(tmp_path):
+    """(F2 axis 2, whole-branch review fix round) `blocked(why)` — the
+    writer's grammar FORBIDS a parenthetical on blocked, unlike the
+    renderer's `blocked(<why>)` tolerance. This test's RED is only
+    against a WEAKENED grammar: the current `_SET_STATUS_GRAMMAR`
+    already excludes it, so this assertion PASSES against current code
+    unchanged; it pins that a future loosened grammar cannot silently
+    accept the renderer's tolerant form on the writer side."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=blocked(why)")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "'blocked(why)'" in result.stdout
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_and_detail_are_mutually_exclusive(tmp_path):
+    """Passing both --detail and --set-status → usage error (exit 2) whose
+    message names both flags; the file is not modified."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(
+        plan_path, "--detail", "T1", "--set-status", "T1=blocked"
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "--set-status" in result.stderr
+    assert "--detail" in result.stderr
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
