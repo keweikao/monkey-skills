@@ -122,8 +122,11 @@ A qualifying amendment records a one-line skip note in the plan's `Notes` naming
 
 After PASS, before SDD handoff: run the kickoff briefing — read [`references/kickoff-briefing.md`](references/kickoff-briefing.md) and batch-brief the round's one-way-door decisions (expect 1-3) and foreseeable implementation forks; the rest route to the Decision Log.
 
-**Progress surface.** The plan carries `Goal:`, `Stage:`, and
-per-task `Status:` from birth (schema below). After the reviewer PASS
+**Progress surface.** The plan carries `Goal:`, `Stage:`, per-task
+`Status:`, an optional `Steps:` title block, and per-task `Gloss:`
+lines from birth (schema below) — Steps titles and Gloss lines are
+written at plan time in the user's conversation language. After the
+reviewer PASS
 is stamped, run `python3 scripts/plan_card.py <plan-path>` and relay
 its card in the conversation language — fire-and-continue, not a new
 pause, framed per `loom-pipeline/hooks/family-relay.md §(a2) Progress
@@ -168,6 +171,7 @@ Plan-document-reviewer verdict: PENDING   ← required; reviewer will flip to PA
     Decision section — required; plan-document-reviewer Check 3 blocks on this field>
 - Status: pending   ← default-on ledger field; SDD maintains it —
     semantics in `references/plan-format.md` §Progress ledger
+- Gloss: <one line, user's conversation language — effect + goal relation>
 
 ## Task 2 — ...
 ```

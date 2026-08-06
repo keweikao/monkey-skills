@@ -30,10 +30,16 @@ Free-form plans force SDD to re-parse; this schema makes the parse trivial.
 
 **Source brief**: <path to brief, e.g. docs/loom/specs/2026-05-16-csv-export.md>
 Goal: <one sentence transcribed from the brief's Smallest End State at
-    plan time — frozen with the plan; never edited afterward>
+    plan time — frozen with the plan (wrap continuation lines WITH
+    indentation — unindented wraps silently truncate the rendered goal);
+    never edited afterward>
 Stage: <planning | sdd:wave-N | review:round-N | finishing — updated by
     the orchestrator at each transition, committed with the nearest
     ledger or close-out commit>
+Steps: <OPTIONAL numbered block, one line per derived dependency
+    level, titles in the user's conversation language; when present
+    the count must equal the plan's dependency-level count —
+    plan_card.py exits 1 loud on mismatch>
 **Total tasks**: <N>
 **Critical-path depth**: <D> (must be ≤5; if >5 route back to brainstorming)
 **Execution order**: sequential | parallel-where-possible
@@ -75,6 +81,11 @@ If `Plan-document-reviewer verdict` is `PENDING`, the plan has not been self-rev
     "pending" at plan time; an old plan without Status fields behaves exactly as
     before — fully backward compatible. NOT authoring content beyond the initial
     "pending"; SDD writes the transitions, the plan-document-reviewer ignores it.>
+- **Gloss**: <one line in the user's conversation language stating
+    the task's user-visible effect and why it matters to the goal —
+    NEVER a restatement of the task name; rendered under the task row
+    by plan_card.py; emitted by writing-plans for new plans, optional
+    on old ones>
 ```
 
 #### `Files touched` and `Independent` (v0.8.0+)
@@ -256,6 +267,9 @@ For a brief at `docs/loom/specs/2026-05-16-csv-export.md` whose Smallest End Sta
 **Source brief**: docs/loom/specs/2026-05-16-csv-export.md
 Goal: users can export the orders list as CSV with the same filters the list view applies
 Stage: planning
+Steps:
+  1. Understand the CSV request and produce the file format
+  2. Connect them so the download actually happens
 **Total tasks**: 3
 **Critical-path depth**: 2 (≤5 ✓)
 **Execution order**: sequential
@@ -276,6 +290,7 @@ Stage: planning
 - **Independent**: true
 - **Brief item covered**: "minimum shippable change: `?format=csv` query param to existing report URL (no UI work)"
 - **Status**: pending
+- **Gloss**: The report URL starts understanding a CSV request — until it does, no export can be asked for at all.
 
 ## Task 2 — Implement CSV renderer for report payload
 
@@ -288,10 +303,11 @@ Stage: planning
 - **Acceptance**:
   - **RED**: `renderers/csv.test.ts > renderCSV produces RFC 4180-compliant output with quoted fields containing commas`
   - **GREEN**: CSV string matches RFC 4180 fixture; passes existing fuzz tests
-- **Dependencies**: none (parallel with Task 1)
+- **Dependencies**: none
 - **Independent**: true
 - **Brief item covered**: "minimum shippable change: CSV output that downstream pipeline can ingest"
 - **Status**: pending
+- **Gloss**: Report data turns into a spreadsheet-ready file other tools can ingest — the thing the export exists to hand over.
 
 ## Task 3 — Wire renderer into handler + set Content-Type
 
@@ -308,6 +324,7 @@ Stage: planning
 - **Independent**: false  # touches files Task 1 also touches; must run after Task 1
 - **Brief item covered**: "minimum shippable change: end-to-end CSV download path"
 - **Status**: pending
+- **Gloss**: Asking for CSV now actually downloads one — the moment the goal's export works end to end for a user.
 
 ## Notes
 
@@ -334,7 +351,7 @@ Stage: planning
 ## Task 4 — Docstring for yaml renderer  (Independent: true, Dependencies: none)
 ## Task 5 — Docstring for toml renderer  (Independent: true, Dependencies: none)
 ## Task 6 — Docstring for html renderer  (Independent: true, Dependencies: none)
-## Task 7 — Run lint gate over all renderers (Dependencies: Tasks 1-6 complete first)
+## Task 7 — Run lint gate over all renderers (Dependencies: Tasks 1, 2, 3, 4, 5, 6 complete first)
 ## Task 8 — Regenerate renderer index doc   (Dependencies: Task 7 completes first)
 ```
 

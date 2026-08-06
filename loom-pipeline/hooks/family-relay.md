@@ -68,13 +68,23 @@ convention — same grounding logic as §(d)'s jargon-and-stakes gate.
 
 The plan-progress variant of the rollup card. Field order is fixed:
 **Goal** (one line, verbatim from the plan header), **task table**
-(✅ done / ⏳ claimed / ⬜ pending / 🚫 blocked, counts then rows),
-**Stage**, **next** (first not-done task, or close-out). The body is
-rendered mechanically by `scripts/plan_card.py` — the relayer adds
-only a one-line conversational frame in the live conversation
-language, same localized-content rule as the rollup card above. Never
-re-order or drop fields; never compose the body by hand when the
-script is available.
+(`[v]` done / `[~]` claimed / `[ ]` pending / `[!]` blocked — plain-ASCII
+marks for cross-platform rendering; counts then rows), **Stage**,
+**next** (first not-done task in roadmap order, or close-out). Within
+the task table, step separators with `(needs: T…)` lists appear when
+the plan declares Dependencies, and indented gloss lines when tasks
+carry `Gloss:`; `--detail T<N>` is a separate on-demand view printing
+one task's curated fields — not part of the card.
+The body is rendered mechanically by `scripts/plan_card.py` — never
+compose it by hand when the script is available, never re-order or
+drop fields. The relayer's frame, in the live conversation language:
+a plain-translation gloss under the goal line; a grounded explanatory
+gloss for `next:` (derived from that task's own plan fields — cite
+the source item, never invent); and for every `[!]` row an
+explanation that OPENS with the stop reason — "needs your decision:
+…" or "waiting on an external condition: …". Pipeline-station
+narration (waves, reviewer arms, verdicts) stays out of the frame
+unless a pending decision cannot be understood without it.
 
 ### (b) Visual defaults
 
