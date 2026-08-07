@@ -295,3 +295,52 @@ def test_span_windows_cannot_be_mutated_through_its_return_value(periods):
     )
     # And the classifier itself still answers as it did.
     assert periods.period_kind(_iso_day(364)) == "annual"
+
+
+def test_span_windows_is_built_from_the_constants_on_every_call(
+    periods, monkeypatch
+):
+    """KILLS: building the dict ONCE and handing out copies of it —
+    `_CACHED = {...}` at module scope with `return dict(_CACHED)`.
+
+    MEASURED 2026-08-07: that mutation leaves the whole suite green. The
+    sibling test above pins that two calls are distinct OBJECTS, which a
+    per-call `dict(_CACHED)` satisfies just as well, so nothing was checking
+    that the numbers inside are read when the caller asks rather than frozen
+    at import.
+
+    THE PROPERTY IS THE SECTION'S OWN PREMISE: this accessor exists so Task E
+    reads these windows instead of restating them, which is worth having only
+    while it DESCRIBES the classifier. `_kind_for_span` reads the module
+    constants at call time, so a snapshot taken at import and the classifier
+    can disagree — and this test is what makes them move together, by
+    rebinding a constant and asking both.
+
+    Rebinding a private constant is deliberate here and is the only way to
+    express it: nothing else can distinguish "read now" from "read at import",
+    because the two agree on every input while the constants hold still.
+    """
+    # 130, not 400: the widened window must stay DISJOINT from the other three
+    # (175-190, 260-285, 350-380), or the probe span below matches more than
+    # one and the assertion silently rides on `_kind_for_span`'s evaluation
+    # order instead of on the rebound constant. A 400 bound overlapped
+    # `_ANNUAL_SPAN`, and reordering those checks — a legal refactor while the
+    # real windows are disjoint — turned this test red with a message that was
+    # not true.
+    widened = (80, 130)
+    monkeypatch.setattr(periods, "_DISCRETE_QUARTER_SPAN", widened)
+
+    assert periods.span_windows()["discrete_quarter"] == (widened,), (
+        "span_windows still reports the window the constant held at import, "
+        f"not the {widened} it holds now — the accessor is a snapshot, so a "
+        "caller reading it can be told something the classifier no longer does"
+    )
+    # The classifier moved with it: a 120-day span buckets as `unknown` under
+    # the real constants and matches NO other window, so its answering
+    # `discrete_quarter` here can only come from the rebound one. That is what
+    # makes the accessor's answer a description of the classifier rather than
+    # merely a changed dict.
+    assert periods.period_kind(_iso_day(120)) == "discrete_quarter", (
+        "the premise is broken: the classifier did not follow the rebound "
+        "constant, so this test cannot tell a fresh read from a snapshot"
+    )

@@ -687,6 +687,34 @@ def _derived_by_key(derived: dict, kind: str) -> dict:
     return by_key
 
 
+def _figures(entry: dict) -> dict:
+    """A derived entry's `values` re-keyed by CONCEPT alone.
+
+    The module keys them by `(row_index, concept)`, because a concept does not
+    identify a line — two rows can share one. Most tests here feed statements
+    whose concepts are unique and are about something else entirely (a window
+    bound, the sort order, `Decimal` exactness), so this lets them keep saying
+    "this concept's figure" without also pinning a row index incidental to
+    their subject.
+
+    RAISES on a repeated concept rather than picking a winner. Picking one is
+    precisely the defect
+    `test_two_lines_sharing_a_concept_each_keep_their_own_derived_figure`
+    pins, and a helper that quietly re-committed it here would hide a
+    regression of that exact shape from every test that goes through it.
+    """
+    figures: dict = {}
+    for (index, concept), value in entry["values"].items():
+        assert concept not in figures, (
+            f"concept {concept!r} appears on more than one line of this "
+            f"statement (line {index} and another), so re-keying by concept "
+            "alone would drop a figure — assert on the (row_index, concept) "
+            "keys directly instead"
+        )
+        figures[concept] = value
+    return figures
+
+
 def _drop_period(statements: dict, kind: str, period_key: str) -> dict:
     """Remove one period column from an in-test copy — from the statement's
     own `periods` list AND from every line's `values`, which is how a capture
@@ -805,7 +833,7 @@ def test_derived_q4_revenue_matches_the_recorded_cross_implementation_figure(
         f"{_RECORDED_FY2025_Q4_REVENUE} -- the fixture moved; re-measure "
         "rather than loosening this"
     )
-    assert entry["values"][_INCOME_CONCEPT] == _RECORDED_FY2025_Q4_REVENUE
+    assert _figures(entry)[_INCOME_CONCEPT] == _RECORDED_FY2025_Q4_REVENUE
 
     # 2. The key describes the value's span, and is NEITHER input's key.
     assert entry["key"] not in (_FY2025_FY, _FY2025_YTD9), (
@@ -856,7 +884,7 @@ def test_derived_cashflow_quarters_match_the_dependencys_own_arithmetic(
         f"{sorted(cash_flow)}"
     )
     q4 = cash_flow[_FY2025_DERIVED_Q4]
-    assert q4["values"][_CFO_CONCEPT] == _CFO_FY2025_Q4
+    assert _figures(q4)[_CFO_CONCEPT] == _CFO_FY2025_Q4
     assert period_kind(q4["key"]) == "discrete_quarter"
 
     # --- PART 2: all four discrete quarters, and their sum -----------------
@@ -868,7 +896,7 @@ def test_derived_cashflow_quarters_match_the_dependencys_own_arithmetic(
     quarters = {}
     for key, expected in _FY2025_CASHFLOW_DISCRETE.items():
         value = (
-            cash_flow[key]["values"][_CFO_CONCEPT]
+            _figures(cash_flow[key])[_CFO_CONCEPT]
             if key in cash_flow
             else Decimal(str(filed[key]))
         )
@@ -949,7 +977,7 @@ def test_derived_cashflow_quarters_match_the_dependencys_own_arithmetic(
             f"subtraction that produces it never fired. Got {sorted(re_derived)}"
         )
         assert period_kind(key) == "discrete_quarter"
-        values = re_derived[key]["values"]
+        values = _figures(re_derived[key])
         mismatched = {}
         for concept, was_filed in removed.items():
             row = _row_of(statements["cash_flow"], concept)
@@ -1147,7 +1175,7 @@ def test_derived_values_are_exact_decimals_not_binary_floats(
     """
     derived = series.derive_discrete_quarters(fixture_doc["statements"])
     entry = _derived_by_key(derived, "income")[_FY2025_DERIVED_Q4]
-    value = entry["values"][_EPS_DILUTED_CONCEPT]
+    value = _figures(entry)[_EPS_DILUTED_CONCEPT]
 
     filed = _values_of(fixture_doc["statements"]["income"], _EPS_DILUTED_CONCEPT)
     float_answer = filed[_FY2025_FY] - filed[_FY2025_YTD9]
@@ -1188,9 +1216,9 @@ def test_a_line_missing_one_input_value_is_omitted_never_zeroed(
     dropped = row["values"].pop(_FY2025_YTD9)
     assert dropped, "the premise is stale: this line had no nine-month value"
 
-    values = _derived_by_key(
+    values = _figures(_derived_by_key(
         series.derive_discrete_quarters(statements), "income"
-    )[_FY2025_DERIVED_Q4]["values"]
+    )[_FY2025_DERIVED_Q4])
 
     assert _INCOME_CONCEPT not in values, (
         f"{_INCOME_CONCEPT} was derived from one input alone: it holds "
@@ -1555,8 +1583,8 @@ def test_a_role_with_two_candidate_columns_derives_nothing_from_that_role(series
     )
     # The two that did derive are right, so the refusal above is not being
     # satisfied by a derivation that fails for some other reason.
-    assert by_key[q3_key]["values"]["us-gaap_Revenue"] == 30
-    assert by_key[q4_key]["values"]["us-gaap_Revenue"] == 40
+    assert _figures(by_key[q3_key])["us-gaap_Revenue"] == 30
+    assert _figures(by_key[q4_key])["us-gaap_Revenue"] == 40
 
 
 def test_a_period_no_line_can_supply_is_not_emitted_as_an_empty_column(series):
@@ -1595,7 +1623,7 @@ def test_a_period_no_line_can_supply_is_not_emitted_as_an_empty_column(series):
         "only Q2 has any line carrying both of its inputs; the periods whose "
         f"inputs no line supplies must not be emitted at all. Got {sorted(by_key)}"
     )
-    assert by_key[_derived_key(start, 91, 183)]["values"] == {
+    assert _figures(by_key[_derived_key(start, 91, 183)]) == {
         "us-gaap_Revenue": Decimal(20), "us-gaap_CostOfRevenue": Decimal(5),
     }
 
@@ -1644,7 +1672,7 @@ def test_a_column_exactly_on_a_role_windows_bound_resolves_that_role(
         f"Got {sorted(by_key)}, expected {sorted(expected)}"
     )
     for key, value in expected.items():
-        assert by_key[key]["values"]["us-gaap_Revenue"] == value
+        assert _figures(by_key[key])["us-gaap_Revenue"] == value
 
 
 @pytest.mark.parametrize("reverse_input", [False, True])
@@ -1760,7 +1788,7 @@ def test_a_numerically_valid_string_cell_is_accepted_not_refused(series):
 
     by_key = _derived_by_key(series.derive_discrete_quarters({"income": statement}),
                             "income")
-    assert by_key[_derived_key(date(2022, 7, 1), 91, 183)]["values"][
+    assert _figures(by_key[_derived_key(date(2022, 7, 1), 91, 183)])[
         "us-gaap_Revenue"
     ] == Decimal(20)
 
@@ -1836,7 +1864,7 @@ def test_a_period_key_carrying_no_readable_span_is_skipped_never_refused(
         f"{sorted(expected)}"
     )
     for key, value in expected.items():
-        assert by_key[key]["values"]["us-gaap_Revenue"] == value
+        assert _figures(by_key[key])["us-gaap_Revenue"] == value
 
 
 def test_derivation_does_not_mutate_the_statements_it_is_given(series):
@@ -2342,15 +2370,26 @@ def test_each_line_carries_the_derived_cells_beside_the_filed_ones(
                     f"not the filer's own {filed_value!r}"
                 )
 
-        by_concept = {line.get("concept"): line for line in lines}
         for entry in derived[kind]:
-            # 2. every derived figure, on its own line, still exact
-            for concept, value in entry["values"].items():
-                cell = by_concept[concept]["values"][entry["key"]]
+            # 2. every derived figure, on its own line, still exact.
+            #
+            # ADDRESSED BY THE INDEX THE SUBTRACTION ITSELF RECORDED, never by
+            # a line lookup built here. An earlier version of this oracle keyed
+            # the lines `{line["concept"]: line}`, which re-derived a row
+            # identity of its own -- last-wins, matching Task E's tie-break by
+            # coincidence and never querying Task F's opposite one. It agreed
+            # with whichever side it happened to match, so the two functions
+            # could disagree with the whole suite green (measured: flipping
+            # `_project_lines`' `setdefault` to plain assignment left 1526
+            # passing). Assertion 1 above has already pinned that `lines` is
+            # `statement_data` in order, which is what makes the index mean
+            # the same row on both sides.
+            for (index, concept), value in entry["values"].items():
+                cell = lines[index]["values"][entry["key"]]
                 assert cell == value and isinstance(cell, Decimal), (
-                    f"{kind} {concept} at {entry['key']}: projected "
-                    f"{cell!r} ({type(cell).__name__}), expected the exact "
-                    f"Decimal {value!r} the subtraction produced"
+                    f"{kind} line {index} ({concept}) at {entry['key']}: "
+                    f"projected {cell!r} ({type(cell).__name__}), expected the "
+                    f"exact Decimal {value!r} the subtraction produced"
                 )
             # 3. and NOT ONE CELL MORE
             carrying = [
@@ -2372,6 +2411,120 @@ def test_each_line_carries_the_derived_cells_beside_the_filed_ones(
     ] == [19, 40, 40]
     assert [len(entry["values"]) for entry in derived["income"]] == [15, 15]
     assert [len(entry["values"]) for entry in derived["cash_flow"]] == [32, 32]
+
+
+def test_two_lines_sharing_a_concept_each_keep_their_own_derived_figure(series):
+    """KILLS the divergence between the two functions that identify a line:
+    Task E's `_difference_rows` kept the LAST row under a concept, Task F's
+    `_project_lines` placed onto the FIRST. Neither is wrong on its own; the
+    two disagreeing is what put one line's figure onto another line.
+
+    MEASURED on this exact input before the fix (2026-08-07, the module run
+    directly): the subtraction answered `{'us-gaap_Revenues': Decimal('1500')}`
+    -- one figure where two lines earn one -- and the projection put that 1500
+    on segment A, whose own quarter is 150, while segment B came back with no
+    derived cell at all. The figure was real and the period key was honest, so
+    nothing in the output marked it: this arc's own failure shape, at cell
+    granularity.
+
+    CONSTRUCTED, because no committed fixture can reach it -- 0 repeated
+    concepts across all 99 rows of the MSFT capture, which is exactly why every
+    existing test agreed with whichever tie-break it happened to match. Two
+    lines under one concept is ordinary XBRL all the same: a segment breakdown,
+    or a restated line filed beside the line it restates.
+
+    The two lines are given figures that cannot be confused for each other
+    (150 vs 1500) and that are not each other's multiple by any span, so a
+    swap, a collapse, and a zero-fill each produce a visibly different answer.
+    """
+    start = date(2020, 7, 1)
+    shared = "us-gaap_Revenues"
+    key_of, statement = _synthetic_statement(
+        start, {"q1": 91, "ytd6": 183},
+        {shared: {"q1": 100, "ytd6": 250}},
+    )
+    statement["statement_data"][0]["label"] = "segment A"
+    # CONSTRUCTED: a SECOND line under the SAME concept, carrying both input
+    # columns itself, so it earns a derived quarter of its own.
+    statement["statement_data"].append({
+        "concept": shared,
+        "label": "segment B",
+        "values": {key_of["q1"]: 1000, key_of["ytd6"]: 2500},
+    })
+
+    q2_key = _derived_key(start, 91, 183)
+    entry, = _derived_by_key(
+        series.derive_discrete_quarters({"income": statement}), "income"
+    ).values()
+    assert sorted(entry["values"].values()) == [Decimal(150), Decimal(1500)], (
+        "the subtraction produced "
+        f"{sorted(entry['values'].values())} for two lines that each carry "
+        "both input columns -- one figure per LINE is owed, and a concept-keyed "
+        f"answer can only hold one of them. Entry values: {entry['values']!r}"
+    )
+
+    lines = series.project_quarterly_series(
+        {"income": statement}, "TEST"
+    )["statements"]["income"]["lines"]
+    assert [line["values"].get(q2_key) for line in lines] == [
+        Decimal(150), Decimal(1500)
+    ], (
+        "each line's derived Q2 must be the subtraction of ITS OWN two cells "
+        "-- 250-100 for segment A, 2500-1000 for segment B. Got "
+        f"{[line['values'].get(q2_key) for line in lines]} for lines "
+        f"{[line.get('label') for line in lines]}"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate,description",
+    [
+        (lambda rows: list(reversed(rows)), "the same lines, re-ordered"),
+        (lambda rows: rows[:1], "a statement with the line index cut off it"),
+    ],
+)
+def test_entries_paired_with_another_statement_are_refused_not_mis_filed(
+    series, mutate, description
+):
+    """KILLS: dropping either arm of `_row_the_subtraction_read`, i.e.
+    `return rows[index]` on its own.
+
+    Addressing a line by POSITION is exact and it is BLIND. Inside
+    `project_quarterly_series` the two lists are one list, so the index always
+    names the right row -- but `derive_discrete_quarters` is PUBLIC, its
+    entries outlive the call, and nothing in their shape says which statement
+    they were derived from. Pair them with a re-ordered or shortened one and a
+    positional write puts a real figure onto a line that did not produce it:
+    the exact defect this addressing was adopted to remove, re-entering
+    through the door the fix opened.
+
+    So the refusal is what makes positional addressing safe to hand out, and
+    it is asserted on BOTH arms, because they fail differently: a re-ordered
+    statement is in range and holds the wrong line (silent without the concept
+    check), a shortened one is out of range.
+
+    CONSTRUCTED and reached through the private projection, which is the only
+    seam where the mismatch is expressible -- the public entry point derives
+    its own entries and can never present one.
+    """
+    start = date(2020, 7, 1)
+    _key_of, statement = _synthetic_statement(
+        start, {"q1": 91, "ytd6": 183},
+        {"us-gaap_Revenue": {"q1": 10, "ytd6": 30},
+         "us-gaap_CostOfRevenue": {"q1": 4, "ytd6": 9}},
+    )
+    entries = series.derive_discrete_quarters({"income": statement})["income"]
+    assert entries, "the premise is broken: nothing was derived to mis-file"
+
+    other = dict(statement, statement_data=mutate(statement["statement_data"]))
+    with pytest.raises(ValueError) as excinfo:
+        series._project_lines(other, entries)
+
+    message = str(excinfo.value)
+    assert _derived_key(start, 91, 183) in message, (
+        f"the refusal does not name the derived period whose figure was about "
+        f"to be mis-filed ({description}): {message}"
+    )
 
 
 def _statements_with(fixture_doc, *kinds: str) -> dict:

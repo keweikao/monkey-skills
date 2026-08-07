@@ -1,14 +1,25 @@
 # Plan: US quarterly three-statement series, 10+ years
 
 **Source brief**: docs/loom/specs/2026-07-28-us-quarterly-statement-series.md
-**Total tasks**: 10 (Task J added 2026-07-29 by plan review — see its header note)
+**Total tasks**: 10 (Task J added 2026-07-29 by plan review — see its header note).
+**9 of 10 SHIPPED on this branch; Task G did NOT ship** — see its own header note. A
+whole-branch reviewer found the gap: the branch filed backlog entries for two lesser
+deferrals while the one planned blocking task that was never built had neither an
+amendment nor an entry.
 **Critical-path depth**: 5 (A → D → E → F → H). Task J's chain A → B → J → H is depth 4, so the ceiling is unmoved.
 **Execution order**: parallel-where-possible
 **Plan-document-reviewer verdict**: PENDING — **amendment series** round A4.
 
-**NOT BLOCKED.** The cash-flow finding that blocked Tasks E/F/G was resolved by
+**NOT BLOCKED — on the cash-flow finding specifically.** (**Narrowed 2026-08-07**:
+this was written as an unqualified universal over the whole document, which a
+reader would now wrongly apply to `## FINDING 2026-08-07`, whose status is OPEN
+and whose fix shape genuinely is a live user decision.) The cash-flow finding that blocked Tasks E/F/G was resolved by
 user decision on 2026-07-30 — see §RESOLVED FINDING. Any sentence below telling
-you the plan is blocked on a user decision is stale; this line wins.
+you the plan is blocked on **that** finding is stale; this line wins **for that
+finding only**. It does NOT cover `## FINDING 2026-08-07`, which is still OPEN.
+(**Second pass, same day**: the first correction narrowed the heading and left
+this sentence's universal standing, so one paragraph diagnosed the defect and
+repeated it in the same breath.)
 
 Two separate review series exist; do not conflate their round numbers.
 - **Original series** (2026-07-28/29): PASS at round 5, 14/14. Its round 3 also
@@ -23,6 +34,22 @@ Two separate review series exist; do not conflate their round numbers.
   be amended, both applied 2026-07-30.
 
 ## Notes
+
+> **Every `pack_us.py:NNNN` pointer in this document is suspect by default —
+> cite by SYMBOL.** Added 2026-08-07 after a whole-branch reviewer found a SIXTH
+> pointer stale from one cause: this branch inserted 6 lines at the top of
+> `pack_us.py`, shifting every symbol below it by +6. Four were corrected
+> individually before the fifth and sixth were found, which is the argument for a
+> blanket note rather than another round of individual fixes. The named symbols
+> are correct throughout; the numbers beside them are not load-bearing and should
+> not be trusted without re-opening the file. The sibling brief carries the same
+> disclaimer for its own §Current State Evidence.
+>
+> **The `~77 filings / 20-37 minutes` figure**, where this document repeats it,
+> is superseded by the branch's own live run: **131 listed, 129 used**, cold cost
+> nearer **35-60 minutes**. `analysis-kpi/references/cli-reference.md` carries the
+> live figure and is the one place to keep current.
+
 
 - **No loom-spec change-folder bound.** Two non-archived change-folders exist
   (`docs/loom/2026-07-12-us-sec-primary-source-layer`,
@@ -129,7 +156,7 @@ income-statement subtraction, so this widens Task E rather than adding a task.
   `_unaccumulate_cashflow_ytd` output, so the subtraction is verified against
   something other than itself.
 - **Task C's SPAN BUCKETING needs no change and becomes correct for all three
-  statements.** It is committed (`88255590`); it was only ever wrong because the
+  statements.** It is committed ("name what each period IS…" (Task C — **cited by commit SUBJECT, not sha, corrected 2026-08-07**: the rebase onto current main rewrote every sha this plan cited, so `88255590` and its siblings resolve on no machine after merge; a subject survives a rebase, a sha does not)); it was only ever wrong because the
   cash-flow keys lied. **Do not re-bucket its windows to work around the
   cash-flow defect** — that is what this bullet forbids, and it still holds.
   **Narrowed 2026-07-30**: this said flatly "Do not edit it", which contradicted
@@ -262,8 +289,10 @@ quarter is via the keys direction 乙 rejects, or via labels that collide six wa
   consumes A's output shape, so the edge would read as vestigial. It is not —
   D owns capturing `us_quarterly_stitched_msft.json`, and the capture script
   calls A's function directly — `capture_us_quarterly_stitched.py` calls
-  `sec.assemble_quarterly_filing_span(CIK, years=YEARS)`, defined at
-  `sec_edgar_client.py:699`. Stated so an implementer does not "clean up" a live
+  `sec.assemble_quarterly_filing_span(CIK, years=YEARS)`, whose `def` is in
+  `sec_edgar_client.py` (**line citation dropped 2026-08-07**: it said `:699`,
+  which is blank — the `def` is one line down. An off-by-one inside the very
+  bullet that argues for citing by symbol rather than position). Stated so an implementer does not "clean up" a live
   dependency. **Cited by SYMBOL, not line number, deliberately**: a line citation
   here was false within hours because the capture script is under active edit by
   the very task this plan is describing (it said `:118`, which is `YEARS = 3`; the
@@ -325,7 +354,7 @@ asking the dependency for discrete cash-flow quarters.
     3. **A statement cell is present but not a finite number.** *Blast radius, stated as the reviewer asked: one non-finite cell in one line of one statement stops the whole call, taking all three statements and every fiscal year for that filer.* Ratified anyway, because a missing value and a corrupt value are different things — the former is ordinary and already handled per-line, while `Decimal(str(float('nan')))` yields `Decimal('NaN')` that propagates into a figure unequal to itself, with nothing raised. All 794 values in the committed fixture are finite, so the cost today is zero and the signal on the day it fires is immediate. Reversible in the cheap direction: narrowing to a per-line skip later is small, whereas discovering months of silently dropped lines is not.
     **Reworded 2026-07-30 — the previous wording was unsatisfiable.** It said "a fiscal year whose Q3-YTD input is absent", and Task D's 11-filing re-capture removed the only year of that shape. Measured from the shipped fixture: the years starting `2023-07-01` and `2024-07-01` each carry the full Q1 / YTD6 / YTD9 / FY set, and the year starting `2025-07-01` carries Q1 / YTD6 / YTD9 but **no FY column**. So the offline refusal case available is the INVERSE of the one originally named — a year that cannot yield Q4 because its FY column is missing, not its Q3-YTD. Use that year. If a test also wants the absent-Q3-YTD case, construct it by deleting that period from an in-test copy of the fixture; do not re-capture to chase it, because the span is run-date-relative.
 - **External surfaces**: none new; operates on Task D's returned structure. The `_unaccumulate_cashflow_ytd` comparison values are captured once, not called live. **Amended 2026-07-30**: the implementation acquired a RUNTIME dependency on Task C's module — it reads Task C's day-span windows rather than restating them, so a widening for a 52/53-week calendar propagates instead of needing a second edit. That is an internal-module dependency, not an external surface, but it was undeclared and a reviewer was right to call the original wording contradicted by the artifact.
-- **Dependencies**: Tasks C, D complete first (**amended 2026-07-30** — the `Task C` edge was added when the implementation began reading Task C's windows at runtime; nothing was broken because Task C is committed at `88255590`, but the plan no longer described the artifact. Note the plan had scheduled Task C's classifier to meet the series at Task F, not here.)
+- **Dependencies**: Tasks C, D complete first (**amended 2026-07-30** — the `Task C` edge was added when the implementation began reading Task C's windows at runtime; nothing was broken because Task C is already committed (Task C, cited by subject — see the sha note at §RESOLVED FINDING), but the plan no longer described the artifact. Note the plan had scheduled Task C's classifier to meet the series at Task F, not here.)
 - **Independent**: false
 - **Note on the Task D edge**: the edge covers Task D's fixture RE-CAPTURE, not just its code, because both of this task's REDs assert against that fixture. Nothing extra needs declaring — Task D's own GREEN names "the re-captured fixture is committed" as part of its done-condition, so `Task D completes first` already carries it. Written as a sibling bullet rather than inside `Dependencies`, which is a closed enumeration SDD parses.
 - **Note on why this is ONE task despite two named REDs** (ruled by plan review A4, recorded so round 5 does not re-litigate it): a split is triggered by a **distinct mechanism or a distinct dependency set**, never by test count. Task H was split because it had both — CLI verb registration versus an acquisition loop with its own error contract, on two different dependency sets. Task E's two REDs pin ONE mechanism: difference two cumulative columns sharing a start date, emit the remainder, mark it derived, refuse on a missing input. Income Q4 is literally the same formula as cash-flow Q4, and the dependency implements all four in one function for that reason — its own docstring states the three cash-flow subtractions at `core.py:716-718` (opened and read 2026-07-30; an earlier draft here said `:713-717`, where `:713` is blank). Same Module, same Files touched, same Dependencies, same fixture.
@@ -351,6 +380,22 @@ asking the dependency for discrete cash-flow quarters.
 - **Brief item covered**: "Project into this toolkit's output shape" + the user's option-乙 decision that the quarterly series gets its own projection.
 
 ## Task G — Verify the 52/53-week fiscal calendar boundary
+
+> **NOT SHIPPED on this branch (recorded 2026-08-07, at whole-branch review).**
+> Neither `us_52_53_week_periods.json` nor
+> `test_52_53_week_period_keys_classify_to_their_exact_kind` exists in the tree —
+> verified by `ls` and a repo-wide grep. Everything below is live forward guidance
+> for whoever picks it up, NOT a description of shipped work.
+>
+> **What ships without it**: Task C's day-span windows are unverified against a
+> 52/53-week filer, so a 14-week quarter in a 53-week year may classify `unknown`
+> rather than `discrete_quarter`. That is the safe direction — the classifier says
+> "I don't know" rather than mislabelling — but it is unmeasured, and brief Open
+> Question 4 stays open.
+>
+> **Carry its two findings** (below) when it is picked up: they were written by
+> Task E's review and describe how a widening here lands on Task E's subtraction.
+> A backlog entry now points here — `docs/loom/backlog/`, 52/53-week calendar.
 
 - **Description**: Capture one 52/53-week filer's quarters and assert Task C's
   classifier handles them — their quarters vary in length year to year and can
@@ -393,9 +438,9 @@ asking the dependency for discrete cash-flow quarters.
   - investing-toolkit/skills/data-markets/scripts/pack.py
 - **Acceptance**:
   - **RED**: `test_quarterly_series_verb_is_registered_and_us_only` — the verb appears in the pack registry, rejects a non-US ticker, and returns the labelled projection for a stubbed series.
-  - **RED (partial and empty acquisition, added 2026-08-05 — the obligation Task J's return shape creates)**: `_acquire_filing_span` returns `(filings, failed_items)` and NO status — it defers the `{requested, succeeded, failed}` triple to this verb, so this verb must build it. Two clauses, both offline. (1) A span in which one accession fails to acquire returns `_status: "partial"`, the failed accession in `failed_items`, and `n_filings_used` equal to `len(filings)` — never `len(rows)`; a short answer must not be shaped like a complete one. (2) **An EMPTY span (`requested == 0`) must NOT report `ok`.** Do NOT copy `pack_reconstruct`'s status formula (`pack_us.py:1597-1601`): its `requested == 0 → ok` is the defect the brief records (§Error), and it is correct only for that verb's "nothing was asked for" case. Here a zero-filing span is a real answer to a real request — a foreign private issuer files 20-F, not 10-Q/10-K — and must surface as an explicit named failure, not as success over an empty series.
+  - **RED (partial and empty acquisition, added 2026-08-05 — the obligation Task J's return shape creates)**: `_acquire_filing_span` returns `(filings, failed_items)` and NO status — it defers the `{requested, succeeded, failed}` triple to this verb, so this verb must build it. Two clauses, both offline. (1) A span in which one accession fails to acquire returns `_status: "partial"`, the failed accession in `failed_items`, and `n_filings_used` equal to `len(filings)` — never `len(rows)`; a short answer must not be shaped like a complete one. (2) **An EMPTY span (`requested == 0`) must NOT report `ok`.** Do NOT copy `pack_reconstruct`'s own status formula (**cited by symbol, corrected 2026-08-07**: this said `pack_us.py:1597-1601`, which this branch's own +6-line insertion at the top of that file shifted to `:1603-1607` — a prohibition an implementer acts on, pointing at a blank line and a comment): its `requested == 0 → ok` is the defect the brief records (§Error), and it is correct only for that verb's "nothing was asked for" case. Here a zero-filing span is a real answer to a real request — a foreign private issuer files 20-F, not 10-Q/10-K — and must surface as an explicit named failure, not as success over an empty series.
     **This is the THIRD unstated cross-task obligation on this branch**, and like the first two it was found by a reviewer rather than by the plan (Task F→H money serialisation; Task B→J cache stubbing; now Task J→H status). Three instances is a pattern, not a coincidence: a task that hands its caller a partial result must state, in the CALLER's entry, what the caller now owes — and the plan has never once caught this by itself.
-  - **RED (money serialisation, added 2026-07-31 — this task's likeliest silent defect)**: Task F's projection returns line values as `Decimal`. **This verb must project them to exact text EXPLICITLY** — `pack_us._decimal_text` (`pack_us.py:1296-1312`) is the in-repo helper and its own docstring states why. It must NOT inherit the facade's fallback: `pack.py`'s `_emit` calls `json.dumps(obj, indent=2, default=str)` (**verified 2026-07-31 by opening it**), which serialises a `Decimal` **silently** — and would serialise a binary float just as happily, which is the whole point. Contrast `kpi_spine_view`, which dumps BARE (`json.dump(_project_money_to_text(view), ...)`), so a stray `Decimal` there really does raise. **Pin it with a bare `json.dumps` in the test, and make the stubbed series carry at least one `Decimal`** — otherwise this task's own RED goes green on a stub that has none, while the live run inherits the fallback. This entry exists because Task F's implementer described the behaviour as deliberate fail-loud; a spec reviewer opened the actual downstream path and found it silent.
+  - **RED (money serialisation, added 2026-07-31 — this task's likeliest silent defect)**: Task F's projection returns line values as `Decimal`. **This verb must project them to exact text EXPLICITLY** — `pack_us._decimal_text` (cited by SYMBOL — **corrected 2026-08-07, second pass**: this said `:1296-1312`, which this branch's own +6-line insertion shifted to `:1302-1318`; the old range starts inside another function's return dict. Sixth instance of that one shift in this document) is the in-repo helper and its own docstring states why. It must NOT inherit the facade's fallback: `pack.py`'s `_emit` calls `json.dumps(obj, indent=2, default=str)` (**verified 2026-07-31 by opening it**), which serialises a `Decimal` **silently** — and would serialise a binary float just as happily, which is the whole point. Contrast `kpi_spine_view`, which dumps BARE (`json.dump(_project_money_to_text(view), ...)`), so a stray `Decimal` there really does raise. **Pin it with a bare `json.dumps` in the test, and make the stubbed series carry at least one `Decimal`** — otherwise this task's own RED goes green on a stub that has none, while the live run inherits the fallback. This entry exists because Task F's implementer described the behaviour as deliberate fail-loud; a spec reviewer opened the actual downstream path and found it silent.
   - **GREEN**: the test passes, the verb is declared in the skill's CLI reference so it has a documented entry point, AND a ONE-OFF live run against a real filer returns a series whose discrete-quarter count and date span are both recorded in the task's close-out — the requirement is "all available history, ten years as the floor", and no fixture-based test can observe it.
 - **External surfaces**: the pack CLI surface; the new verb must be added to `analysis-kpi/references/cli-reference.md` and verified to run.
 - **Dependencies**: Tasks F, J complete first
@@ -427,7 +472,7 @@ one — and it is the arc's own output producing it.
 
 **The cause is Task E's skip guard doing precisely what it was built to do.**
 `derive_discrete_quarters` refuses to write over a period the filer stated
-(`if key in filed_keys: continue`), which is right: a filed figure is a primary
+(`if key in filed_keys:` → `return None`, in `_derive_one_quarter` — **corrected 2026-08-07**: this was written as `continue`, which greps to nothing; same effect, but this passage is the anchor for a pending user decision about where to change that guard, so it has to be findable), which is right: a filed figure is a primary
 source and a derived one is a subtraction. But the guard tests for the KEY's
 presence, not for whether that key carries anything. A 10-Q contributes a sparse
 Q4-shaped column for its own fiscal year, so the key exists, so the derivation is
@@ -444,7 +489,7 @@ column but no annual column of their own to be skipped against.
 
 **NOT Task H's defect, and not to be fixed there.** Task H composes; the judgement
 lives in Task E's guard. Recorded here rather than in Task E's entry because Task E
-is committed (`b5b92c34`) and this is the plan's live-finding log.
+is committed ("difference out the quarters no filing states…" (Task E — cited by subject; its pre-rebase sha `b5b92c34` is now an orphan, see the note at Task C)) and this is the plan's live-finding log.
 
 **The shape of the fix is a decision, not a mechanic** — it is the same
 filed-versus-derived precedence question the arc has already answered once, now at
@@ -502,7 +547,7 @@ projection.
   `sec_edgar_client._acquire_raw_filing(accession)`, appends
   `{"accession": accession, **filing}` to `failed_items` and `continue`s when the
   return is an error dict — i.e. exactly this task's loop, loud-skip included.
-  `:1476` is prose in the surrounding docstring stating that an acquisition
+  the surrounding docstring's own prose (**cited by content, corrected 2026-08-07**: this said `:1476`, shifted to `:1482` by this branch's +6-line insertion; its sibling `:1549-1563` still lands only because a 15-line range absorbs a 6-line shift — the same one-true-one-false pair in a single bullet that this task's GREEN was already corrected for) states that an acquisition
   failure "is a LOUD skip recorded in `failed_items`, never a" silent one — the
   convention, not the loop.
 - **Module**: investing-toolkit/skills/data-markets/scripts/pack_us.py
@@ -513,7 +558,7 @@ projection.
   - investing-toolkit/skills/analysis-kpi/scripts/kpi_us_quarterly_series.py
 - **Acceptance**:
   - **RED**: `test_partial_acquisition_failure_is_reported_not_silent` — when one accession in the span fails to acquire, the loop records that accession as a failed item AND still returns the filings acquired from the rest. A run that silently returns a shorter span, or that aborts the whole request, fails this test. **The same test also pins the loop's OUTPUT CONTRACT**: what it yields must be whatever `_acquire_raw_filing` returns, never an accession row or dict — that is the input contract Task D's Description fixes, and it is checkable from Task J's own position. **Narrowed 2026-07-30**: an earlier wording asked this test to prove the objects are accepted by Task D's function unmodified, which Task J cannot execute — it declares no dependency on Task D, and no committed raw-filing fixture exists in any task's `Files touched` to feed D's function offline. That end-to-end seam stays where it already lives, in Task H's one-off live run.
-  - **GREEN**: the test passes offline, and a failed accession appears in the run's `failed_items` with its accession number, matching the existing per-accession failure shape at `pack_us.py:1553-1555`.
+  - **GREEN**: the test passes offline, and a failed accession appears in the run's `failed_items` with its accession number, matching the existing per-accession failure shape in `pack_reconstruct`'s acquire loop — `failed_items.append({"accession": accession, **filing})` (**cited by symbol, corrected 2026-08-07**: this said `pack_us.py:1553-1555`, which is a comment plus two loop-setup lines; the append is further down, inside that function's `for row in selected:` loop body, and the same task entry cited the enclosing range correctly, so one entry carried a true and a false pointer at the same code. Two byte-identical `failed_items.append` calls exist in this file; the one meant here is `pack_reconstruct`'s — the FIRST of the two, and the model to copy. The second lives in `_acquire_filing_span`, the loop Task J itself builds, so it cannot be the shape Task J matches against. No line number is given on purpose: the first correction of this pointer stated a magnitude and got it wrong, and the second named the wrong one of the two functions).
 - **External surfaces**: none new — reuses `sec_edgar_client._acquire_raw_filing` through Task B's cache.
 - **Note on Task B's cache (added 2026-07-31, from Task B's spec review — an obligation Task B created that this entry did not state)**: **stub at `sec_edgar_client._acquire_raw_filing`**, the boundary this file's own docstring already names (`test_data_markets_us.py:61-67`) — **not** at `edgar.get_by_accession_number`. Task B put a disk cache behind the latter, and `test_data_markets_us.py` pins no cache directory (**verified 2026-07-31: zero occurrences of `INVESTING_TOOLKIT_CACHE` in that file, and all six existing stub sites use the higher boundary**), so a lower stub would let the loop take a hit from the developer's real cache directory. On a second run the loop would take that disk hit instead of reaching the stub, and `test_partial_acquisition_failure_is_reported_not_silent` would **stop exercising the failure it exists to pin, without failing**. If a lower stub is ever needed, add an autouse `INVESTING_TOOLKIT_CACHE` fixture first — `test_sec_narrative.py:137-144` and `test_exhibit_fetch.py:88-93` are the pattern.
   **This is the second unstated cross-task obligation on this branch** — Task F created one for Task H (money serialisation) that also had to be written in after the fact. Both were found by a reviewer, neither by the plan. A task that changes a seam another task calls through should state what it now requires of that caller, in the caller's own entry, before the caller is dispatched.
@@ -547,12 +592,26 @@ and was re-reviewed; it is logged here rather than silently applied.
    `{key, kind, derived, start, end}`. No new top-level shape — existing consumers
    and tooling already read this envelope.
    **WIDENED 2026-07-31 by the user, on a spec review's escalation**: one more
-   top-level key, **`n_filings_used`** — the SIXTH key of the returned dict, or the
-   fifth envelope metadata field if you exclude the `statements` container, and this
-   sentence says both because the count was miscounted twice on this branch — present
-   only when the input reports one
+   top-level key, **`n_filings_used`** — present only when the input reports one
    (absent rather than fabricated, following `kpi_spine_view`'s own optional-marker
-   doctrine). It earns the widening because Task J's partial-acquisition failure is
+   doctrine).
+
+   **On counting the keys — kept in its own paragraph, because this clause was
+   once spliced into the sentence above and orphaned its contract.** As of this
+   decision `n_filings_used` was the sixth key of the returned dict, or the fifth
+   envelope metadata field if you exclude the `statements` container; the count was
+   miscounted twice on this branch before that wording settled. **The SHIPPED
+   envelope has seven**: Task H's 2026-08-05 RED added a nested `acquisition`
+   section, which is outside this door's scope (the door governs Task F's
+   projection, which Task H returns unwidened) but makes any key count stated here
+   immediately stale. Counted 2026-08-07 from the live payload: `pack` / `ticker` /
+   `fetched_at` / `_status` / `n_filings_used` / `acquisition` / `statements`.
+   **A door that pins a COUNT dates itself; pin the field NAMES and their meanings
+   instead** — two miscounts plus one correct-when-written count that a later task
+   made stale is the evidence, and the staleness is the more instructive half:
+   nobody was wrong, and the number went bad anyway.
+
+   `n_filings_used` earns the widening because Task J's partial-acquisition failure is
    otherwise invisible downstream — a short answer and a complete one have the same
    shape, which is this arc's recurring defect. **How this came up matters more than
    the field**: Task F's implementer added it unasked, and the one test written to

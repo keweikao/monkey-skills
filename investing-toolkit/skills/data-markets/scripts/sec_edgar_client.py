@@ -1305,6 +1305,12 @@ def _acquire_raw_filing(accession: str) -> object:
     identity is unset, edgartools raised, or the accession did not resolve to a
     filing — never a silent ``None``.
 
+    An accession that is itself unusable answers with that same slot. ``None``
+    reaches this seam from real callers (``pack_us._fetch_xval_source_a``, for
+    a window holding no 10-K), and it is the CACHE KEY it breaks first, which
+    is why that key is computed inside the ``try`` below rather than ahead of
+    it.
+
     Both ``acquire_filing`` (which projects this to a JSON ``_filing_ref`` dict)
     and ``fetch_narrative_sections`` (which segments the raw filing + reads its
     disclosure metadata) go through here, so the two callers can NEVER diverge on
@@ -1340,6 +1346,13 @@ def _acquire_raw_filing(accession: str) -> object:
 
     A failed acquisition is a loud ``{"error": ...}`` slot that is SURFACED,
     never cached — a transient 429/403 is not poisoned into a permanent entry.
+
+    A failed CACHE READ is not an acquisition failure and is never reported as
+    one. An entry that cannot be read is warned about on stderr and falls
+    through to the network, which then overwrites it: the only escape from a
+    bad entry in a cache with no TTL is a refetch, and calling one a
+    resolution failure would both blame SEC for a local file and withhold the
+    refetch that repairs it.
     """
     identity_error = _ensure_edgar_identity()
     if identity_error is not None:
@@ -1353,16 +1366,67 @@ def _acquire_raw_filing(accession: str) -> object:
     # every other test — the SEC fair-access identity is a precondition of this
     # SEAM, not merely of the send. `edgar` is needed to rebuild a cached Filing
     # anyway (neither the import nor `set_identity` sends a request).
-    path = cache_util.cache_path(
-        "sec_edgar", f"raw_filing_{_accession_nodash(accession)}"
-    )
-    cached = cache_util.load_cache(path, TTL_RAW_FILING)
-    if cached is not None:
-        filing = _filing_from_cache_payload(edgar, cached)
+    try:
+        # THE CACHE KEY IS COMPUTED INSIDE THIS TRY, and that placement is the
+        # contract rather than an accident. `_accession_nodash` is not
+        # defensive, so an accession of `None` — which
+        # `pack_us._fetch_xval_source_a` really does produce, from
+        # `_latest_10k_accession` returning `None` for a window with no 10-K —
+        # raises here and leaves as the loud resolution slot below. Computed
+        # ahead of the try it escaped as an `AttributeError` instead, aborting
+        # a memo-fetch with a traceback where a wholesale failure was owed:
+        # a live regression, filed and fixed 2026-08-07. Every caller reads
+        # this seam with `isinstance(result, dict)`, and several docstrings
+        # still promise it; a raise is not a shape any of them handle.
+        #
+        # What this try covers is therefore the ACQUISITION — the key the
+        # accession is unusable for, and the network call. The cache read
+        # underneath has its own `except` for the reason given there, and it is
+        # the one place where a failure DOES change whether the network is
+        # reached: it falls through to it deliberately.
+        path = cache_util.cache_path(
+            "sec_edgar", f"raw_filing_{_accession_nodash(accession)}"
+        )
+
+        # THE CACHE READ GETS ITS OWN `except`, and that is the second half of
+        # the contract above. Under the outer one it answered a LOCAL fault with
+        # the REMOTE resolution slot — `load_cache` breaking its own "Never
+        # raises" docstring on an entry whose `data` is not a mapping (filed:
+        # docs/loom/backlog/2026-07-31-cache-util-load-cache-breaks-its-never-raises-contract.md)
+        # came back as "accession '...' did not resolve to a filing", pointing
+        # the reader at SEC for a broken file on their own disk. Worse, the
+        # network was never reached, so the refetch that OVERWRITES the bad
+        # entry never fired — and this cache has no TTL, so that filing stayed
+        # dead on that machine under a false attribution.
+        #
+        # Falling through to a refetch both reports honestly and repairs: it is
+        # `load_cache`'s own documented fail-open doctrine ("missing / corrupt /
+        # schema-mismatched / expired ⇒ None") enforced at the call site instead
+        # of trusted, and `save_cache` below then heals the entry. A cache is an
+        # optimization; an unreadable one costs the 15.9-29.1 s it was built to
+        # save, never a wrong answer. Pinned by
+        # test_a_cache_read_that_raises_refetches_instead_of_blaming_the_accession.
+        try:
+            cached = cache_util.load_cache(path, TTL_RAW_FILING)
+            filing = (
+                _filing_from_cache_payload(edgar, cached)
+                if cached is not None
+                else None
+            )
+        except Exception as cache_exc:  # noqa: BLE001 — a cache fault is never fatal
+            # Loud, not silent (`cache_util.save_cache`'s write-failure warning
+            # is the convention): a seam whose whole purpose is removing an
+            # index scan silently paying for one again is worth a line.
+            sys.stderr.write(
+                f"WARNING: unreadable cache file '{path}' "
+                f"({type(cache_exc).__name__}: {cache_exc}); refetching\n"
+            )
+            sys.stderr.flush()
+            filing = None
         if filing is not None:
+            # A warm hit returns from INSIDE the try and still sends nothing.
             return filing
 
-    try:
         filing = edgar.get_by_accession_number(accession)
     except Exception as exc:  # noqa: BLE001 — fail loud, don't guess the shape
         return _acquire_error(

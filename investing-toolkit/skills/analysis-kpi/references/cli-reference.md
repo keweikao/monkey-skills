@@ -806,6 +806,34 @@ columns AS FILED, and a filed column is never overwritten. A fiscal year
 missing an input column yields NO derived period for it — never a partial
 subtraction and never a fabricated zero.
 
+**KNOWN GAP — a `derived: false` quarter is NOT a promise of completeness.**
+The skip guard above asks whether a period KEY was already filed, not
+whether that column carries anything. A 10-Q contributes a sparse
+Q4-shaped column for its own fiscal year, so the key exists, so the
+subtraction is skipped — and two or three populated cells stand in for a
+quarter. **Measured on MSFT, this page's own worked example, and it hits BOTH
+duration statements — not just cash flow.** Fiscal years 2010–2020 return a
+Q4 column classified `discrete_quarter` and marked `derived: false`
+carrying **1–2 of 69 cash-flow lines** and **5–8 of 42 income lines**,
+against **30–32** and **15** respectively for the years 2021–2026 where the
+derivation did fire. Those four counts are `MEASURED-not-repo`, 2026-08-06 —
+the same session payload as the COLD-RUNS figures above, not in the tree and
+not re-derivable from it. The paragraph above says a 10-Q's income statement is
+discrete where its cash-flow statement is cumulative — true, and it does
+NOT make the income statement safe here: the sparse Q4 column exists on
+both, so both skip. The inputs were present
+in every one of those years — the guard simply never asked. So a reader
+filtering on `derived: false` to isolate filed primary-source figures will
+pick up eleven years of near-empty columns.
+
+**Until this is fixed, count the populated cells rather than trusting the
+flag** — compare a quarter against its OWN statement's neighbours, since
+the two denominators differ: on this filer a healthy cash-flow quarter
+carries about 30 of 69 and a healthy income quarter about 15 of 42. The defect, the measurements and
+the three candidate fixes are recorded in
+`docs/loom/plans/2026-07-28-us-quarterly-statement-series.md`
+§FINDING 2026-08-07; the fix shape is an open decision, not an oversight.
+
 **Money is emitted as exact TEXT, not JSON numbers** — the derived cells
 only; filed cells ride through as the stitcher gave them. A float
 round-trip is how this module family once manufactured a false
@@ -817,7 +845,11 @@ real answer to a real request; it comes back as `error` +
 `error_class: "empty_span"` with the counts, and exits non-zero. A span
 that lost SOME filings is `partial` (exit **2**) with each unacquirable
 accession named in `acquisition.failed_items` — never a shorter series
-shaped like a complete one.
+shaped like a complete one. **That guarantee is about FILINGS, not about
+cells**: every filing that was asked for is either in the series or named
+in `failed_items`. It does not extend to how full a period's column is —
+see the KNOWN GAP above, where a column can be thin without anything
+saying so.
 
 **`reconstruct` SURVIVES UNCHANGED.** The two verbs differ in shape
 (single-filing reconstruction vs multi-filing stitched series) and in

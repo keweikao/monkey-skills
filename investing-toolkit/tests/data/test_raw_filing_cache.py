@@ -339,6 +339,53 @@ def test_a_failed_acquisition_is_surfaced_and_never_cached(tmp_path):
     assert recovered.obj() == f"parsed-filing:{ACCESSION}"
 
 
+def test_an_accession_of_none_comes_back_as_a_loud_slot_not_a_traceback():
+    """KILLS: computing the cache key AHEAD of the `try`.
+
+    A LIVE REGRESSION, not a hypothetical. This function used to go straight
+    from its identity guard into `try: edgar.get_by_accession_number(...)`, so
+    a `None` accession raised INSIDE the try and came back as the loud
+    resolution slot every caller tests for with `isinstance(result, dict)`.
+    The cache key was then inserted ahead of that try, and `_accession_nodash`
+    is not defensive, so for a window of about a week
+    `'NoneType' object has no attribute 'replace'` escaped as an
+    `AttributeError` instead. **That window is CLOSED**: the key moved back
+    inside the try on 2026-08-07, and this test is what holds it there.
+
+    The confirmed live site was `pack_us._fetch_xval_source_a`, which takes
+    `_latest_10k_accession(...)` — signature `str | None`, `None` when the
+    window holds no 10-K — and hands it straight here. During that window a
+    filer with no 10-K aborted memo-fetch with a traceback where it used to
+    report a wholesale failure; with the key moved back, it reports the
+    wholesale failure again, and `_fetch_xval_source_a`'s own docstring —
+    which never changed — became true again rather than needing a correction.
+
+    Nothing could see it: every existing test of that path mocks this
+    boundary, so none of them ever passes a real `None` through it. This one
+    calls the real function.
+
+    THE NETWORK IS ALSO ASSERTED UNTOUCHED. `None` is unresolvable before any
+    request is worth making, and a fix that merely moved the failure later —
+    into `get_by_accession_number(None)` — would satisfy the error-slot
+    assertion while spending an SEC round-trip on a value known to be bad.
+    """
+    network = _CountingNetwork()
+
+    with _client_with_edgar(network) as sec:
+        result = sec._acquire_raw_filing(None)
+
+    assert isinstance(result, dict) and "error" in result, (
+        f"a None accession must come back as the loud resolution slot every "
+        f"caller reads with isinstance(result, dict); got {result!r}"
+    )
+    assert result.get("error_class") == "resolution", (
+        f"the slot is not tagged as a resolution failure: {result!r}"
+    )
+    assert network.calls == [], (
+        f"a None accession reached the network before failing: {network.calls}"
+    )
+
+
 _ABSENT = object()
 
 
@@ -459,6 +506,96 @@ def test_a_corrupt_cache_entry_refetches_and_self_heals(
     # The corrupt bytes are gone: what is on disk is the ratified payload.
     stored = json.loads(path.read_text())["data"]
     assert stored["filing"] == _ratified_payload()["filing"]
+
+
+def test_a_cache_read_that_raises_refetches_instead_of_blaming_the_accession(
+    tmp_path, capsys,
+):
+    """KILLS: letting the CACHE READ fall into the acquisition `except`.
+
+    A LIVE DEFECT, reproduced before this test was written. Moving the cache-key
+    computation inside the acquisition `try` (the fix pinned by
+    `test_an_accession_of_none_comes_back_as_a_loud_slot_not_a_traceback`)
+    brought `cache_util.load_cache` and `_filing_from_cache_payload` under the
+    same `except Exception`. An entry whose envelope is well-formed but whose
+    `data` is not a mapping then came back as::
+
+        {"error": "SEC EDGAR filing acquisition failed: accession '...' did not
+                   resolve to a filing (dictionary update sequence element #0
+                   has length 3; 2 is required)",
+         "error_class": "resolution"}
+
+    Two separate wrongs. The accession resolved fine, so a LOCAL cache fault was
+    reported as a REMOTE resolution failure — a false attribution that sends the
+    reader to SEC. And because the network was never reached, the refetch that
+    would overwrite the bad entry never fired; this cache has no TTL, so the
+    filing was dead on that machine, per filer, until someone deleted the file.
+
+    `data`-is-not-a-mapping is exactly the shape
+    `docs/loom/backlog/2026-07-31-cache-util-load-cache-breaks-its-never-raises-contract.md`
+    files against `load_cache`'s "Never raises" docstring: its closing
+    `dict(envelope.get("data", {}))` raises on any non-mapping. It is the one
+    corrupt shape `test_a_corrupt_cache_entry_refetches_and_self_heals` cannot
+    reach — every row there corrupts a value INSIDE a `data` dict, so `dict(...)`
+    succeeds and the fault surfaces in this module's own fail-open rebuild.
+
+    THE `_cache_meta.version` IS LOAD-BEARING IN THE FIXTURE, and this test
+    checks that rather than trusting it. A probe that writes the poisoned bytes
+    by hand without a CURRENT version gets a clean bill of health for the wrong
+    reason: `load_cache` returns None at its schema-version check, long before
+    the `dict(...)` that breaks. That false all-clear cost a round upstream of
+    this test. Writing through the real `save_cache` stamps the current version
+    by construction; the `pytest.raises` below then proves the poisoned entry
+    actually REACHES the failing line, so this test cannot silently degrade into
+    an ordinary cache-miss test. When the backlog entry above is fixed and
+    `load_cache` fail-opens to `None`, that guard is the line to relax to
+    `is None` — the behavioural assertions after it hold either way.
+    """
+    path = tmp_path / "sec_edgar" / CACHE_FILENAME
+    network = _CountingNetwork()
+
+    with _client_with_edgar(network) as sec:
+        sec.cache_util.save_cache(path, ["not", "a", "mapping"])
+        assert path.exists(), "the poisoned entry must be on disk before the read"
+        with pytest.raises((TypeError, ValueError)):
+            # The fixture reaches the defective line — not merely the schema
+            # check that would return None ahead of it.
+            sec.cache_util.load_cache(path, sec.TTL_RAW_FILING)
+
+        healed = sec._acquire_raw_filing(ACCESSION)
+        # Same accession again: a fall-through that did not OVERWRITE the
+        # poisoned entry would refetch forever, which is the permanence at stake.
+        second = sec._acquire_raw_filing(ACCESSION)
+
+    assert not isinstance(healed, dict), (
+        "a local cache-read fault was reported as a remote acquisition failure; "
+        f"got {healed!r}"
+    )
+    assert network.calls == [ACCESSION], (
+        "a cache entry that cannot be read must fall through to the network "
+        f"exactly once and then heal itself; the spy recorded {network.calls!r}"
+    )
+    assert (healed.accession_no, healed.cik, healed.company, healed.form) == (
+        ACCESSION, CIK, COMPANY, FORM
+    )
+    assert healed.obj() == f"parsed-filing:{ACCESSION}"
+    assert second.accession_no == ACCESSION
+    assert second.obj() == f"parsed-filing:{ACCESSION}"
+    assert type(second.filing_date) is datetime.date
+
+    # The poisoned bytes are gone: what is on disk is the ratified payload.
+    stored = json.loads(path.read_text())["data"]
+    assert stored["filing"] == _ratified_payload()["filing"]
+
+    # Repaired, but never SILENTLY: a cache the caller believes is warm turning
+    # into a 15.9-29.1 s index scan is exactly the surprise this module's stderr
+    # convention exists for (`cache_util.save_cache`'s own write-failure
+    # warning). Swallowing the fault would make a permanently-unreadable entry
+    # look like a merely slow one.
+    warning = capsys.readouterr().err
+    assert "WARNING" in warning and str(path) in warning, (
+        f"the unreadable cache entry was repaired silently; stderr was {warning!r}"
+    )
 
 
 def test_the_identity_guard_precedes_even_a_warm_cache_hit(

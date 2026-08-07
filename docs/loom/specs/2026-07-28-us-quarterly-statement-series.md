@@ -57,13 +57,53 @@ the start of XBRL mandate (~2009-2011) where only 2014+ has been verified.
    quarter's value. The dependency's arithmetic is right; its output keys
    misdescribe it. Full measurement and the user's direction decision are recorded
    in the plan's §RESOLVED FINDING 2026-07-30.
-4. Derive the Q4 income column the library does not emit: `FY − Q3-YTD`, over
+4. **Amended 2026-08-07** — this step still enumerated only the income
+   subtraction after §Decision was widened to four subtractions across two
+   statements; step 3 above was amended in place on 2026-07-30 and this one was
+   missed. What shipped: **income Q4 = FY − Q3-YTD, and cash-flow
+   Q2 = YTD6 − Q1, Q3 = YTD9 − YTD6, Q4 = FY − YTD9** — all three subtractions
+   applied to every duration statement, since a filer that states no discrete
+   income columns needs them derived too. Original wording follows.
+   ~~Derive the Q4 income column the library does not emit~~: `FY − Q3-YTD`, over
    periods it already returns.
 5. **Label every period explicitly** — discrete quarter / year-to-date / annual /
    derived — rather than leaving it to be inferred from a day-span.
 6. Project into this toolkit's output shape.
 
 ## Current State Evidence
+
+> **The `~77 filings / 20-37 minutes` figure, wherever it appears in this brief — including §Smallest End State ABOVE this note, which plan Tasks A and J quote verbatim as their `Brief item covered` — is a
+> PLANNING ESTIMATE that the branch's own live run measured LOW.** Corrected
+> once here rather than at each of its five occurrences. Uncapped MSFT,
+> 2026-08-06: **131 filings listed, 129 used** — about 70% more than the
+> estimate, so the cold cost scales to roughly **35-60 minutes**. That scaled
+> figure is derived from the measured filing count, NOT separately timed, and is
+> `MEASURED-not-repo` (the payload is a session artifact). The consumer-facing
+> statement of it lives in `analysis-kpi/references/cli-reference.md`, which is
+> the one place to keep current; every occurrence below is planning history.
+>
+> **Line numbers in this section are as measured when the brief was written
+> (2026-07-28) and have since drifted — cite by SYMBOL, not position.**
+> Added 2026-08-07 by whole-branch review. **Do not read the list below as an
+> inventory** — a second reviewer re-measured and found at least three more of the
+> same +6 shift unlisted (`:1287-1295`→`1293-1301`, `:1465-1472`→`1471-1478`,
+> `:1581-1601`→`1587-1607`), which is exactly why this note is blanket rather than
+> a set of individual corrections. Measured examples: `pack_reconstruct` 1456→1462, the inline `["10-K"]` 1539-1541→1546,
+> `RECONSTRUCT_ANNUAL_FILINGS` 1218→1224, the `failed_items` append
+> 1553-1555→1560, the reconstruct dispatch 1846→2163 (**corrected 2026-08-07,
+> round 4**: this list said 2154, which is `kpi-topline-backfill`'s error
+> message, not reconstruct's — a false pointer written INTO the note whose
+> subject is false pointers, and caught only because a reviewer opened it),
+> and `_acquire_raw_filing`
+> 1200→1298. Two were actively misleading: `pack.py:116` now lands on this
+> arc's own new `QUARTERLY_SERIES_PACK`, and the `:1200` figure was itself a
+> mid-arc correction that Task B's cache work re-invalidated **in the same
+> branch** — a second-order instance of the lesson this branch shipped as
+> `docs/loom/memory/a-relayed-claim-becomes-fact-in-one-hop.md`.
+> The named symbols are all still correct and are what a reader should follow.
+> This disclaimer is the same convention the sibling audit already carries; the
+> brief lacked it, and instead maintained one pointer with a dated verification,
+> which read as a promise that all of them were live.
 
 **Forward** — `pack_reconstruct` (`pack_us.py:1456`) resolves a CIK
 (`sec_edgar_client.resolve_cik`), calls `list_filings(cik, ["10-K"], 8)` with the
@@ -98,7 +138,11 @@ wrapper**; measured cold cost 15.9-29.1 s per filing, and a fresh process
 re-pays it in full (~16.2 s). The per-filing figure is the durable measurement;
 the total follows the span. At the ~40 filings of the original ten-year framing
 that was 11-19 minutes; at the ~77 of the clarified all-available-history
-requirement it is **20-37 minutes every run**. `cache_util`'s TTLs (`cache_util.py:66-92`) cover only the
+requirement it is **20-37 minutes every run**. `cache_util`'s TTLs (`compute_ttl` and the "Cadence-aware TTL" block —
+**corrected 2026-08-07**, this said `cache_util.py:66-92`, which is
+`resolve_cache_dir` and its writability fallback, containing no TTL code at all;
+`cache_util.py` is unchanged on this branch, so it was wrong when written, not
+drifted) cover only the
 submissions/facts layer. edgartools' own disk cache holds SEC quarterly index
 files, not filing documents.
 
@@ -190,8 +234,20 @@ the hard part, not fetching.
   plan.
 - **Rung A (convert 13 spine fields to structure-driven selection)** — already
   withdrawn on measurement (audit §8); this brief does not revive it.
-- **`RECONSTRUCT_ANNUAL_FILINGS = 8` as a fixed constant** and the inline
-  `["10-K"]` — both become parameters of the new verb. If the annual-only verb
+- ~~**`RECONSTRUCT_ANNUAL_FILINGS = 8` as a fixed constant** and the inline
+  `["10-K"]` — both become parameters of the new verb.~~ **DID NOT HAPPEN —
+  recorded 2026-08-07 at whole-branch review, which caught that this bullet reads
+  as satisfied while only half of it is.** Neither became a parameter: the
+  constant is still fixed in `pack_us.py`, and the new verb hardcodes its own
+  form list (`forms = ["10-Q", "10-K"]` inside
+  `sec_edgar_client.assemble_quarterly_filing_span`). No plan task ever covered
+  this half — Task A's `Brief item covered` quotes a different sentence — so it
+  was never dropped by decision, it was simply never picked up. **The second
+  clause below WAS answered**, by Task H's `Note on the annual verb`, which is
+  what made the whole bullet look discharged. The annual verb keeps its own
+  constant and its own form list; the two paths coexist deliberately, and
+  parameterising the old one is out of this arc's scope rather than done.
+  If the annual-only verb
   survives alongside it, say why in the plan rather than leaving two paths.
 
 ## Open Questions
@@ -206,10 +262,16 @@ the hard part, not fetching.
    byte-unchanged.
 2. **Span parameterisation.** Years back, or explicit start/end? A span in years
    is simpler; explicit dates compose better with a later store lane.
-3. **Cache granularity.** Cache the raw filing document, or the parsed XBRL
-   object? The document is unambiguously immutable; the parsed object is faster
-   to reuse but is invalidated by our own parser changing — the same argument
-   `pack_us.py:1465-1472` makes against persisting reconstructions.
+3. ~~**Cache granularity.** Cache the raw filing document, or the parsed XBRL
+   object?~~ **RESOLVED 2026-07-31 by the user — and the question's own premise
+   was false.** There is no document at this seam to cache: the acquisition step
+   never fetches one, it resolves an accession against SEC's quarterly INDEX
+   files and builds the object from an index row. Neither fork existed as posed.
+   The ratified format caches the five values that rebuild the object; the
+   measurement that refuted the premise is in plan Decision Log #3. Original
+   wording follows. ~~The document is unambiguously immutable; the parsed object
+   is faster to reuse but is invalidated by our own parser changing — the same
+   argument `pack_us.py:1465-1472` makes against persisting reconstructions.~~
 4. **Fiscal-year-end handling.** MSFT (June) and WMT (January) were probed and
    worked, but no filer with a 52/53-week calendar was tested in this arc.
 

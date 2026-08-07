@@ -659,13 +659,16 @@ def test_fetch_xval_source_a_no_10k_is_wholesale_failure_not_crash():
 
     WHAT IS PINNED HERE IS THE READING, NOT THE BOUNDARY. `_acquire_raw_filing`
     is mocked below with a resolution-error slot, so this test says nothing
-    about what the real function does with a `None` accession -- and it no
-    longer does what an earlier version of this docstring claimed. Since
-    `sec_edgar_client._acquire_raw_filing` began computing its disk-cache key
-    from `_accession_nodash(accession)` ahead of its own `try`, a `None`
-    accession raises `AttributeError` there rather than returning a slot
-    (verified by execution; `_accession_nodash` calls `accession.replace(...)`
-    unguarded). Nothing in this file exercises that real path."""
+    about what the real function does with a `None` accession. That real
+    behaviour has now been restored to the loud slot it always used to be
+    (the cache-key computation moved back inside `_acquire_raw_filing`'s own
+    `try`, 2026-08-07) and is pinned where it belongs, in
+    `test_raw_filing_cache.py::test_an_accession_of_none_comes_back_as_a_loud_slot_not_a_traceback`
+    -- which also asserts the network was never reached. Two earlier versions
+    of this docstring each asserted the contract of their own moment in the
+    present tense, and each was falsified by the next change; state where the
+    pin LIVES, not what the boundary currently does. Nothing in this file
+    exercises that real path."""
     if str(MARKETS_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(MARKETS_SCRIPTS))
     import pack_us  # noqa: E402
@@ -2086,7 +2089,7 @@ def test_partial_acquisition_failure_is_reported_not_silent(monkeypatch):
 
 def test_a_row_with_no_accession_is_recorded_never_attempted_never_dropped(monkeypatch):
     """A span row whose `accessionNumber` is `None` must be recorded as its own
-    failed item -- neither handed to the acquisition boundary (which crashes on
+    failed item -- neither handed to the acquisition boundary (which cannot NAME
     it) nor filtered out of the span (which loses it silently).
 
     THE ROW IS REAL. `sec_edgar_client.list_filings` builds each row by index
@@ -2096,14 +2099,18 @@ def test_a_row_with_no_accession_is_recorded_never_attempted_never_dropped(monke
 
     Both wrong answers are pinned, because both are one edit away:
 
-      1. **Handing it to `_acquire_raw_filing`.** That function computes its
-         disk-cache key from `_accession_nodash(accession)` BEFORE its `try`,
-         and `_accession_nodash` calls `accession.replace("-", "")` with no
-         guard -- so `None` raises `AttributeError` out of this loop and takes
-         the whole span down, including every filing that already acquired.
-         The stub below reproduces that exact boundary behaviour rather than
-         tolerating `None`, so a loop that attempts the row fails here with the
-         production symptom instead of quietly passing on a forgiving mock.
+      1. **Handing it to `_acquire_raw_filing`.** That function answers a
+         `None` accession with its ordinary loud resolution slot, which reports
+         `accession: None` and carries no form and no filing date -- so the row
+         survives, but becomes unidentifiable, which for a row that HAS no
+         accession is the whole of its identity. (It briefly raised
+         `AttributeError` here instead, between the cache key being lifted out
+         of its `try` and being moved back in on 2026-08-07; three docstrings
+         across two files went on asserting that raise after it was gone, this
+         one included. State the observable contract, not the mechanism.)
+         The stub below reproduces the CURRENT boundary -- it returns the slot
+         rather than raising -- so a loop that attempts the row fails here on
+         the real loss instead of on a crash production no longer produces.
       2. **Filtering it out**, the way `pack_reconstruct` does. That is right
          THERE and silent HERE: `pack_reconstruct` counts `requested` over its
          own filtered list, while this function returns no count at all and
@@ -2128,11 +2135,25 @@ def test_a_row_with_no_accession_is_recorded_never_attempted_never_dropped(monke
     attempted: list = []
 
     def _fake_acquire(accession):
-        # Faithful to the real boundary: the disk cache key is computed first
-        # and `_accession_nodash` is not defensive, so a `None` accession
-        # raises here rather than returning a slot.
-        accession.replace("-", "")
+        # Faithful to the real boundary: a `None` accession comes back as a
+        # loud resolution slot, NOT a raise. If the guard under test is ever
+        # removed, this stub reproduces what production would actually do, so
+        # the resulting failure reads true; a stub that raised instead would
+        # fail this test with a crash production no longer produces.
+        # THE LEDGER IS WRITTEN FIRST, BEFORE THE None BRANCH, and the order is
+        # the point: `attempted` exists to record every call that REACHED this
+        # boundary, so a `None` short-circuit placed above it would quietly
+        # stop recording the one call the assertion below is looking for. That
+        # is what an earlier version of this stub did — with the production
+        # guard deleted, the boundary was reached, stderr showed the call, and
+        # `attempted == [good]` still passed.
         attempted.append(accession)
+        if accession is None:
+            return {
+                "error": "SEC EDGAR filing acquisition failed: accession None "
+                "did not resolve to a filing",
+                "error_class": "resolution",
+            }
         return acquired
 
     monkeypatch.setattr(sec_edgar_client, "_acquire_raw_filing", _fake_acquire)

@@ -505,9 +505,23 @@ def _reject_degenerate_pair(
 
 def _difference_rows(
     rows: list[Any], minuend: str, subtrahend: str
-) -> dict[str, Any]:
-    """`{concept: minuend_value - subtrahend_value}` over every row that carries
-    BOTH columns, as `Decimal`.
+) -> dict[tuple[int, str], Any]:
+    """`{(row_index, concept): minuend_value - subtrahend_value}` over every row
+    that carries BOTH columns, as `Decimal`.
+
+    KEYED BY THE ROW'S POSITION IN `statement_data`, NOT BY ITS CONCEPT, and
+    that is the whole point of this signature. Concepts REPEAT -- a segment
+    breakdown, or a restated line filed beside the line it restates, puts two
+    rows under one concept, and that is ordinary XBRL. A concept-keyed answer
+    can hold only one figure for the two lines that each earned one, so it
+    silently drops one line's quarter and reports the other's; measured on a
+    two-segment revenue line 2026-08-07, the surviving figure then landed on
+    the OTHER segment's row, real number and honest period key and nothing
+    marking it.
+
+    The concept rides along in the key so a reader of an entry can see which
+    line a figure belongs to, and so `_project_lines` can check that the row it
+    is about to write to is the row this subtraction read.
 
     A row missing either side is omitted, never zero-filled: treating the absent
     side as zero would emit the whole cumulative figure as if it were one
@@ -517,15 +531,15 @@ def _difference_rows(
     A cell that is present but is not a FINITE number raises out of the whole
     call rather than being skipped -- see `_cell_decimal`.
     """
-    values: dict[str, Any] = {}
-    for row in rows:
+    values: dict[tuple[int, str], Any] = {}
+    for index, row in enumerate(rows):
         concept = row.get("concept")
         if not concept:
             continue
         row_values = row.get("values") or {}
         if minuend not in row_values or subtrahend not in row_values:
             continue
-        values[concept] = (
+        values[(index, concept)] = (
             _cell_decimal(concept, minuend, row_values[minuend])
             - _cell_decimal(concept, subtrahend, row_values[subtrahend])
         )
@@ -679,6 +693,14 @@ def derive_discrete_quarters(statements: Any) -> dict[str, list[dict[str, Any]]]
     make "every discrete quarter regardless of provenance" unanswerable.
     `minuend` and `subtrahend` name the two input period keys, so a reader can
     re-check any figure without re-deriving the pairing.
+
+    `values` is keyed by `(row_index, concept)` -- the row's POSITION in the
+    statement's own `statement_data`, with its concept beside it. Position,
+    because a concept does not identify a line: two rows under one concept is
+    ordinary XBRL and a concept-keyed answer can hold only one of the two
+    figures they earn (`_difference_rows`). An entry is therefore addressed to
+    ONE statement -- the one it was derived from -- and pairing it with another
+    is refused rather than mis-filed (`_row_the_subtraction_read`).
 
     Values are `Decimal`, never binary float: this arithmetic subtracts money
     across periods, and float has already manufactured a false restatement flag
@@ -845,6 +867,15 @@ def _project_lines(
     input columns -- gets no cell here either, since inventing one would be
     the fabricated zero Task E refuses to emit, wearing a real period's key.
 
+    THE LINE IS ADDRESSED BY POSITION, WHICH IS WHAT MAKES THAT SENTENCE TRUE.
+    An earlier version read Task E's answer by CONCEPT while Task E wrote it by
+    concept too -- but with the opposite tie-break, so on two lines sharing one
+    concept each function picked a different winner and a real figure landed on
+    a line that did not produce it. Position is the only identity a stitched
+    statement gives a line; see `_difference_rows` for why the concept is not
+    one, and `_row_the_subtraction_read` for what keeps positional addressing
+    from being blind.
+
     PROVENANCE LIVES ON THE PERIOD AXIS, not here: a cell does not say
     whether it was filed or derived, because its period already does, once,
     for every line at once. That is what one-way door #1's two orthogonal
@@ -853,16 +884,51 @@ def _project_lines(
     rows = [
         copy.deepcopy(row) for row in (statement or {}).get("statement_data") or []
     ]
-    by_concept: dict[Any, dict[str, Any]] = {}
-    for row in rows:
-        by_concept.setdefault(row.get("concept"), row)
     for entry in derived_entries:
-        for concept, value in entry["values"].items():
-            row = by_concept.get(concept)
-            if row is None:
-                continue
+        for (index, concept), value in entry["values"].items():
+            row = _row_the_subtraction_read(rows, index, concept, entry["key"])
             row.setdefault("values", {})[entry["key"]] = value
     return rows
+
+
+def _row_the_subtraction_read(
+    rows: list[Any], index: int, concept: str, period_key: str
+) -> dict[str, Any]:
+    """`rows[index]`, or `ValueError` when that row is not the line the
+    subtraction read.
+
+    Positional addressing is exact and it is also BLIND: it names the right
+    line only while the list `_difference_rows` walked and the list projected
+    here are the same list in the same order. Inside `project_quarterly_series`
+    they are -- both come from one statement's `statement_data`, and neither
+    function reorders it -- so this cannot fire on that path.
+
+    It is a BACKSTOP, in the same sense as `_reject_degenerate_pair`, and for a
+    seam that is real: `derive_discrete_quarters` is PUBLIC and hands its
+    entries out, so nothing stops a caller pairing them with a different
+    statement, or with one whose rows have since been filtered or re-sorted.
+    Without this check that pairing writes a real figure onto the wrong line --
+    the exact defect positional addressing was adopted to remove, re-entering
+    through the door the fix opened.
+    """
+    if not 0 <= index < len(rows):
+        raise ValueError(
+            f"the derived period {period_key} carries a figure for line "
+            f"{index} ({concept}), but this statement has {len(rows)} lines. "
+            "These derived entries were produced from a different statement "
+            "than the one being projected."
+        )
+    row = rows[index]
+    if row.get("concept") != concept:
+        raise ValueError(
+            f"the derived period {period_key} carries a figure for line "
+            f"{index}, which the subtraction read as {concept!r}; the line at "
+            f"that position here is {row.get('concept')!r}. These derived "
+            "entries were produced from a different statement, or from this "
+            "one before its rows were re-ordered -- writing the figure anyway "
+            "would put a real number on a line that did not produce it."
+        )
+    return row
 
 
 def _projection_status(projected: dict[str, Any]) -> str:

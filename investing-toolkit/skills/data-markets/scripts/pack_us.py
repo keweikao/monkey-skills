@@ -1674,12 +1674,21 @@ def _acquire_filing_span(rows: list[dict]) -> tuple[list, list[dict]]:
 
     A ROW CARRYING NO ACCESSION IS RECORDED HERE, neither attempted nor
     filtered out. `list_filings` keeps rows whose columns were padded with
-    `None` (`_append_submission_block`), and `_acquire_raw_filing` cannot be
-    handed one: it computes its disk-cache key from
-    `_accession_nodash(accession)` BEFORE its `try`, and that helper calls
-    `accession.replace(...)` with no guard -- so a `None` raises
-    `AttributeError` straight out of this loop, aborting the span and
-    discarding every filing that already acquired. Filtering the row instead
+    `None` (`_append_submission_block`).
+
+    THE GUARD BELOW IS NOT CRASH-PREVENTION, and saying so is load-bearing:
+    `_acquire_raw_filing` answers a `None` accession with its ordinary loud
+    resolution slot, pinned by
+    `test_an_accession_of_none_comes_back_as_a_loud_slot_not_a_traceback`. An
+    earlier version of this paragraph justified the guard by the
+    `AttributeError` that seam used to raise out of an unguarded
+    `_accession_nodash` -- reasoning about another module's PRIVATE internals,
+    which went stale the moment that detail moved, and which would have
+    invited a maintainer to delete the guard as obsolete once the crash was
+    gone. The guard earns its place on the observable contract instead: the
+    resolution slot reports `accession: None` and so cannot NAME the row,
+    while a row carrying no accession is identifiable only by form + filing
+    date. Filtering the row instead
     (what `pack_reconstruct` does) is right THERE and silent HERE:
     `pack_reconstruct` counts `requested` over its own already-filtered list,
     while this function returns no count at all and leaves the caller to
