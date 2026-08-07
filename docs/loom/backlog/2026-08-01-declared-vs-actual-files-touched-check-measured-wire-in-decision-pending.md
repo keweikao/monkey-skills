@@ -37,13 +37,16 @@ origin: HANDOFF-2026-08-01 P1, agreed after the Reuse-adequacy arc's seven-vs-ze
      `files-touched-misses-machinery-coupled-files.md` §How-to-apply
      stands unsuperseded.
   3. Letter-suffixed task headings (`## Task 3a`) — RESOLVED (2026-08-07,
-     shipped this branch): the parser now recognizes letter-suffixed
-     headings across the 13 plans / 51 headings that were previously
-     invisible, closing the SILENT non-coverage gap. Still deferred:
-     multi-sha `done(a+b)` vocabulary seen on the same plan.
-     - start: next time a plan records a multi-sha `done(a+b)`-style
-       vocabulary and the comparator needs to resolve it into individual
-       commits.
+     shipped this branch): the parser now recognizes SINGLE-letter
+     suffixed headings across the 13 plans / 51 headings that were
+     previously invisible, closing the SILENT non-coverage gap for that
+     shape. Still deferred: multi-letter suffixes (`## Task 3ab`) remain
+     the same accepted silent-drop limitation (documented in the parser's
+     own `_TASK_HDR` comment), and multi-sha `done(a+b)` vocabulary seen
+     on the same plan.
+     - start: next time a plan uses a multi-letter task suffix, or records
+       a multi-sha `done(a+b)`-style vocabulary the comparator needs to
+       resolve into individual commits.
   4. `Status:` comment tails — RESOLVED (2026-08-07, shipped this
      branch): the parser now handles annotated `Status:` comment tails,
      so a fully-ledgered plan's join keys (e.g.
@@ -66,8 +69,8 @@ origin: HANDOFF-2026-08-01 P1, agreed after the Reuse-adequacy arc's seven-vs-ze
        close-outs that a weak-model (e.g. haiku-tier) consumption probe
        becomes measurable at the now-live consumption seam.
   8. CJK paths: `git show` C-quotes non-ASCII paths by default
-     (`core.quotepath`) → false UNDER; add `-c core.quotepath=off` at
-     wiring time.
+     (`core.quotepath`) → false UNDER; the fix is `-c core.quotepath=off`,
+     deferred past this wiring until a CJK path first appears (see start:).
      - start: next time a task's declared or actual path contains
        non-ASCII (CJK) characters and the comparator's git layer needs
        `-c core.quotepath=off` to read it correctly.

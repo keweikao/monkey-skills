@@ -278,11 +278,14 @@ This skill is intentionally light on novel logic. Its value is orchestration; th
      repo root in no plugin — absent → say `files-touched check: N/A —
      checker not present in this repo` loudly and move on. Otherwise
      run `python3 <repo-root>/scripts/check_files_touched.py <the
-     branch's plan path>` from the repo root, before the close-out
-     commit. Per its EXIT_CONTRACT: exit 0 — proceed silently; exit 1
-     — STOP, a task under/over-declared or an unresolved sha (name
-     it); exit 2 — surface loudly, not STOP: the plan has no ledger
-     (0 tasks or join keys), never a silent pass.
+     branch's plan path> --variant R3` from the repo root, before the
+     close-out commit (`--variant R3` is the measurement audit's sole
+     ship candidate — 0 false alarms; the default `all` also runs R1,
+     which the audit rates no-ship). Per its EXIT_CONTRACT: exit 0 —
+     proceed silently; exit 1 — STOP, a task under/over-declared, an
+     unresolved sha, or a parse error (name it); exit 2 — surface
+     loudly, not STOP: the plan has no ledger (0 tasks or join keys),
+     never a silent pass.
    - Attached-HEAD check: run `git symbolic-ref -q HEAD` in the main
      working tree — it must print the branch being finished. Detached
      HEAD or a different branch means something (typically a subagent)
