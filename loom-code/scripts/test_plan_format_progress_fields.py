@@ -38,6 +38,9 @@ REVIEWER_PROMPT_MD = (
     / "plan-document-reviewer-prompt.md"
 )
 PLAN_CARD_SCRIPT = REPO_ROOT / "scripts" / "plan_card.py"
+WP_SKILL_MD = (
+    REPO_ROOT / "loom-code" / "skills" / "writing-plans" / "SKILL.md"
+)
 
 GOAL_SCHEMA_LINE = (
     "Goal: <one sentence transcribed from the brief's Smallest End State at "
@@ -47,9 +50,20 @@ GOAL_SCHEMA_LINE = (
 )
 
 STAGE_ENUM_LINE = (
-    "Stage: <planning | sdd:wave-N | review:round-N | finishing — updated by "
-    "the orchestrator at each transition, committed with the nearest "
-    "ledger or close-out commit>"
+    "Stage: <planning | sdd:wave-N | review:round-N | blocked:user-decision "
+    "| finishing — updated by the orchestrator at each transition, "
+    "committed with the nearest ledger or close-out commit>"
+)
+
+BLOCKED_DUTY_SENTENCE = (
+    "blocked:user-decision marks an arc halted awaiting a user ruling: set "
+    "it when the orchestrator stops mid-arc to wait for a user decision "
+    "(an open finding, a deferred choice), and on resume flip Stage to "
+    "the stage the ruling re-enters."
+)
+
+SKILL_MD_ENUM_FRAGMENT = (
+    "enum planning | sdd:wave-N | review:round-N | blocked:user-decision |"
 )
 
 DEFAULT_ON_SENTENCE = (
@@ -112,9 +126,31 @@ def test_goal_schema_line_present():
 
 def test_stage_enum_line_present():
     """Task 1(a): the `Stage:` enum header schema line (N1, verbatim)
-    exists, carrying the four-value enum
-    planning / sdd:wave-N / review:round-N / finishing."""
+    exists, carrying the five-value enum
+    planning / sdd:wave-N / review:round-N / blocked:user-decision /
+    finishing."""
     assert _normalize(STAGE_ENUM_LINE) in _normalized_text()
+
+
+def test_blocked_duty_sentence_present():
+    """Plan 2026-08-07 Task 1: the blocked:user-decision when-to-set duty
+    sentence exists as its own sentence (sibling prose OUTSIDE the header
+    template block, so a plan copier never inherits rule text)."""
+    assert _normalize(BLOCKED_DUTY_SENTENCE) in _normalized_text()
+
+
+def _normalized_skill_md_text() -> str:
+    """Whitespace-normalized writing-plans SKILL.md text (same collapse
+    as _normalized_text, but for the SKILL.md schema-block copy)."""
+    text = WP_SKILL_MD.read_text(encoding="utf-8")
+    return " ".join(text.split())
+
+
+def test_skill_md_enum_line_matches():
+    """Plan 2026-08-07 Task 2: writing-plans SKILL.md's schema-block
+    enum line carries the same five-value Stage enum as plan-format.md —
+    the extended fragment including blocked:user-decision."""
+    assert _normalize(SKILL_MD_ENUM_FRAGMENT) in _normalized_skill_md_text()
 
 
 def test_status_ledger_default_on_sentence_present():
