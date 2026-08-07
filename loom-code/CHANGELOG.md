@@ -5,6 +5,89 @@ All notable changes to the `loom-code` plugin (formerly `code-toolkit`) will be 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.69.0] — 2026-08-08 — the direction layer: DIRECTION.md, Bet, and two conditional station reads
+
+### Added
+
+- **`DIRECTION.md` convention.** A per-repo roadmap artifact
+  (`docs/loom/DIRECTION.md`) with a `## Now` section that is
+  GENERATED from `COMMITTED-NEXT` backlog entry files by
+  `scripts/backlog_index.py --direction-write` — never hand-edited —
+  and read as a PARALLEL ACTIVE SET, not a serial queue (one entry
+  typically maps to one worktree/lane; the ≤5 cap is parallel-steering
+  capacity, mirroring the backlog store's own `COMMITTED-NEXT` cap).
+  `## Next` and `## Later` stay human-written themes. No dates
+  anywhere in the file — the generated `## Now` body's entry-name
+  identifiers are the one explicit exemption — enforced as three
+  independent checks in `backlog_index.py`'s flagless validate mode
+  (mirroring `check_loom_memory_integrity.py`'s trio shape): `## Now`
+  content matches the `COMMITTED-NEXT` entry files; `## Now`/`## Next`/
+  `## Later` headings present; and no date-like token (`20\d\d[-/年.]` or
+  `Q[1-4]`) anywhere outside the generated `## Now` body — date tokens
+  inside a backlog-entry filename reference (`YYYY-MM-DD-slug.md`) are
+  exempt: identifiers, not schedule promises.
+- **`--direction-write <path>` / `--direction-check <path>`** land in
+  `scripts/backlog_index.py` as the DIRECTION.md counterparts of
+  `--write`/`--check`: `--direction-write` regenerates `## Now` from
+  the store's `COMMITTED-NEXT` entries (empty queue → the file's own
+  "queue empty — bet at the next close-out" line, never a blank
+  section); `--direction-check` is self-confirmation only — it
+  re-runs the generator in memory and diffs it against the committed
+  file, exit 1 on drift or a missing file. It does NOT run the three
+  validate-mode checks above; CI needs the flagless validate mode, not
+  `--direction-check`, to catch a stray date or a missing heading.
+- **The backlog charter's fourth verb, Bet (promote).** Promoting a
+  backlog entry into `COMMITTED-NEXT` is **user-only** — agents never
+  promote. Triggered by `finishing-a-development-branch`'s close-out
+  when that close-out flips a backlog entry, `COMMITTED-NEXT` is empty
+  after the flip, and the repo has `docs/loom/DIRECTION.md`, or
+  manually at any time. Candidates list
+  **same-lane first** (when the just-closed arc belongs to a theme,
+  that theme's next arc leads the list), then the ready query's
+  `OPEN` output.
+- **Roadmap entries — a named pattern, not a new file type.** A
+  roadmap entry is an ordinary backlog entry whose body is an ordered
+  arc list with dependency notes, serving one DIRECTION theme;
+  `docs/loom/DIRECTION.md`'s `## Next` lines may point at one by
+  filename (its date prefix is a file identifier, exempt from the
+  no-dates rule). As each arc ships, its evidence line accumulates in the
+  entry's body rather than opening a new entry per arc.
+
+### Changed
+
+- **`brainstorming`'s Axis 0** grows a DIRECTION.md read, independent
+  of the Backlog ready check's store condition: when the target repo
+  has `docs/loom/DIRECTION.md` — with or without a backlog store —
+  Axis 0 reads it and surfaces `## Now` and `## Next` alongside the
+  ready queue. No file → skip silently, same posture as the no-store
+  case. The two conditions are deliberately decoupled (a repo can
+  carry the roadmap file without the backlog store, or vice versa) so
+  the read fires on DIRECTION.md's presence alone.
+- **`finishing-a-development-branch`'s Backlog-close row** grows a
+  betting duty that needs BOTH artifacts: after a shipped-or-superseded
+  entry closes, when the repo also has `docs/loom/DIRECTION.md`, the
+  row runs `--direction-write` and stages the refreshed file into the
+  same close-out commit; if `COMMITTED-NEXT` is then EMPTY, it surfaces
+  the same-lane-first betting prompt to the user — the user promotes
+  (edits `status:` to `COMMITTED-NEXT`) or declines, never a silent
+  agent default. On promote, the row re-runs both `--write` and
+  `--direction-write` and re-stages `BACKLOG.md` + `DIRECTION.md`
+  before the close-out commit lands, so a same-turn promotion never
+  ships behind a stale `## Now`. No `docs/loom/DIRECTION.md` in the
+  repo → skip the betting duty silently, the same opt-in posture as
+  the store-absent case.
+- **Five `ROADMAP.md` tombstones** (loom-code, philosophers-toolkit,
+  systems-thinking-toolkit, investing-toolkit, legal-toolkit): each
+  file gets a one-line "superseded" banner PREPENDED at line 2,
+  pointing to `docs/loom/DIRECTION.md`; the rest of the file is kept
+  in full, unchanged, as a design-era artifact — no content is
+  deleted or replaced.
+- **The whole convention is conditional and portable by design.**
+  Every new read or write is gated on the target file's presence,
+  defaults to a silent skip when absent, and is opt-in per repo — a
+  repo can adopt `DIRECTION.md` without a backlog store, or run the
+  backlog store without ever creating `DIRECTION.md`.
+
 ## [0.68.0] — 2026-08-07 — finishing's five ONCE-bullets collapse into one close-out table
 
 ### Changed

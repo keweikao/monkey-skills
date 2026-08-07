@@ -87,8 +87,14 @@ The `status` field is a closed enum — exactly these seven values, no
 others. Pick by what is *blocking the item*, not by how important it
 feels:
 
-- `COMMITTED-NEXT` — decided, scheduled, and next in line. Nothing is
-  blocking it but our own turn to start.
+- `COMMITTED-NEXT` — decided, scheduled, and active/claimed for the
+  parallel set. Nothing is blocking it but our own turn to start. When
+  `docs/loom/DIRECTION.md` exists, this queue is mirrored into its
+  generated `## Now` section by `scripts/backlog_index.py
+  --direction-write` (see §Verbs' Bet flow). This is a PARALLEL ACTIVE
+  SET, not a serial queue: one entry typically maps to one
+  worktree/lane, and the ≤5 cap is parallel-steering capacity. See
+  `docs/loom/DIRECTION.md`'s charter header — the convention's SSOT.
 - `OPEN` — agreed to be worth doing, not yet scheduled. Anyone may
   pick it up.
 - `PARKED` — deliberately not being done for now, with the reason
@@ -114,14 +120,15 @@ never carry any other status.
 
 ## Verbs
 
-Three flows read and close this store; everything else only writes it.
+Four flows read, close, or promote items in this store; everything
+else only writes it.
 
 - **Ready query** — `python3 scripts/backlog_index.py --ready` is the
   store's read surface: it prints the `COMMITTED-NEXT` queue (the
-  "now" queue, file-date order; store policy — not enforced by the
-  tool — keep it to ≤5 entries: a sixth commitment means re-judging
-  the queue) followed by `OPEN` candidates with their `start:`
-  conditions.
+  "now" queue, file-date order — a listing order, not an execution
+  order; store policy — not enforced by the tool — keep it to ≤5
+  entries: a sixth commitment means re-judging the queue) followed by
+  `OPEN` candidates with their `start:` conditions.
 - **Close duty** — `finishing-a-development-branch`'s Step 8
   Backlog-close check flips a shipped or superseded entry's status at
   branch close-out. The procedure lives in that skill, not here —
@@ -131,6 +138,34 @@ Three flows read and close this store; everything else only writes it.
   later.
 - **Kickoff read** — `brainstorming`'s Axis 0 Backlog ready check runs
   the ready query at arc kickoff, so the queue informs new work.
+- **Bet (promote)** — promoting a backlog entry into `COMMITTED-NEXT`
+  is **user-only**; agents never promote. Triggered by
+  `finishing-a-development-branch`'s close-out when that close-out
+  flips a backlog entry (the duty lives in its Backlog-close row), the
+  `COMMITTED-NEXT` queue is empty after the flip, and the repo has
+  `docs/loom/DIRECTION.md` — or manually at any time. Candidates: the
+  active roadmap entries' next arcs first (same-lane first — when an
+  arc of theme X just closed, theme X's next arc leads the list), then
+  the ready query's `OPEN` output. To promote, the user edits the
+  chosen entry's `status:` to `COMMITTED-NEXT`; `--write` and
+  `--direction-write` then regenerate `BACKLOG.md` and DIRECTION.md's
+  `## Now` from it.
+
+## Roadmap entries — a named pattern, not a new file type
+
+A **roadmap entry** is an ordinary backlog entry whose body is an
+ordered arc list with dependency notes, serving one DIRECTION theme —
+not a new file type, not a DIRECTION section. `docs/loom/DIRECTION.md`'s
+`## Next` lines may point at one by filename (the filename's date
+prefix is a file identifier, exempt from DIRECTION.md's no-dates
+rule). As each arc ships, its evidence line accumulates in the entry's
+body rather than opening a new entry per arc. Precedent for the shape
+(not the cadence — per-arc
+evidence accumulation is the prescription going forward):
+`2026-08-07-execute-complexity-audit-keep-lanes.md` held one theme's
+ordered arc list with dependency notes across five PRs, its body
+revised arc by arc as the plan reshaped, with the SHIPPED evidence for
+all five arcs recorded together at close.
 
 ## Filename rule
 
