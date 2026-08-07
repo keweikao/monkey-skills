@@ -268,22 +268,19 @@ This skill is intentionally light on novel logic. Its value is orchestration; th
      script. No hit, or no store → skip silently (auditable from the
      diff, like the memory-store bullet).
    - Files-touched check (orchestrator-only, ONCE per branch, same
-     shape as its Step 8 siblings — a per-implementer/per-wave run
-     would race the same comparator): joins THIS branch's own plan
-     against its real commit diffs, catching a task whose declared
-     `Files touched` under-states what it actually touched. Trigger,
-     auditable from the diff: the branch has a plan file at
-     `docs/loom/plans/<date>-<topic>.md` — absent → skip silently,
-     same posture as the memory-store bullet. The checker ships at the
-     repo root in no plugin — absent → say `files-touched check: N/A —
-     checker not present in this repo` loudly and move on. Otherwise
-     run `python3 <repo-root>/scripts/check_files_touched.py <the
-     branch's plan path> --variant R3` from the repo root, before the
-     close-out commit (`--variant R3` is the measurement audit's sole
-     ship candidate — 0 false alarms; the default `all` also runs R1,
-     which the audit rates no-ship). Per its EXIT_CONTRACT: exit 0 —
-     proceed silently; exit 1 — STOP, a task under/over-declared, an
-     unresolved sha, or a parse error (name it); exit 2 — surface
+     shape as its Step 8 siblings — a per-wave run would race it):
+     joins THIS branch's plan against its real commit diffs, catching a
+     task that under-declares `Files touched`. Trigger (diff-auditable):
+     a plan file at `docs/loom/plans/<date>-<topic>.md` — absent → skip
+     silently, like the memory-store bullet. Checker absent (ships in no
+     plugin) → say `files-touched check: N/A — checker not present in
+     this repo` loudly. Else run `python3
+     <repo-root>/scripts/check_files_touched.py <plan path> --variant
+     R3` before the close-out commit (`--variant R3` is the audit's sole
+     ship candidate; `all` also runs R1, rated no-ship). Per
+     EXIT_CONTRACT: exit 0 — proceed; exit 1 — STOP (a task
+     under/over-declared, an unresolved sha, or a parse error — name
+     it); exit 2 — surface
      loudly, not STOP: the plan has no ledger (0 tasks or join keys),
      never a silent pass.
    - Attached-HEAD check: run `git symbolic-ref -q HEAD` in the main

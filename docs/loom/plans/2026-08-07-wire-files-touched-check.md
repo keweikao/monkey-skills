@@ -22,7 +22,7 @@ Plan-document-reviewer verdict: PASS (2026-08-07, round 1)
 - Dependencies: none
 - Independent: true
 - Brief item covered: "Letter-suffixed task headings … does not match `## Task 3a`; worse, the heading still matches `_TASK_BOUNDARY` … so the block is consumed as a boundary and vanishes with zero parse_errors"
-- Status: done(c6a9755f)
+- Status: done(3d07c0b3)
 - Gloss: 讓比對器看得到 `## Task 3a` 這種帶字母的任務標題，不再靜默吞掉。
 
 ## Task 2 — parse annotated `Status: done(<sha>)` tails
@@ -39,7 +39,7 @@ Plan-document-reviewer verdict: PASS (2026-08-07, round 1)
 - Dependencies: Task 1 completes first
 - Independent: false
 - Brief item covered: "`_STATUS_DONE` … is `$`-anchored, so a real annotated line … fails the match … This is gap 3b — a wiring-blocking must-fix"
-- Status: done(b7e50634)
+- Status: done(b6f0a0a2)
 - Gloss: 讓 `Status: done(sha)  # 註解` 這種帶註解的行仍能抽出 sha，接線後才不會空轉噪音。
 
 ## Task 3 — wire the Step 8 sibling check into finishing
@@ -56,7 +56,7 @@ Plan-document-reviewer verdict: PASS (2026-08-07, round 1)
 - Dependencies: Task 2 completes first
 - Independent: false
 - Brief item covered: "The Step 8 sibling check … orchestrator-only, ONCE per branch, keyed on 'a plan file exists for this branch' … calling `<repo-root>/scripts/check_files_touched.py` with a loud N/A when the script is absent … Gates on a real under-declaration (exit 1); reports exit 2 (loud-empty) distinctly."
-- Status: done(79d37488)
+- Status: done(4fe0db24)
 - Gloss: 把比對器接成收分支站 Step 8 的一個檢查，只看有 plan 的新分支、腳本不在就大聲說 N/A。
 
 ## Task 4 — reconcile the backlog entry
@@ -73,7 +73,7 @@ Plan-document-reviewer verdict: PASS (2026-08-07, round 1)
 - Dependencies: none
 - Independent: true
 - Brief item covered: "flip … the decision-pending backlog entry … to record the wire-in decision, and attach `start:` re-triggers to the residual obligations that stay deferred"
-- Status: done(08b2f9ad)
+- Status: done(52d9946f)
 - Gloss: 把那條「決定待定」的 backlog 改記成已決定，殘餘項各補一個「何時再啟動」的觸發條件。
 
 ## Notes
