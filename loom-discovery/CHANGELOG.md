@@ -6,6 +6,39 @@ file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-08-07 — plugin description back inside the listing's range
+
+### Changed
+
+- **Plugin description** cut from 1005 to 104 characters across
+  `marketplace.json`, `.claude-plugin/plugin.json`, and
+  `.codex-plugin/plugin.json`. The old string enumerated both skills with
+  their gate vocabularies, the artifact directory layout, and the delegation
+  rules — README content on a browse surface, and a 4.6x outlier against the
+  next-longest plugin (216) in a listing whose median is 97. The detail is
+  not lost: `.codex-plugin`'s `longDescription` and `README.md` both retain
+  it. Finishes the sweep of #437 (all 25 descriptions to one-line taglines)
+  and #494 (seven more), which `loom-discovery` missed by landing later
+  in #523.
+- **This is a patch RELEASE, not a metadata-only edit.** Claude Code CLI
+  reads the installed `plugin.json` when listing plugins (see
+  `scripts/check-marketplace-description-sync.py`'s docstring); without a
+  version bump, existing CLI installs would keep displaying the 1005-char
+  string until the next release — the exact surface this change fixes.
+  Claude Desktop and fresh installs read `marketplace.json` and would have
+  refreshed either way.
+
+### Unchanged — deliberately
+
+- The `user-insights` SKILL frontmatter description stays at its measured
+  899-character pin. `docs/skill-dogfood/2026-07-30-description-diet-firing-ab/`
+  found that string regresses at three separate diet bands (170 / 217 / 493)
+  against the `loom-pipeline:loom-memory` guard pair, and requires a same-day
+  two-leg A/B before any future attempt. That pin is a skill-routing surface;
+  the plugin manifest edited here is a browse blurb that no experiment has
+  ever varied. The two strings sit one directory apart and are not the same
+  decision.
+
 ## [0.4.0] — 2026-07-25 — bba imperative in entry router
 
 ### Added
