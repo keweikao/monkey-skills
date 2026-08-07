@@ -55,6 +55,17 @@ on:
       - 'loom-product-principles/skills/product-principles/references/knowledge-triage.md'
       - 'loom-interface-design/skills/interaction-flows/references/knowledge-triage.md'
       - 'loom-interface-design/skills/design-system/references/knowledge-triage.md'
+      # Repo-root drift guards scan the whole loom-*/ tree (T1
+      # test_state_anchor_carrier_inventory.py's population is EVERYTHING
+      # under loom-*/) and read specific sibling files (T2
+      # test_brief_clause_lockstep.py), but only loom-code/** is otherwise
+      # in this trigger — so any sibling-plugin edit must fire this
+      # workflow, else it would merge ungated (fail-open).
+      - 'loom-discovery/**'
+      - 'loom-product-principles/**'
+      - 'loom-interface-design/**'
+      - 'loom-spec/**'
+      - 'loom-pipeline/**'
       - '.github/workflows/loom-code-ci.yml'
   push:
     branches: [main]
@@ -71,6 +82,12 @@ on:
       - 'loom-product-principles/skills/product-principles/references/knowledge-triage.md'
       - 'loom-interface-design/skills/interaction-flows/references/knowledge-triage.md'
       - 'loom-interface-design/skills/design-system/references/knowledge-triage.md'
+      # Same repo-root drift-guard rationale as the pull_request trigger above.
+      - 'loom-discovery/**'
+      - 'loom-product-principles/**'
+      - 'loom-interface-design/**'
+      - 'loom-spec/**'
+      - 'loom-pipeline/**'
 
 permissions:
   contents: read
