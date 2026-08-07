@@ -1,8 +1,8 @@
 # loom-code
 
-> **Process-discipline + canon-grounded 程式開發工作流 for Claude Code (+ Codex CLI)。** 12-skill plugin，SessionStart 自動注入 router charter，讓 agent 停止合理化、開始 deferring — 每條規則皆 grounded 於一級書目（Beck on TDD / Martin on naming / Fowler on refactoring / Feathers on legacy code / OWASP ASVS on security / 徳丸本 on encoding security）。
+> **Process-discipline + canon-grounded 程式開發工作流 for Claude Code (+ Codex CLI)。** 13-skill plugin，SessionStart 自動注入 router charter，讓 agent 停止合理化、開始 deferring — 每條規則皆 grounded 於一級書目（Beck on TDD / Martin on naming / Fowler on refactoring / Feathers on legacy code / OWASP ASVS on security / 徳丸本 on encoding security）。
 
-**狀態**：v0.23.0 — 12 skills；v0.3.0 起達成完整 Superpowers parity。各版本細節（rule-sheet 注入、reviewer-discipline、parallel dispatch、spec→code seam、memory verify gate 等）見 [CHANGELOG.md](CHANGELOG.md)。
+**狀態**：v0.66.0 — 13 skills；v0.3.0 起達成完整 Superpowers parity。各版本細節（rule-sheet 注入、reviewer-discipline、parallel dispatch、spec→code seam、memory verify gate 等）見 [CHANGELOG.md](CHANGELOG.md)。
 **語言**：[English](README.md) | [日本語](README.ja.md) | **繁體中文**
 **Repository**：[`monkey-skills`](https://github.com/kouko/monkey-skills) 的一部分
 
@@ -41,12 +41,12 @@ claude plugin install loom-code@monkey-skills
 
 # 驗證
 claude plugin list | grep loom-code       # 預期：enabled
-claude plugin details loom-code           # 預期：12 skills + SessionStart & PreToolUse hooks
+claude plugin details loom-code           # 預期：13 skills + SessionStart & PreToolUse hooks
 ```
 
 ### Codex CLI（build 完成、實機驗證延後）
 
-⚠️ Codex CLI manifest 已 build 並隨 Claude Code 變體同步 bump 到 v0.23.0，但在實機 Codex CLI 上的安裝與驗證流程仍按使用者指示延後。詳見 [`tests/codex-cli/README.md`](tests/codex-cli/README.md)。
+⚠️ Codex CLI manifest 已 build 完成，並與 Claude Code 變體 lockstep 同步（透過 `scripts/sync_codex_manifests.py`，每次 release 都同步），但在實機 Codex CLI 上的安裝與驗證流程仍按使用者指示延後。詳見 [`tests/codex-cli/README.md`](tests/codex-cli/README.md)。
 
 ### 本地開發（給貢獻者）
 
@@ -62,17 +62,17 @@ claude plugin install loom-code@monkey-skills --scope local
 
 ---
 
-## 12 個 skill
+## 13 個 skill
 
 | # | Skill | Stage | 做什麼 |
 |---|---|---|---|
 | Router | [`using-loom-code`](skills/using-loom-code/) | Always-on | SessionStart 注入 ~2 KB router card（coding mandate＋5 條 load-bearing rules）；完整 router（含 Skill Priority 表）於調用時載入（0.24.0） |
 | 1 | [`brainstorming`](skills/brainstorming/) | Discovery | HARD-GATE 5-axis 探索（Problem / Users / Smallest End State / Alternatives / What Becomes Obsolete）；v0.7.0+ brief 帶 `Current State Evidence` 5 維 recon section；拒絕跳過 discovery 的合理化 |
 | 2 | [`writing-plans`](skills/writing-plans/) | Planning | ≤5-task plan + 每個 task RED-GREEN acceptance；BLOCKED → child-test fallback（Beck Part II §Child Test）；v0.8.0+ 加入 `Independent` + `Files touched` 欄位作為 parallel-dispatch 入場條件 |
-| 3 | [`subagent-driven-development`](skills/subagent-driven-development/) | Execution | 每個 task 派 triad（implementer + spec-reviewer + code-quality-reviewer）；reviewer 三件套攜帶 `reviewer-discipline-v1` SSOT 注入區塊（R1+R2） |
+| 3 | [`subagent-driven-development`](skills/subagent-driven-development/) | Execution | 每個 task 派 triad（implementer + spec-reviewer + code-quality-reviewer）；reviewer 四件套攜帶 `reviewer-discipline-v1` SSOT 注入區塊（R1+R2） |
 | 4 | [`tdd-iron-law`](skills/tdd-iron-law/) | Discipline | "沒先有 failing test 不准寫 production code"（Beck 2002 Preface, ISBN 978-0321146533）；§Feathers (2004) 對 legacy code backfill 的合法區別 |
 | 5 | [`systematic-debugging`](skills/systematic-debugging/) | Repair | 4 階段 REPRODUCE → ISOLATE → HYPOTHESIZE → VERIFY；HARD-GATE "沒重現不准 fix" |
-| 6 | [`requesting-code-review`](skills/requesting-code-review/) | Review | 全 branch 審查、7 維度評分（cross-task-coherence 為 branch 限定維度）；v0.7.0+ verdict 帶 `standards_version` stamp、findings 必填 `where:` file:line；push-as-trigger |
+| 6 | [`requesting-code-review`](skills/requesting-code-review/) | Review | 全 branch 審查、11 維度評分（cross-task-coherence 為 branch 限定維度）；v0.7.0+ verdict 帶 `standards_version` stamp、findings 必填 `where:` file:line；push-as-trigger |
 | 7 | [`verification-before-completion`](skills/verification-before-completion/) | Verification | "沒跑 package-level test 不准 done"；涵蓋 20+ 種 stack 的 canonical command |
 | 7b | [`ui-verification`](skills/ui-verification/) | Verification（條件式） | 用 host 的 browser/device 自動化把 `ui-flows.md` 列舉的狀態實機走一遍；條件或工具不在時明講 N/A；token 合規檢查排除在外（已停車） |
 | 8 | [`finishing-a-development-branch`](skills/finishing-a-development-branch/) | 分支收尾 | 7 步 orchestrator（review → verify → git-memory 強制 → commit → push → 可選 PR + worktree 清理） |
@@ -142,7 +142,7 @@ finishing-a-development-branch
 | Harness | 狀態 |
 |---|---|
 | **Claude Code** | ✅ 多輪 ritual 完整驗證 — Phase 3 orchestrator (v0.3.0)、Phase 4 prep (v0.4.0)、多語研究 (v0.5.1)、plugin-level agent dispatch (v0.5.2 + v0.6.0)、cross-task-coherence 維度全 branch 審查 (v0.6.0)、reviewer-discipline SSOT extraction + Current State Evidence section (v0.7.0) |
-| **Codex CLI** | ⚠️ Manifest 已 build 並追蹤到 v0.23.0；實機安裝與驗證流程依使用者指示延後（見 `tests/codex-cli/README.md`） |
+| **Codex CLI** | ⚠️ Manifest 已 build 完成，並每次 release lockstep 追蹤；實機安裝與驗證流程依使用者指示延後（見 `tests/codex-cli/README.md`） |
 
 SessionStart hook 發出可移植 JSON shape，涵蓋 Claude Code 的 `hookSpecificOutput.additionalContext`、Codex CLI 的 `additional_context` 以及 legacy `additionalContext` keys — 同一個 hook 服務兩種 harness。
 

@@ -36,7 +36,7 @@ Per [`SKILL.md`](SKILL.md) §When NOT to Use:
 Every verdict carries:
 
 - **`standards_version`** stamp (from `plugin.json` `version`) — lets downstream readers date the review against a specific rubric revision (v0.7.0 reviewer-discipline R1).
-- 7-dimension scores (security / architecture / correctness / naming / tests / refactoring / **cross-task-coherence** — branch-only).
+- 11-dimension scores (security / architecture / correctness / naming / tests / refactoring / **cross-task-coherence** — branch-only / external-surface-grounding / principles-conformance — conditional / **deliberate-simplification** — branch-only / deletion-first).
 - Severity-tagged findings (🔴 fatal / 🟡 should-fix / 🟢 nit), each citing `where:` (file:line or commit SHA range). **Missing `where` flips the verdict to `NEEDS_REVISION`** regardless of severity (v0.7.0 reviewer-discipline R2 — opaque findings are unfixable).
 - ≤5-bullet summary.
 
@@ -48,7 +48,7 @@ Aggregation (aligned with `rubrics/quality-gate.md` SSOT):
 - Exactly 1 🟡, no 🔴, all with `where` → `PASS_WITH_NOTES`
 - No 🔴, no 🟡 → `PASS`
 
-R1+R2 discipline lives in `loom-code/scripts/_reviewer-discipline.md` (SSOT) and is auto-injected into the 3 reviewer agents by `distribute.py`.
+R1+R2 discipline lives in `loom-code/scripts/_reviewer-discipline.md` (SSOT) and is auto-injected into the 4 reviewer agents by `distribute.py`.
 
 ## Cross-skill
 

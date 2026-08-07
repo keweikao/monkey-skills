@@ -36,7 +36,7 @@
 每個 verdict 帶：
 
 - **`standards_version`** stamp（從 `plugin.json` 的 `version` 欄）— 讓 downstream reader 知道這次 review 是哪一版 rubric 跑的（v0.7.0 reviewer-discipline R1）。
-- 7 維度評分（security / architecture / correctness / naming / tests / refactoring / **cross-task-coherence** — branch 限定）。
+- 11 維度評分（security / architecture / correctness / naming / tests / refactoring / **cross-task-coherence** — branch 限定 / external-surface-grounding / principles-conformance — 條件式 / **deliberate-simplification** — branch 限定 / deletion-first）。
 - 嚴重度標籤 findings（🔴 fatal / 🟡 should-fix / 🟢 nit），每個 finding 都必須帶 `where:`（file:line 或 commit SHA range）。**缺 `where` 整個 verdict 自動翻成 `NEEDS_REVISION`**（v0.7.0 reviewer-discipline R2 — opaque finding 無法修）。
 - ≤5 條 summary。
 
@@ -48,7 +48,7 @@
 - 恰好 1 個 🟡、無 🔴、全部帶 `where` → `PASS_WITH_NOTES`
 - 無 🔴、無 🟡 → `PASS`
 
-R1+R2 紀律的 canonical 在 `loom-code/scripts/_reviewer-discipline.md`，由 `distribute.py` 自動注入 3 個 reviewer agent。
+R1+R2 紀律的 canonical 在 `loom-code/scripts/_reviewer-discipline.md`，由 `distribute.py` 自動注入 4 個 reviewer agent。
 
 ## Cross-skill
 

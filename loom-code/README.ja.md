@@ -1,8 +1,8 @@
 # loom-code
 
-> **Process-discipline + canon-grounded コーディングワークフロー for Claude Code (+ Codex CLI)。** 12-skill プラグイン。SessionStart で router charter を自動注入し、エージェントが合理化をやめて defer し始めるよう仕向ける — 各ルールは一次情報源に grounded（Beck on TDD / Martin on naming / Fowler on refactoring / Feathers on legacy code / OWASP ASVS on security / 徳丸本 on encoding security）。
+> **Process-discipline + canon-grounded コーディングワークフロー for Claude Code (+ Codex CLI)。** 13-skill プラグイン。SessionStart で router charter を自動注入し、エージェントが合理化をやめて defer し始めるよう仕向ける — 各ルールは一次情報源に grounded（Beck on TDD / Martin on naming / Fowler on refactoring / Feathers on legacy code / OWASP ASVS on security / 徳丸本 on encoding security）。
 
-**状態**：v0.23.0 — 12 skills；v0.3.0 以来フル Superpowers parity。バージョンごとの詳細（rule-sheet 注入、reviewer-discipline、parallel dispatch、spec→code seam、memory verify gate など）は [CHANGELOG.md](CHANGELOG.md) を参照。
+**状態**：v0.66.0 — 13 skills；v0.3.0 以来フル Superpowers parity。バージョンごとの詳細（rule-sheet 注入、reviewer-discipline、parallel dispatch、spec→code seam、memory verify gate など）は [CHANGELOG.md](CHANGELOG.md) を参照。
 **言語**：[English](README.md) | **日本語** | [繁體中文](README.zh-TW.md)
 **Repository**：[`monkey-skills`](https://github.com/kouko/monkey-skills) の一部
 
@@ -41,12 +41,12 @@ claude plugin install loom-code@monkey-skills
 
 # 確認
 claude plugin list | grep loom-code       # 期待：enabled
-claude plugin details loom-code           # 期待：12 skills + SessionStart & PreToolUse hooks
+claude plugin details loom-code           # 期待：13 skills + SessionStart & PreToolUse hooks
 ```
 
 ### Codex CLI（build 完了、実機検証は延期中）
 
-⚠️ Codex CLI manifest は build 済みで Claude Code 変体と同期して v0.23.0 までバンプ済み、しかし実 Codex CLI 環境での install + 検証 ritual はユーザ指示により延期中。準備ができたら [`tests/codex-cli/README.md`](tests/codex-cli/README.md) を参照。
+⚠️ Codex CLI manifest は build 済みで、Claude Code 変体と lockstep で（`scripts/sync_codex_manifests.py` 経由でリリースのたびに）同期されているが、実 Codex CLI 環境での install + 検証 ritual はユーザ指示により延期中。準備ができたら [`tests/codex-cli/README.md`](tests/codex-cli/README.md) を参照。
 
 ### ローカル開発（コントリビューター向け）
 
@@ -62,17 +62,17 @@ claude plugin install loom-code@monkey-skills --scope local
 
 ---
 
-## 12 のスキル
+## 13 のスキル
 
 | # | Skill | Stage | 何をするか |
 |---|---|---|---|
 | Router | [`using-loom-code`](skills/using-loom-code/) | Always-on | SessionStart は ~2 KB の router card（coding mandate＋5 つの load-bearing rules）を注入；完全な router（Skill Priority テーブル含む）は呼び出し時にロード（0.24.0） |
 | 1 | [`brainstorming`](skills/brainstorming/) | Discovery | HARD-GATE 5-axis 探索（Problem / Users / Smallest End State / Alternatives / What Becomes Obsolete）；v0.7.0+ ブリーフに `Current State Evidence` 5 次元 recon セクション搭載；discovery スキップの合理化を拒否 |
 | 2 | [`writing-plans`](skills/writing-plans/) | Planning | ≤5-task plan + 各タスク RED-GREEN acceptance；BLOCKED → child-test フォールバック（Beck Part II §Child Test）；v0.8.0+ で `Independent` + `Files touched` フィールドを追加（parallel-dispatch 適格条件） |
-| 3 | [`subagent-driven-development`](skills/subagent-driven-development/) | Execution | タスクごとに triad を派遣（implementer + spec-reviewer + code-quality-reviewer）；reviewer 三人組は `reviewer-discipline-v1` SSOT 注入ブロック（R1+R2）搭載 |
+| 3 | [`subagent-driven-development`](skills/subagent-driven-development/) | Execution | タスクごとに triad を派遣（implementer + spec-reviewer + code-quality-reviewer）；reviewer 四人組は `reviewer-discipline-v1` SSOT 注入ブロック（R1+R2）搭載 |
 | 4 | [`tdd-iron-law`](skills/tdd-iron-law/) | Discipline | "FAILING TEST なしに production code を書くな"（Beck 2002 Preface, ISBN 978-0321146533）；§Feathers (2004) 正当な legacy code backfill 区別 |
 | 5 | [`systematic-debugging`](skills/systematic-debugging/) | Repair | 4 フェーズ REPRODUCE → ISOLATE → HYPOTHESIZE → VERIFY；HARD-GATE "再現せず fix するな" |
-| 6 | [`requesting-code-review`](skills/requesting-code-review/) | Review | 全ブランチレビュー 7 次元スコア（cross-task-coherence はブランチ限定次元）；v0.7.0+ verdict に `standards_version` スタンプ、findings は `where:` file:line 必須；push-as-trigger |
+| 6 | [`requesting-code-review`](skills/requesting-code-review/) | Review | 全ブランチレビュー 11 次元スコア（cross-task-coherence はブランチ限定次元）；v0.7.0+ verdict に `standards_version` スタンプ、findings は `where:` file:line 必須；push-as-trigger |
 | 7 | [`verification-before-completion`](skills/verification-before-completion/) | Verification | "PACKAGE-LEVEL TEST 実行なしに DONE するな"；20+ stack の canonical コマンドを網羅 |
 | 7b | [`ui-verification`](skills/ui-verification/) | Verification（条件付き） | `ui-flows.md` が列挙する状態をホストの browser/device 自動化で実機走査；条件・ツール不在時は N/A を明示；token 適合チェックは対象外（park 済み） |
 | 8 | [`finishing-a-development-branch`](skills/finishing-a-development-branch/) | Branch close | 7 ステップ orchestrator（review → verify → git-memory 必須 → commit → push → 任意 PR + worktree cleanup） |
@@ -142,7 +142,7 @@ finishing-a-development-branch
 | Harness | 状態 |
 |---|---|
 | **Claude Code** | ✅ 複数 ritual サイクル完全検証 — Phase 3 orchestrator (v0.3.0)、Phase 4 prep (v0.4.0)、多言語研究 (v0.5.1)、plugin-level agent dispatch (v0.5.2 + v0.6.0)、cross-task-coherence 次元での全ブランチ code-review (v0.6.0)、reviewer-discipline SSOT extraction + Current State Evidence section (v0.7.0) |
-| **Codex CLI** | ⚠️ Manifest は build + v0.23.0 までトラック済；実機 install + 検証 ritual はユーザ指示により延期中（`tests/codex-cli/README.md` 参照） |
+| **Codex CLI** | ⚠️ Manifest は build 済みでリリースごとに lockstep でトラック済；実機 install + 検証 ritual はユーザ指示により延期中（`tests/codex-cli/README.md` 参照） |
 
 SessionStart hook は portable な JSON shape を発出し、Claude Code の `hookSpecificOutput.additionalContext`、Codex CLI の `additional_context`、legacy `additionalContext` keys をカバー — 同じ hook が両 harness を提供。
 
