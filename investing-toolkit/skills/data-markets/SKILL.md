@@ -2,9 +2,10 @@
 name: data-markets
 description: |
   Layer-1 unified data fetch across US/JP/TW/KR/CN equities + macro — one
-  pack.py facade, market auto-detected from ticker suffix, 9 pack types
+  pack.py facade, market auto-detected from ticker suffix, 10 pack types
   (snapshot / memo-fetch / comps-multiples / screener-batch / regime-pack /
-  kpi-quarterly / kpi-topline-backfill / statement-backfill / reconstruct).
+  kpi-quarterly / kpi-topline-backfill / statement-backfill / reconstruct /
+  quarterly-series).
   Emits a raw data pack（原始資料包，非渲染卡片）from SEC EDGAR, EDINET, TWSE, FRED and
   14 more sources through a shared cache layer. Use for 資料層 health checks,
   cache (快取) verification, or fetch-by-source-name. Pure I/O, no analysis —
@@ -58,12 +59,17 @@ is unwritable.
 | `kpi-topline-backfill` | single, **US-only** | `pack.py --ticker AAPL --pack kpi-topline-backfill` |
 | `statement-backfill` | single, **US-only** | `pack.py --ticker AAPL --pack statement-backfill` |
 | `reconstruct` | single, **US-only**, needs client deps | `uv run --with edgartools --with requests pack.py --ticker KO --pack reconstruct` |
+| `quarterly-series` | single, **US-only**, needs client deps | `uv run --with edgartools --with requests pack.py --ticker MSFT --pack quarterly-series` |
 
 `regime-pack` has no ticker dimension; omitting `--market` is a usage
 error (exit 64). `kpi-quarterly`, `kpi-topline-backfill`,
-`statement-backfill` and `reconstruct` are refused (exit 64) for any
-market but `us` — the facade's `US_ONLY_PACKS` guard names this as a
-market-availability problem, not a pack-name typo.
+`statement-backfill`, `reconstruct` and `quarterly-series` are refused
+(exit 64) for any market but `us` — the facade's `US_ONLY_PACKS` guard
+names this as a market-availability problem, not a pack-name typo.
+`--years N` caps `quarterly-series`' span and is itself a usage error
+(exit 64) on any other pack or below 1; that verb's envelope, its
+derived-period semantics and its cold-run cost are documented in
+`../analysis-kpi/references/cli-reference.md`.
 
 ## Client dependencies are supplied on the invocation
 

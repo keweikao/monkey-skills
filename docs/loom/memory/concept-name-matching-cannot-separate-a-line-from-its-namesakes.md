@@ -51,6 +51,15 @@ candidate, not a value. And when reporting a name-derived count, state what it
 excludes before stating the number, or it will be read as a measurement of the
 thing it merely resembles.
 
+**Bounded in turn (2026-07-28):** "the decision needs the declared hierarchy"
+holds for TOTAL-versus-COMPONENT, which is the problem this entry is about. It
+does NOT extend to choosing among several legitimate TOTALS — a measurement over
+14 filings found a structural rule promoting the wrong equity figure on 8 of 8,
+because parent-only equity's calculation parent is always the including-NCI
+figure and the KPI convention wants the parent-only one. Which total a metric
+means is a reporting convention, not a structural fact. See
+[[a-mechanism-difference-is-not-a-defect]].
+
 Bounds [[same-economic-fact-different-concept-string-needs-first-present-fallback]]:
 a first-present candidate list is right when the candidates are SYNONYMS for one
 economic item, and wrong when they are DIFFERENT MEASURES — total vs component is

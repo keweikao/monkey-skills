@@ -124,13 +124,19 @@ class _FakeAttachment:
 
 class _FakeFiling:
     """Mirror the raw edgartools ``Filing`` surface fetch_exhibit_documents reads:
-    ``accession_no`` / ``cik`` / ``form`` / ``filing_date`` (a ``datetime.date``,
-    NOT a str — matching the live capture in sec_edgar_client) and
-    ``attachments`` (an iterable of ``_FakeAttachment``)."""
+    ``accession_no`` / ``cik`` / ``company`` / ``form`` / ``filing_date`` (a
+    ``datetime.date``, NOT a str — matching the live capture in
+    sec_edgar_client) and ``attachments`` (an iterable of ``_FakeAttachment``).
+
+    ``company`` was added when `_acquire_raw_filing` gained its disk cache: the
+    ratified cache payload stores the five values `edgar.Filing.__init__`
+    requires, and `company` is one of them. The real Filing has always carried
+    it; this double simply had not needed it before."""
 
     def __init__(self, *, accession_no, attachments):
         self.accession_no = accession_no
         self.cik = 1065280
+        self.company = "NETFLIX INC"
         self.form = "8-K"
         self.filing_date = datetime.date(2025, 1, 21)
         self.attachments = list(attachments)

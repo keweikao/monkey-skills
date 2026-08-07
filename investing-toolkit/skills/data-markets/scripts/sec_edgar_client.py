@@ -78,6 +78,7 @@ TTL_SUBMISSIONS = 86400       # 24 hours
 TTL_SUBMISSION_PAGES = 7 * 86400  # 7 days
 TTL_NARRATIVE = cache_util.compute_ttl("immutable", None)  # permanent; filings don't change
 TTL_EXHIBIT_RAW = cache_util.compute_ttl("immutable", None)  # permanent; a filed exhibit's bytes never change
+TTL_RAW_FILING = cache_util.compute_ttl("immutable", None)  # permanent; a filing's identity never changes
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0
@@ -696,6 +697,85 @@ def list_filings(
     return rows
 
 
+def assemble_quarterly_filing_span(cik: int, years: int | None = None) -> list[dict]:
+    """Return every 10-Q and 10-K filing for `cik`, oldest first.
+
+    `years=None` (the default) returns the filer's ENTIRE 10-Q/10-K history --
+    ten years is a FLOOR for this feature, not a target, so "all available
+    history" has to actually mean all of it. `years`, when given, caps the
+    span to the most recent `years` years.
+
+    Both paths reuse `list_filings`, which already merges the paginated
+    submissions archive (`fetch_submissions`). The two branches below use
+    `list_filings`'s TWO independent stop conditions deliberately:
+
+    - `years` given: pass a `min_filing_date` cutoff, same pattern as
+      `action_filings`'s `since_days` above. `list_filings` documents that
+      `min_filing_date` OVERRIDES `limit` as the stop condition -- the
+      `limit` argument passed alongside it is inert (see its docstring),
+      so it is not a truncation risk.
+    - `years=None`: no date cutoff exists, so `limit` becomes the real stop
+      condition. Passing a constant here (however generous) is the exact
+      defect `narrative_filings_window_days`'s docstring documents for a
+      sibling parameter: a fixed guess looks sufficient until a filer's
+      real history exceeds it, then silently truncates. Instead `limit` is
+      derived from the filer's own submissions payload -- the TOTAL row
+      count across every form, which strictly upper-bounds the 10-Q/10-K
+      subset -- so it can never be smaller than the true count for THIS
+      filer, no matter how large that filer's own history is.
+    """
+    forms = ["10-Q", "10-K"]
+
+    if years is not None:
+        min_filing_date = (
+            date.today() - timedelta(days=years * _DAYS_PER_YEAR)
+        ).isoformat()
+        # `limit` is inert here -- `min_filing_date` overrides it as the stop
+        # condition (see `list_filings`'s docstring); this mirrors
+        # `action_filings`'s `since_days` branch above. `1` is a deliberate
+        # LOW canary, not a placeholder: if `min_filing_date`'s override ever
+        # regressed, `limit` would become the real stop condition again and
+        # this branch would return at most 1 row -- failing its test loudly
+        # -- whereas a "safe-looking" large constant here would mask that
+        # exact regression by coincidentally returning enough rows anyway.
+        rows = list_filings(cik, forms, 1, min_filing_date=min_filing_date)
+    else:
+        sub = fetch_submissions(cik)
+        if "error" in sub:
+            return []
+        recent = sub.get("data", {}).get("filings", {}).get("recent", {})
+        total_rows = len(recent.get("form", []))
+        rows = list_filings(cik, forms, total_rows)
+
+    # `_append_submission_block` deliberately pads short columns with `None`
+    # (a real shape for this module, not a hypothetical), and `list_filings`
+    # keeps those rows rather than dropping them. A bare `r.get("filingDate")
+    # or ""` key would sort a `None`-dated row FIRST (empty string sorts
+    # before any real date), i.e. claim the OLDEST slot in this oldest-first
+    # contract for a row with no date at all. The tuple key below sorts by
+    # "dateless" first (dated rows before undated), so undated rows sort LAST.
+    #
+    # WHY THE DIRECTION IS SAFE, without appealing to a precedent that does not
+    # exist: an earlier version of this comment cited `_latest_filing` as the
+    # house idiom, and that citation was WRONG -- `_latest_filing` (:813-817)
+    # FILTERS undated rows out and takes a plain `max`, it carries no `or ""`.
+    # The repo's actual `or ""` idiom is `select_narrative_filings` (:876), and
+    # there it pairs with `max`, where a falsy key sorts LAST for free. This
+    # function sorts ASCENDING, which inverts that safety -- hence the explicit
+    # first tuple element. The direction is defensible on its own terms and
+    # needs no precedent: a row with no date cannot truthfully occupy the
+    # OLDEST slot of an oldest-first contract.
+    #
+    # The predicate is `not ...`, not `is None`: `_append_submission_block`
+    # pads short columns with None today, but an empty-string date would slip
+    # into the dated half under an `is None` test and reclaim the oldest slot --
+    # the exact outcome this key exists to prevent.
+    return sorted(
+        rows,
+        key=lambda r: (not r.get("filingDate"), r.get("filingDate") or ""),
+    )
+
+
 # ---------------------------------------------------------------------------
 # select_narrative_filings — quarter-anchored filing-selection policy (pure
 # function, no I/O) over already-fetched `list_filings` rows. Decides WHICH
@@ -1055,8 +1135,17 @@ def _ensure_edgar_identity(identity: str | None = None) -> dict | None:
 # Real Filing shape captured live 2026-07-12 (AAPL FY2024 10-K, accession
 # 0000320193-24-000123; anchored by test_data_markets_live.py
 # ::test_edgartools_acquire_real_10k_shape):
-#   accession_no:str  cik:int  form:str  filing_date:datetime.date(!)
+#   accession_no:str  cik:int  company:str  form:str  filing_date:datetime.date(!)
 #   period_of_report:str  filing_url:str (primary-doc URL)  homepage_url:str
+# (`company` added to this record 2026-07-31: the raw-filing cache payload reads
+# it — it is one of the five values `Filing.__init__` needs to rebuild the
+# object — so it is now load-bearing rather than merely present. Its anchoring
+# is WEAKER than the fields above it, and knowingly so: the live test asserts
+# the others explicitly, and reaches `company` only by EXECUTING the cache write
+# on a cold run, where a missing attribute would raise. The typed surface behind
+# it — `Filing.__init__(cik, company, form, filing_date, accession_no)` and
+# `to_dict()` — was probed offline against edgartools 5.42.0 on 2026-07-31 and is
+# recorded in test_raw_filing_cache.py's module docstring.)
 # edgartools has NO `primary_document` attr — the primary-doc filename is the
 # last path segment of filing_url, which is itself the reconstructable SEC
 # Archives URL `.../data/{cik}/{accession-no-dashes}/{document}`.
@@ -1118,6 +1207,94 @@ def _acquire_error(error_class: str, detail: str, *, identifier=None,
     return slot
 
 
+def _raw_filing_archives_url(cik: int, accession: str) -> str:
+    """The filing's SEC Archives DIRECTORY URL, reconstructed from cik +
+    accession with NO network call.
+
+    Deliberately NOT ``Filing.filing_url``: that property resolves the filing's
+    primary document over the wire, so building it here would add a network
+    round-trip to every cache MISS — on the one seam whose whole purpose is
+    removing network cost. The directory URL is coarser provenance (it names the
+    filing's folder, not its primary document) and that is the ratified trade,
+    not an oversight. See the plan's Decision Log #3.
+    """
+    return SEC_ARCHIVES_URL.format(
+        cik_int=cik, accession_nodash=_accession_nodash(accession), doc=""
+    )
+
+
+def _raw_filing_cache_payload(accession: str, filing) -> dict:
+    """The ratified on-disk cache payload for one acquired filing.
+
+    Shape (user-ratified 2026-07-31, plan Decision Log #3 — a one-way door;
+    widening it later invalidates every cached filing on every machine, at
+    20-37 minutes per filer to rebuild)::
+
+        {accession, fetched_at, sec_url,
+         filing: {accession_number, cik, company, form, filing_date}}
+
+    ``filing`` mirrors edgartools' OWN ``Filing.to_dict()`` field names — note
+    ``accession_number``, not this repo's usual ``accession`` — so a future
+    field change in the dependency surfaces as a mismatch against the library
+    rather than as our own silent drift. ``filing_date`` is ISO text here
+    because the payload is JSON; ``_filing_from_cache_payload`` restores it to a
+    ``datetime.date``.
+    """
+    return {
+        "accession": accession,
+        "fetched_at": _now_iso(),
+        "sec_url": _raw_filing_archives_url(filing.cik, accession),
+        "filing": {
+            "accession_number": filing.accession_no,
+            "cik": filing.cik,
+            "company": filing.company,
+            "form": filing.form,
+            "filing_date": _filing_date_iso(filing.filing_date),
+        },
+    }
+
+
+def _filing_from_cache_payload(edgar_module, payload: dict) -> object | None:
+    """Rebuild a real ``edgar.Filing`` from a cache payload, or None on a
+    malformed one (fail-open → the caller refetches and self-heals, matching
+    ``cache_util.load_cache``'s own doctrine for a corrupt entry).
+
+    ``Filing.__init__(cik, company, form, filing_date, accession_no)`` is the
+    whole identity — every other attribute (``period_of_report``,
+    ``filing_url``, ``homepage_url``, ``obj()``) is a lazily-derived property on
+    an index-acquired filing too, so a rebuilt filing diverges from a live one
+    on none of them. Verified against edgartools 5.42.0 on 2026-07-31.
+
+    **Deliberately NOT ``Filing.from_dict``**, which is otherwise the obvious
+    reader for a ``to_dict`` payload: its source coerces ``filing_date=str(...)``,
+    so a cache hit would carry ``filing_date`` as a ``str`` where a live
+    acquisition carries a ``datetime.date``. ``date.fromisoformat`` preserves
+    the type. That divergence is invisible to a hit-count or value assertion —
+    ``str(date)`` renders exactly ``"2025-04-30"`` — so it is pinned by an
+    explicit type assertion in test_raw_filing_cache.py.
+    """
+    stored = payload.get("filing")
+    # A REDUNDANT early-out, deliberately kept and deliberately labelled: every
+    # non-dict value `json.loads` can produce (null / bool / number / str /
+    # list) raises TypeError on `stored["cik"]` and lands in the same fail-open
+    # below, so no test can distinguish this line's presence — it states the
+    # precondition where a reader looks for it instead of leaving it implied by
+    # an incidental TypeError. The BEHAVIOUR is pinned either way, by
+    # `test_a_corrupt_cache_entry_refetches_and_self_heals`'s non-dict rows.
+    if not isinstance(stored, dict):
+        return None
+    try:
+        return edgar_module.Filing(
+            cik=int(stored["cik"]),
+            company=str(stored["company"]),
+            form=str(stored["form"]),
+            filing_date=date.fromisoformat(str(stored["filing_date"])),
+            accession_no=str(stored["accession_number"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _acquire_raw_filing(accession: str) -> object:
     """Acquire the RAW edgartools ``Filing`` object for an accession — the SHARED
     producer boundary the acquire→segment seam is built on.
@@ -1128,6 +1305,12 @@ def _acquire_raw_filing(accession: str) -> object:
     identity is unset, edgartools raised, or the accession did not resolve to a
     filing — never a silent ``None``.
 
+    An accession that is itself unusable answers with that same slot. ``None``
+    reaches this seam from real callers (``pack_us._fetch_xval_source_a``, for
+    a window holding no 10-K), and it is the CACHE KEY it breaks first, which
+    is why that key is computed inside the ``try`` below rather than ahead of
+    it.
+
     Both ``acquire_filing`` (which projects this to a JSON ``_filing_ref`` dict)
     and ``fetch_narrative_sections`` (which segments the raw filing + reads its
     disclosure metadata) go through here, so the two callers can NEVER diverge on
@@ -1135,6 +1318,41 @@ def _acquire_raw_filing(accession: str) -> object:
     crash on ``filing.obj()`` / ``filing.form`` (a ``dict`` has neither). Keeping
     the raw filing at this seam is what preserves the live ``--action narrative``
     contract against real edgartools.
+
+    Cache: a disk HIT rebuilds the Filing from its stored identity and NEVER
+    calls ``get_by_accession_number``. Filings are immutable, so existence is
+    validity — no TTL, no invalidation policy. This is load-bearing rather than
+    convenient: the resolution scans SEC's quarterly INDEX files, edgartools
+    caches those with a process-local ``@lru_cache(maxsize=8)``, and so a fresh
+    process re-pays the brief's measured 15.9-29.1 s PER FILING in full — 20-37
+    minutes for the ~77 filings of a full history, every run. Note what is
+    cached is the filing's IDENTITY, not a document: no filing document is
+    fetched at this seam at all.
+
+    The key family ``raw_filing_<accession-no-dashes>`` is distinct from
+    ``narrative_sections_`` / ``exhibit_raw_`` for the reason those two record
+    in their own docstrings — three incompatible payload shapes sharing the
+    immutable TTL, so a shared key would let a warm machine take a
+    schema-passing HIT of the WRONG shape that never self-heals.
+
+    The key NORMALISES the accession through ``_accession_nodash``: both
+    spellings circulate (that is why that helper exists, and ``--accession`` on
+    this client's CLI takes whatever a user types), and keyed on the raw string
+    they would be two entries for one filing — never a wrong answer, but a
+    second full index scan on the seam built to remove it, in a cache nothing
+    expires. The stored ``accession`` field keeps the spelling as REQUESTED,
+    which is inert provenance: what a hit returns is rebuilt from
+    ``filing.accession_number``, the canonical form edgartools itself resolved.
+
+    A failed acquisition is a loud ``{"error": ...}`` slot that is SURFACED,
+    never cached — a transient 429/403 is not poisoned into a permanent entry.
+
+    A failed CACHE READ is not an acquisition failure and is never reported as
+    one. An entry that cannot be read is warned about on stderr and falls
+    through to the network, which then overwrites it: the only escape from a
+    bad entry in a cache with no TTL is a refetch, and calling one a
+    resolution failure would both blame SEC for a local file and withhold the
+    refetch that repairs it.
     """
     identity_error = _ensure_edgar_identity()
     if identity_error is not None:
@@ -1142,7 +1360,73 @@ def _acquire_raw_filing(accession: str) -> object:
 
     import edgar
 
+    # The identity guard stays FIRST, and a test now holds it there:
+    # test_the_identity_guard_precedes_even_a_warm_cache_hit
+    # A hit sends nothing, which is exactly why the ordering was invisible to
+    # every other test — the SEC fair-access identity is a precondition of this
+    # SEAM, not merely of the send. `edgar` is needed to rebuild a cached Filing
+    # anyway (neither the import nor `set_identity` sends a request).
     try:
+        # THE CACHE KEY IS COMPUTED INSIDE THIS TRY, and that placement is the
+        # contract rather than an accident. `_accession_nodash` is not
+        # defensive, so an accession of `None` — which
+        # `pack_us._fetch_xval_source_a` really does produce, from
+        # `_latest_10k_accession` returning `None` for a window with no 10-K —
+        # raises here and leaves as the loud resolution slot below. Computed
+        # ahead of the try it escaped as an `AttributeError` instead, aborting
+        # a memo-fetch with a traceback where a wholesale failure was owed:
+        # a live regression, filed and fixed 2026-08-07. Every caller reads
+        # this seam with `isinstance(result, dict)`, and several docstrings
+        # still promise it; a raise is not a shape any of them handle.
+        #
+        # What this try covers is therefore the ACQUISITION — the key the
+        # accession is unusable for, and the network call. The cache read
+        # underneath has its own `except` for the reason given there, and it is
+        # the one place where a failure DOES change whether the network is
+        # reached: it falls through to it deliberately.
+        path = cache_util.cache_path(
+            "sec_edgar", f"raw_filing_{_accession_nodash(accession)}"
+        )
+
+        # THE CACHE READ GETS ITS OWN `except`, and that is the second half of
+        # the contract above. Under the outer one it answered a LOCAL fault with
+        # the REMOTE resolution slot — `load_cache` breaking its own "Never
+        # raises" docstring on an entry whose `data` is not a mapping (filed:
+        # docs/loom/backlog/2026-07-31-cache-util-load-cache-breaks-its-never-raises-contract.md)
+        # came back as "accession '...' did not resolve to a filing", pointing
+        # the reader at SEC for a broken file on their own disk. Worse, the
+        # network was never reached, so the refetch that OVERWRITES the bad
+        # entry never fired — and this cache has no TTL, so that filing stayed
+        # dead on that machine under a false attribution.
+        #
+        # Falling through to a refetch both reports honestly and repairs: it is
+        # `load_cache`'s own documented fail-open doctrine ("missing / corrupt /
+        # schema-mismatched / expired ⇒ None") enforced at the call site instead
+        # of trusted, and `save_cache` below then heals the entry. A cache is an
+        # optimization; an unreadable one costs the 15.9-29.1 s it was built to
+        # save, never a wrong answer. Pinned by
+        # test_a_cache_read_that_raises_refetches_instead_of_blaming_the_accession.
+        try:
+            cached = cache_util.load_cache(path, TTL_RAW_FILING)
+            filing = (
+                _filing_from_cache_payload(edgar, cached)
+                if cached is not None
+                else None
+            )
+        except Exception as cache_exc:  # noqa: BLE001 — a cache fault is never fatal
+            # Loud, not silent (`cache_util.save_cache`'s write-failure warning
+            # is the convention): a seam whose whole purpose is removing an
+            # index scan silently paying for one again is worth a line.
+            sys.stderr.write(
+                f"WARNING: unreadable cache file '{path}' "
+                f"({type(cache_exc).__name__}: {cache_exc}); refetching\n"
+            )
+            sys.stderr.flush()
+            filing = None
+        if filing is not None:
+            # A warm hit returns from INSIDE the try and still sends nothing.
+            return filing
+
         filing = edgar.get_by_accession_number(accession)
     except Exception as exc:  # noqa: BLE001 — fail loud, don't guess the shape
         return _acquire_error(
@@ -1156,6 +1440,7 @@ def _acquire_raw_filing(accession: str) -> object:
             f"accession {accession!r} did not resolve to a filing",
             identifier=accession,
         )
+    cache_util.save_cache(path, _raw_filing_cache_payload(accession, filing))
     return filing
 
 

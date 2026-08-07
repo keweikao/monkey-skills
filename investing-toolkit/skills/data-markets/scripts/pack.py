@@ -78,6 +78,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import sys
@@ -108,12 +109,24 @@ EXIT_PARTIAL = 2
 EXIT_FAILED = 1
 EXIT_USAGE_ERROR = 64
 
+# The one pack that takes a span cap. Named rather than inlined because two
+# separate guards below read it -- the US-only set, and the `--years` scope
+# check that keeps the flag from reaching a `build_pack` that has no such
+# parameter.
+QUARTERLY_SERIES_PACK = "quarterly-series"
+
 # Packs that exist for exactly one market. Refused loudly (exit 64) when the
 # resolved market differs — never routed to a market module whose generic
 # "unknown pack" ValueError would misname a market-availability problem as a
 # pack-name typo. `--market us` still overrides ticker detection entirely.
 US_ONLY_PACKS: frozenset[str] = frozenset(
-    {"kpi-quarterly", "kpi-topline-backfill", "statement-backfill", "reconstruct"}
+    {
+        "kpi-quarterly",
+        "kpi-topline-backfill",
+        "statement-backfill",
+        "reconstruct",
+        QUARTERLY_SERIES_PACK,
+    }
 )
 
 # Suffix -> market. Order matters only in that each pattern is disjoint.
@@ -453,6 +466,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="override market auto-detection",
     )
     parser.add_argument(
+        "--years",
+        type=int,
+        help=(
+            f"--pack {QUARTERLY_SERIES_PACK} only: cap the span to the most "
+            f"recent N years (default: ALL available history)"
+        ),
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="suppress progress stderr logging"
     )
     return parser
@@ -476,6 +497,23 @@ def main(argv: list[str] | None = None) -> int:
                 f"resolved to market '{market}', which has no source for "
                 f"this pack"
             )
+        # REFUSED, not ignored: no other market module's `build_pack` accepts
+        # a span cap, so a `--years` that looked accepted would be a lie on
+        # four of five markets. A non-positive cap is refused for a different
+        # reason -- it resolves to a cutoff at or after today, and the empty
+        # span that comes back would be reported as a failure attributed to
+        # the FILER rather than to the flag that caused it.
+        if args.years is not None:
+            if args.pack != QUARTERLY_SERIES_PACK:
+                raise _UsageError(
+                    f"--years applies only to --pack {QUARTERLY_SERIES_PACK}; "
+                    f"--pack {args.pack} has no span dimension"
+                )
+            if args.years < 1:
+                raise _UsageError(
+                    f"--years must be a positive number of years, got "
+                    f"{args.years}; omit it entirely for all available history"
+                )
     except _UsageError as exc:
         pack_name = args.pack if args is not None else None
         _emit(
@@ -491,8 +529,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.quiet:
         module._QUIET = True  # noqa: SLF001 — shared CLI passthrough convention
 
+    # Passed ONLY when given, so the four market modules whose `build_pack`
+    # takes no `years` are never called with an argument they do not have.
+    # The guard above has already established that a present `--years` means
+    # the US-only quarterly-series pack.
+    build_kwargs = {} if args.years is None else {"years": args.years}
+
     try:
-        result = module.build_pack(args.pack, tickers)
+        # STDOUT IS THE JSON CHANNEL, and `build_pack` is the one call in this
+        # function that runs code this repo does not own. Measured, not
+        # hypothetical: on a live `--pack quarterly-series` run, edgartools'
+        # `get_filings` emitted `print_warning(...)` through a rich console --
+        # which writes to STDOUT -- for two unresolvable 1994 accessions, and
+        # the document this facade emitted was no longer parseable JSON. No
+        # market module prints (they log to stderr through their own `_log`),
+        # so a fix inside any one of them would leave the next dependency free
+        # to do it again.
+        #
+        # REDIRECTED, NOT SUPPRESSED: the chatter lands on stderr beside the
+        # progress log, where a reader who wants to know which accession went
+        # missing can still see it.
+        #
+        # The redirect covers ONLY this call. Every `_emit` in this function
+        # sits strictly before or after it, so the payload's own JSON is never
+        # inside the redirect -- including the `_emit` calls in the handlers
+        # below, which run after the context manager has exited.
+        with contextlib.redirect_stdout(sys.stderr):
+            result = module.build_pack(args.pack, tickers, **build_kwargs)
     except ValueError as exc:
         _emit(
             {

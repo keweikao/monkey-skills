@@ -36,6 +36,11 @@ Pack types:
                      across the last 8 annual filings — US-only; recomputed
                      per run, never persisted (docs/loom/plans/
                      2026-07-26-as-filed-statement-reconstruction.md)
+  quarterly-series   single ticker, the three statements as a DISCRETE-QUARTER
+                     series over ALL available history (ten years is a floor,
+                     not a target), every period stating what it is; optional
+                     `--years N` upper bound — US-only (docs/loom/plans/
+                     2026-07-28-us-quarterly-statement-series.md)
 
 Environment:
   INVESTING_TOOLKIT_CACHE   passed through to underlying clients (yfinance / sec / fred)
@@ -48,6 +53,7 @@ import sys
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -1630,6 +1636,310 @@ def pack_reconstruct(ticker: str) -> dict:
     }
 
 
+def _acquire_filing_span(rows: list[dict]) -> tuple[list, list[dict]]:
+    """Acquire every filing in an accession span, reporting partial failure.
+
+    Takes the rows `sec_edgar_client.assemble_quarterly_filing_span` returns
+    (oldest first) and returns `(filings, failed_items)`: the raw edgartools
+    `Filing` objects for the accessions that acquired, and one loud entry per
+    accession that did not.
+
+    WHY THIS LOOP LIVES HERE. `kpi_us_quarterly_series.stitch_quarterly_statements`
+    takes ALREADY-ACQUIRED filing objects and deliberately does not acquire
+    them: turning accession rows into filings from an `analysis-*` module would
+    make it import `data-markets` directly, and this repo crosses that boundary
+    by subprocess (see `kpi_us_statements.py`'s own docstring prohibition and
+    `etf_aggregator.py`'s subprocess call sites). So the seam is bridged from
+    the `data-markets` side, which is this file.
+
+    WHAT IT RETURNS IS WHAT THE PRODUCER RETURNED. The filings are passed
+    through untouched -- not projected, not re-wrapped, not turned back into
+    accession rows. That is the input contract the stitching function is
+    written against, and it is the reason this function does not build a JSON
+    payload the way `pack_reconstruct`'s loop does: the caller needs the live
+    objects, and only the caller knows what to project.
+
+    A FAILED ACQUISITION IS A LOUD SKIP, never a silent one -- the convention
+    `pack_reconstruct`'s docstring states and its own loop implements, followed
+    here rather than restated in a second shape. A full span runs to well over
+    a hundred filings and costs tens of minutes cold -- the brief's §Boundary
+    estimate of ~77 filings measured LOW, a live uncapped MSFT span listed 131
+    -- so one unresolvable accession aborting the request would throw away
+    every filing that DID acquire; and dropping it quietly would return a short
+    span shaped exactly like a complete one, which is the failure this whole
+    arc exists to remove. The cost figure itself is stated in ONE place,
+    `../../analysis-kpi/references/cli-reference.md`, so it has one place to
+    drift from. The caller reconciles `len(rows)` against the two returned
+    lists.
+
+    A ROW CARRYING NO ACCESSION IS RECORDED HERE, neither attempted nor
+    filtered out. `list_filings` keeps rows whose columns were padded with
+    `None` (`_append_submission_block`).
+
+    THE GUARD BELOW IS NOT CRASH-PREVENTION, and saying so is load-bearing:
+    `_acquire_raw_filing` answers a `None` accession with its ordinary loud
+    resolution slot, pinned by
+    `test_an_accession_of_none_comes_back_as_a_loud_slot_not_a_traceback`. An
+    earlier version of this paragraph justified the guard by the
+    `AttributeError` that seam used to raise out of an unguarded
+    `_accession_nodash` -- reasoning about another module's PRIVATE internals,
+    which went stale the moment that detail moved, and which would have
+    invited a maintainer to delete the guard as obsolete once the crash was
+    gone. The guard earns its place on the observable contract instead: the
+    resolution slot reports `accession: None` and so cannot NAME the row,
+    while a row carrying no accession is identifiable only by form + filing
+    date. Filtering the row instead
+    (what `pack_reconstruct` does) is right THERE and silent HERE:
+    `pack_reconstruct` counts `requested` over its own already-filtered list,
+    while this function returns no count at all and leaves the caller to
+    reconcile `len(rows)` against the two returned lists. A dropped row makes
+    that reconciliation come up short with nothing recorded to explain it. So
+    the row gets its own `no_accession` slot, named by form + filing date
+    since there is no accession to name it by.
+
+    AN EMPTY `rows` RETURNS `([], [])`. Nothing was asked for, so nothing
+    failed, and no entry is fabricated to represent the emptiness -- an empty
+    quarterly span is a real answer for a foreign private issuer that files
+    20-F rather than 10-Q. What it MEANS is the caller's to decide.
+    """
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    # Lazy import, same as every other SEC pack in this module:
+    # `sec_edgar_client`'s top-level `import requests` must not become an
+    # import-time cost for packs that never reach SEC.
+    import sec_edgar_client
+
+    filings: list = []
+    failed_items: list[dict] = []
+    for row in rows:
+        accession = row.get("accessionNumber")
+        # `not accession`, not `is None` -- an empty string is as unacquirable
+        # as a missing one, and this is the predicate `list_filings` itself
+        # uses on these same padded columns.
+        if not accession:
+            _log("pack [acquire]", "row with no accession -- recorded, not sent")
+            failed_items.append({
+                "accession": accession,
+                **sec_edgar_client._acquire_error(
+                    "no_accession",
+                    f"a filing row carried no accessionNumber "
+                    f"(form={row.get('form')!r}, "
+                    f"filingDate={row.get('filingDate')!r}), "
+                    f"so there is nothing to acquire",
+                ),
+            })
+            continue
+        _log("pack [acquire]", f"{accession}")
+        filing = sec_edgar_client._acquire_raw_filing(accession)
+        if isinstance(filing, dict) and "error" in filing:
+            failed_items.append({"accession": accession, **filing})
+            continue
+        filings.append(filing)
+    return filings, failed_items
+
+
+def _project_series_money_to_text(value):
+    """Every `Decimal` anywhere in the quarterly-series payload as EXACT TEXT;
+    everything else returned untouched.
+
+    WHY EXPLICITLY, when the facade would serialise a `Decimal` anyway.
+    `pack.py`'s `_emit` is `json.dumps(obj, indent=2, default=str)`, so a
+    `Decimal` left in place comes out right TODAY -- and a binary `float` would
+    come out just as quietly, which is the mode this module family already
+    shipped once (`_decimal_text`, and
+    docs/loom/memory/construction-guaranteed-invariant-proves-nothing.md). The
+    projection is therefore made here and pinned by a BARE `json.dumps` in
+    `test_derived_money_is_exact_text_and_never_the_facade_fallback`, the same
+    posture `kpi_spine_view._project_money_to_text` takes at its own CLI
+    boundary.
+
+    ONLY `Decimal` IS CONVERTED, and that is the fail-loud choice rather than
+    the tidy one. The derived cells are OUR arithmetic and must be exact text;
+    the filed cells are the stitcher's own values (measured `float` on this
+    arc's committed capture) and this pack is pass-through for them. Blanket
+    `str()` over every cell would additionally stringify any value that is
+    neither -- an object, a date, a library wrapper -- and hide it from the
+    bare dump whose whole job is to catch it.
+
+    Rebuilds rather than mutating in place: the projection is `Task F`'s return
+    value and this function is not the only thing holding it during a test.
+    """
+    if isinstance(value, Decimal):
+        return _decimal_text(value)
+    if isinstance(value, dict):
+        return {key: _project_series_money_to_text(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_project_series_money_to_text(item) for item in value]
+    return value
+
+
+def _series_failure_envelope(ticker: str) -> dict:
+    """The pack envelope for a quarterly-series run that never reaches the
+    projection.
+
+    FAILURE PATHS ONLY, and the name says so because the success path must not
+    use it: `project_quarterly_series` builds its own `pack` / `ticker` /
+    `fetched_at` (plan Task F, envelope ratified in the Decision Log), so a
+    second copy computed alongside it would be dead on every successful run --
+    including a second `datetime.now()` whose value nothing ever reads. The two
+    refusals below need one because they answer BEFORE the projection exists,
+    and a refusal that does not say whose it is or when it was made is not
+    usable in a directory of pack outputs.
+    """
+    return {
+        "pack": "quarterly-series",
+        "ticker": ticker.upper(),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def pack_quarterly_series(ticker: str, years: int | None = None) -> dict:
+    """US-only QUARTERLY THREE-STATEMENT SERIES pack (plan Task H,
+    docs/loom/plans/2026-07-28-us-quarterly-statement-series.md): one company's
+    income statement, balance sheet and cash-flow statement as a
+    discrete-quarter series over ALL available history, every period stating
+    what it is.
+
+    `years=None` (the default) means all available history -- ten years is the
+    user's FLOOR, not the target (brief §Smallest End State). `years=N` caps
+    the span for a quick look, and a capped run is not a witness to the
+    all-history requirement.
+
+    ORCHESTRATION ONLY. Five committed pieces, in order, and nothing decided
+    here: `sec_edgar_client.assemble_quarterly_filing_span` (Task A) lists the
+    accessions, `_acquire_filing_span` (Task J, above) turns them into filing
+    objects through Task B's disk cache, `stitch_quarterly_statements` (Task D)
+    stitches them, `derive_discrete_quarters` (Task E) subtracts out the
+    quarters no filing states, and `project_quarterly_series` (Task F) answers
+    with every period labelled.
+
+    THE ANALYSIS-KPI CROSSING IS AN IMPORT, NOT A SUBPROCESS, and the reason is
+    the same one `pack_reconstruct` records above (see the layer note at
+    `_ANALYSIS_KPI_SCRIPTS`): the subprocess crossing this repo uses in the
+    OPPOSITE direction (`analysis-*` reaching `data-markets`, e.g.
+    `etf_aggregator.py`'s `subprocess.run` call sites) is not available here,
+    because `stitch_quarterly_statements` takes LIVE edgartools `Filing`
+    objects and those do not survive a JSON process boundary. That is also
+    exactly why Task D refuses to acquire its own filings and this file bridges
+    the seam instead. The layer note's standing caveat applies unchanged: what
+    keeps this acyclic is the sibling convention that the analysis-kpi modules
+    import no data-markets module at all.
+
+    THE STATUS TRIPLE IS BUILT HERE because `_acquire_filing_span` deliberately
+    returns none: it hands back `(filings, failed_items)` and leaves the caller
+    to reconcile them against `len(rows)`, since only the caller knows what a
+    short span MEANS for its own verb.
+
+    A ZERO-FILING SPAN IS A NAMED FAILURE, NOT AN `ok` RUN OVER AN EMPTY
+    SERIES. `pack_reconstruct`'s formula answers `requested == 0` with `"ok"`
+    -- correct THERE, where zero means the caller asked for nothing, and a
+    known defect the brief records (§Error). Here zero filings is a real answer
+    to a real request: a foreign private issuer files 20-F rather than
+    10-Q/10-K, and a well-formed empty series would tell its reader that
+    company published no quarterly statements. The same door covers the other
+    route to zero -- every accession failing to acquire -- and the counts in
+    the message are what tell the two apart.
+
+    THE ACQUISITION REPORT IS A NESTED SECTION, not top-level keys, and that
+    placement is load-bearing rather than stylistic. `pack.py`'s
+    `_list_section_status` reads an EMPTY top-level list as `"failed"` (right
+    for a ticker fan-out, wrong for a `failed_items: []` that MEANS success),
+    which is the measured defect `pack_reconstruct`'s docstring records from a
+    live KO run that reconstructed 4 of 4 filings and still reported partial.
+    A section carrying its own `_status` is what `_section_status` honours --
+    and it is the ONLY signal that survives, because `main()` overwrites the
+    payload's own top-level `_status` with its own block before emitting.
+
+    The envelope is otherwise Task F's, unwidened (plan Decision Log one-way
+    door #2): `pack` / `ticker` / `fetched_at` / `_status` / `n_filings_used` /
+    `statements`. `n_filings_used` counts the filings the series was BUILT
+    from, never the filings requested -- it is computed by
+    `stitch_quarterly_statements` from the list this verb actually handed it,
+    so a short answer cannot wear a complete answer's count.
+    """
+    _log("quarterly-series start", f"{ticker} years={years}")
+    t0 = time.monotonic()
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    _ensure_analysis_kpi_importable()
+    # Lazy imports: same pattern as every other SEC pack in this module --
+    # neither `sec_edgar_client`'s top-level `import requests` nor the
+    # cross-layer series module may become an import-time cost for packs that
+    # never reach SEC.
+    import sec_edgar_client
+    from kpi_us_quarterly_series import (
+        project_quarterly_series,
+        stitch_quarterly_statements,
+    )
+
+    resolved = sec_edgar_client.resolve_cik(ticker)
+    if "error" in resolved:
+        _log(
+            "quarterly-series done",
+            f"{ticker} FAILED in {time.monotonic() - t0:.1f}s",
+        )
+        # The resolver's own sentence, over an envelope that says whose refusal
+        # this is -- never replaced by this layer's guess at what went wrong.
+        return {**_series_failure_envelope(ticker), **resolved}
+
+    rows = sec_edgar_client.assemble_quarterly_filing_span(
+        resolved["cik"], years=years
+    )
+    filings, failed_items = _acquire_filing_span(rows)
+    requested = len(rows)
+    failed = len(failed_items)
+
+    if not filings:
+        envelope = _series_failure_envelope(ticker)
+        _log(
+            "quarterly-series done",
+            f"{ticker} NO FILINGS in {time.monotonic() - t0:.1f}s",
+        )
+        return {
+            **envelope,
+            "_status": "failed",
+            "error": (
+                f"no 10-Q/10-K filing could be turned into a quarterly series "
+                f"for {envelope['ticker']}: {requested} filing(s) listed, "
+                f"{failed} failed to acquire, 0 acquired. A zero-filing span "
+                f"is a real answer to a real request -- a foreign private "
+                f"issuer files 20-F, not 10-Q/10-K -- so it is reported as a "
+                f"failure rather than as a well-formed empty series."
+            ),
+            "error_class": "empty_span",
+            "acquisition": {
+                "failed_items": failed_items,
+                "requested": requested,
+                "succeeded": 0,
+                "failed": failed,
+                "_status": "failed",
+            },
+        }
+
+    payload = project_quarterly_series(stitch_quarterly_statements(filings), ticker)
+
+    # Fold the acquisition's own degradation into the projection's verdict,
+    # mirroring `pack_reconstruct`'s fold: it may DEMOTE an `ok` projection
+    # over a short span, never promote a projection that already failed on its
+    # own terms -- a run with no statements is worse news than a short one.
+    if failed and payload["_status"] != "failed":
+        payload["_status"] = "partial"
+    payload["acquisition"] = {
+        "failed_items": failed_items,
+        "requested": requested,
+        "succeeded": len(filings),
+        "failed": failed,
+        "_status": "partial" if failed else "ok",
+    }
+
+    _log(
+        "quarterly-series done",
+        f"{ticker} {len(filings)}/{requested} filings in "
+        f"{time.monotonic() - t0:.1f}s",
+    )
+    return _project_series_money_to_text(payload)
+
+
 def pack_comps_multiples(tickers: list[str]) -> dict:
     """Multiples-only fields. Single or batch."""
     _log("comps-multiples start", f"{len(tickers)} ticker(s)")
@@ -1791,10 +2101,11 @@ SUPPORTED_PACKS: tuple[str, ...] = (
     "kpi-topline-backfill",
     "statement-backfill",
     "reconstruct",
+    "quarterly-series",
 )
 
 
-def build_pack(pack_name: str, tickers: list[str]) -> dict:
+def build_pack(pack_name: str, tickers: list[str], years: int | None = None) -> dict:
     """Build a US data pack. Mirrors data-us/scripts/pack.py's CLI dispatch
     (pack-type -> ticker-count validation, section assembly) minus
     argparse/sys.exit handling — the unified pack.py facade (T4) owns
@@ -1803,6 +2114,12 @@ def build_pack(pack_name: str, tickers: list[str]) -> dict:
     Raises ValueError on an unsupported pack name or a ticker-count/pack-type
     mismatch (parity with the original CLI's `return 2` validation paths,
     without sys.exit).
+
+    `years` is the OPTIONAL span cap `quarterly-series` takes and no other pack
+    has; the facade refuses `--years` for any other pack rather than passing it
+    here to be ignored, so this parameter reaching a pack that cannot use it is
+    a facade bug, not a silent no-op. The four sibling market modules' own
+    `build_pack` signatures are unchanged and are never called with it.
     """
     if pack_name not in SUPPORTED_PACKS:
         raise ValueError(f"unknown pack '{pack_name}'")
@@ -1849,5 +2166,11 @@ def build_pack(pack_name: str, tickers: list[str]) -> dict:
                 "pack reconstruct requires exactly one ticker (single, heavy)"
             )
         return pack_reconstruct(ticker_list[0])
+    if pack_name == "quarterly-series":
+        if len(ticker_list) != 1:
+            raise ValueError(
+                "pack quarterly-series requires exactly one ticker (single, heavy)"
+            )
+        return pack_quarterly_series(ticker_list[0], years=years)
     # regime-pack: no ticker dimension
     return pack_regime()
