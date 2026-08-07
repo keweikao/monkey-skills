@@ -267,6 +267,22 @@ This skill is intentionally light on novel logic. Its value is orchestration; th
      note the index must be regenerated on a machine that has the
      script. No hit, or no store → skip silently (auditable from the
      diff, like the memory-store bullet).
+   - Files-touched check (orchestrator-only, ONCE per branch, same
+     shape as its Step 8 siblings — a per-implementer/per-wave run
+     would race the same comparator): joins THIS branch's own plan
+     against its real commit diffs, catching a task whose declared
+     `Files touched` under-states what it actually touched. Trigger,
+     auditable from the diff: the branch has a plan file at
+     `docs/loom/plans/<date>-<topic>.md` — absent → skip silently,
+     same posture as the memory-store bullet. The checker ships at the
+     repo root in no plugin — absent → say `files-touched check: N/A —
+     checker not present in this repo` loudly and move on. Otherwise
+     run `python3 <repo-root>/scripts/check_files_touched.py <the
+     branch's plan path>` from the repo root, before the close-out
+     commit. Per its EXIT_CONTRACT: exit 0 — proceed silently; exit 1
+     — STOP, a task under/over-declared or an unresolved sha (name
+     it); exit 2 — surface loudly, not STOP: the plan has no ledger
+     (0 tasks or join keys), never a silent pass.
    - Attached-HEAD check: run `git symbolic-ref -q HEAD` in the main
      working tree — it must print the branch being finished. Detached
      HEAD or a different branch means something (typically a subagent)
