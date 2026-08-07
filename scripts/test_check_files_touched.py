@@ -126,6 +126,46 @@ def test_malformed_files_touched_line_lands_in_parse_errors():
     assert "Files touched" in result.parse_errors[0]
 
 
+def test_annotated_status_done_tail_yields_sha():
+    """Real ledger shape (docs/loom/plans/2026-07-25-company-total-revenue.md:254):
+    `done(<sha>)` followed by a whitespace + `#`-comment tail must still
+    yield the join key. The `$`-anchored regex previously fell through to
+    `_STATUS_SHALESS`, failed that too, and produced a parse_error — mis-
+    reporting the whole plan as exit 2 (loud-empty) on the repo's normal
+    annotated-ledger shape (gap 3b)."""
+    result = parse_plan_text(_single_task(
+        "- **Files touched**: src/a.py",
+        status_line=("- Status: done(c301c7be)  # spec-reviewer PASS; "
+                      "code-quality-reviewer PASS_WITH_NOTES")))
+
+    assert result.tasks["1"].sha == "c301c7be"
+    assert result.parse_errors == []
+
+
+def test_annotated_status_relaxation_preserves_boundary():
+    """No-over-broadening boundary, pinned alongside the relaxation above:
+    a bare `done(<sha>)` with no tail still yields its sha; a genuinely
+    sha-less `pending` Status still carries no sha and no parse error; and
+    a foreign-vocabulary token still produces a parse_error. The annotation
+    relaxation must not swallow arbitrary text as 'done'."""
+    bare = parse_plan_text(_single_task(
+        "- **Files touched**: src/a.py",
+        status_line="- **Status**: done(abc1234)"))
+    assert bare.tasks["1"].sha == "abc1234"
+    assert bare.parse_errors == []
+
+    pending = parse_plan_text(_single_task(
+        "- **Files touched**: src/a.py", status_line="- Status: pending"))
+    assert pending.tasks["1"].sha is None
+    assert pending.parse_errors == []
+
+    foreign = parse_plan_text(_single_task(
+        "- **Files touched**: src/a.py", status_line="- Status: shipped!"))
+    assert foreign.tasks["1"].sha is None
+    assert len(foreign.parse_errors) == 1
+    assert "Status" in foreign.parse_errors[0]
+
+
 def test_malformed_status_value_lands_in_parse_errors():
     """A Status value outside the four-word ledger vocabulary is a parse
     error (sha stays None) — not a silent None."""

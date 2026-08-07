@@ -112,7 +112,16 @@ _STATUS_LINE = re.compile(
 
 # Progress-ledger vocabulary (plan-format.md:106): only `done(<sha>)`
 # carries a join key; the other three are valid and sha-less.
-_STATUS_DONE = re.compile(r"^done\(([0-9a-fA-F]{7,40})\)$")
+#
+# The optional `(?:\s+.*)?` tail (Task 2, wiring gap 3b) admits a real
+# annotated ledger line — docs/loom/plans/2026-07-25-company-total-
+# revenue.md:254's `done(c301c7be)  # spec-reviewer PASS; ...` — without
+# over-broadening: a tail is only absorbed when it is separated from the
+# closing `)` by whitespace, so it stays general (not hard-required to
+# start with `#`) while a genuinely sha-less Status (`pending`, `blocked`)
+# or a foreign-vocabulary token still falls through to `_STATUS_SHALESS`
+# and its parse_error, unchanged.
+_STATUS_DONE = re.compile(r"^done\(([0-9a-fA-F]{7,40})\)(?:\s+.*)?$")
 _STATUS_SHALESS = re.compile(r"^(?:pending|claimed\(@[^)]+\)|blocked)$")
 
 _NEW_TOKEN_PREFIX = re.compile(r"^NEW\s*:\s*")
