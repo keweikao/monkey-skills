@@ -12,12 +12,22 @@ naming the missing field) — never a bare "exit != 0", which a missing
 script file also satisfies (exit 2, empty stdout).
 """
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PLAN_CARD_SCRIPT = REPO_ROOT / "scripts" / "plan_card.py"
+
+# Direct import (not subprocess) so the fix-round ordering test below can
+# monkeypatch build_card — a subprocess call cannot be monkeypatched.
+_SPEC = importlib.util.spec_from_file_location("plan_card", PLAN_CARD_SCRIPT)
+plan_card = importlib.util.module_from_spec(_SPEC)
+sys.modules["plan_card"] = plan_card
+_SPEC.loader.exec_module(plan_card)
 
 
 def _plan_text(
@@ -727,6 +737,12 @@ def test_set_status_rewrites_in_place(tmp_path):
     assert result.stdout == (
         "old: - Status: pending\n"
         "new: - Status: done(abc1234)\n"
+        "\n"
+        "goal: Ship the widget pipeline end-to-end.\n"
+        "tasks: 1 done / 0 claimed / 0 pending / 0 blocked\n"
+        "[v] T1 parser\n"
+        "stage: sdd:wave-1\n"
+        "next: close-out\n"
     )
     assert plan_path.read_text(encoding="utf-8") == text.replace(
         "- Status: pending", "- Status: done(abc1234)"
@@ -758,6 +774,12 @@ def test_set_status_preserves_bold_field_markup(tmp_path):
     assert result.stdout == (
         "old: - **Status**: pending\n"
         "new: - **Status**: done(abc1234)\n"
+        "\n"
+        "goal: Ship the widget pipeline end-to-end.\n"
+        "tasks: 1 done / 0 claimed / 0 pending / 0 blocked\n"
+        "[v] T1 parser\n"
+        "stage: sdd:wave-1\n"
+        "next: close-out\n"
     )
     assert plan_path.read_text(encoding="utf-8") == text.replace(
         "- **Status**: pending", "- **Status**: done(abc1234)"
@@ -777,6 +799,12 @@ def test_set_status_pending_kind(tmp_path):
     assert result.stdout == (
         "old: - Status: done(abc1234)\n"
         "new: - Status: pending\n"
+        "\n"
+        "goal: Ship the widget pipeline end-to-end.\n"
+        "tasks: 0 done / 0 claimed / 1 pending / 0 blocked\n"
+        "[ ] T1 parser\n"
+        "stage: sdd:wave-1\n"
+        "next: T1 parser\n"
     )
     assert "- Status: pending" in plan_path.read_text(encoding="utf-8")
 
@@ -793,6 +821,12 @@ def test_set_status_claimed_kind(tmp_path):
     assert result.stdout == (
         "old: - Status: pending\n"
         "new: - Status: claimed(@implementer)\n"
+        "\n"
+        "goal: Ship the widget pipeline end-to-end.\n"
+        "tasks: 0 done / 1 claimed / 0 pending / 0 blocked\n"
+        "[~] T1 parser\n"
+        "stage: sdd:wave-1\n"
+        "next: T1 parser\n"
     )
     assert "- Status: claimed(@implementer)" in plan_path.read_text(
         encoding="utf-8"
@@ -812,8 +846,35 @@ def test_set_status_blocked_kind(tmp_path):
     assert result.stdout == (
         "old: - Status: claimed(@implementer)\n"
         "new: - Status: blocked\n"
+        "\n"
+        "goal: Ship the widget pipeline end-to-end.\n"
+        "tasks: 0 done / 0 claimed / 0 pending / 1 blocked\n"
+        "[!] T1 parser\n"
+        "stage: sdd:wave-1\n"
+        "next: T1 parser\n"
     )
     assert "- Status: blocked" in plan_path.read_text(encoding="utf-8")
+
+
+def test_set_status_stdout_includes_card_body_after_new_line(tmp_path):
+    """The rendered card follows old:/new: and a blank line — goal line,
+    a task row, and stage line must all be present, proving build_card's
+    own output (not a drifted second renderer) rides the flip."""
+    plan_path = _write_plan(
+        tmp_path, _plan_text(tasks=[("parser", "pending")])
+    )
+
+    result = _run_card(plan_path, "--set-status", "T1=done(abc1234)")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    stdout = result.stdout
+    marker = "new: - Status: done(abc1234)\n"
+    assert marker in stdout
+    after_new = stdout.split(marker, 1)[1]
+    assert after_new.startswith("\n"), "blank line must separate new: from the card"
+    assert "goal: Ship the widget pipeline end-to-end." in after_new
+    assert "[v] T1 parser" in after_new
+    assert "stage: sdd:wave-1" in after_new
 
 
 def test_set_status_task_not_found_exits_1_naming_it(tmp_path):
@@ -1030,3 +1091,212 @@ def test_set_status_and_detail_are_mutually_exclusive(tmp_path):
     assert "--set-status" in result.stderr
     assert "--detail" in result.stderr
     assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+# --- ledger writer: --set-stage ----------------------------------------------
+# Task 1 of docs/loom/plans/2026-08-08-progress-display-hardening.md.
+# Free-text value (stage vocabulary evolves) — no enum validation.
+
+
+def test_set_stage_happy_path_rewrites_and_prints_card(tmp_path):
+    """`--set-stage "<text>"` replaces the Stage: header's value, prints
+    old:/new: (the Stage header line before/after), then a blank line and
+    the full card."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "sdd:wave-2")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "old: Stage: sdd:wave-1\n"
+        "new: Stage: sdd:wave-2\n"
+        "\n"
+        "goal: Ship the widget pipeline end-to-end.\n"
+        "tasks: 0 done / 0 claimed / 1 pending / 0 blocked\n"
+        "[ ] T1 parser\n"
+        "stage: sdd:wave-2\n"
+        "next: T1 parser\n"
+    )
+    assert plan_path.read_text(encoding="utf-8") == text.replace(
+        "Stage: sdd:wave-1", "Stage: sdd:wave-2"
+    )
+
+
+def test_set_stage_replaces_wrapped_continuation_lines(tmp_path):
+    """(Finding 2, fix round) A wrapped `Stage:` value — an indented
+    continuation line, N1's folded shape — must have its ENTIRE span
+    replaced: the `Stage:` line plus every continuation line. Replacing
+    only the `Stage:` line leaves a stale orphan continuation, which
+    `_header_value` would fold back into a stale-merged value on the
+    next render even though `new:` echoes the correct one."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    wrapped = text.replace(
+        "Stage: sdd:wave-1\n", "Stage: sdd:wave-1\n  continued detail\n"
+    )
+    plan_path = _write_plan(tmp_path, wrapped)
+
+    result = _run_card(plan_path, "--set-stage", "sdd:wave-2")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = plan_path.read_text(encoding="utf-8")
+    stage_lines = [line for line in after.splitlines() if line.startswith("Stage:")]
+    assert stage_lines == ["Stage: sdd:wave-2"], stage_lines
+    assert "continued detail" not in after
+    assert "stage: sdd:wave-2\n" in result.stdout, result.stdout
+
+
+def test_set_stage_and_detail_are_mutually_exclusive(tmp_path):
+    """(Finding 3 reviewer note, fix round) Passing both --set-stage and
+    --detail → usage error (exit 2) whose message names both flags; the
+    file is not modified."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "sdd:wave-2", "--detail", "T1")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "--set-stage" in result.stderr
+    assert "--detail" in result.stderr
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_stage_and_set_status_are_mutually_exclusive(tmp_path):
+    """(Finding 3 reviewer note, fix round) Passing both --set-stage and
+    --set-status → usage error (exit 2) whose message names both flags;
+    the file is not modified."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(
+        plan_path, "--set-stage", "sdd:wave-2", "--set-status", "T1=blocked"
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "--set-stage" in result.stderr
+    assert "--set-status" in result.stderr
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_stage_missing_header_exits_1(tmp_path):
+    """A plan with no `Stage:` header line → exit 1 loud naming the
+    missing field; the file is not modified."""
+    text = _plan_text(stage=None, tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "sdd:wave-2")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert "Stage" in result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_stage_empty_value_exits_1(tmp_path):
+    """A whitespace-only value → exit 1 loud; the file is not modified."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "   ")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_stage_newline_value_exits_1(tmp_path):
+    """A value containing a newline must not be accepted — it would
+    inject a second physical line into the header block, silently
+    corrupting the plan's structure. Exit 1 loud; file untouched."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "review:round-1\nGoal: hacked")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_stage_carriage_return_value_exits_1(tmp_path):
+    """A value containing a bare `\\r` must not be accepted either — the
+    `"\\n" in new_value` guard misses it, but plan_card's own readers
+    fold text via splitlines(), which treats `\\r` as a line boundary
+    too — so the injected text would re-materialize as a second header
+    line on the next read. Exit 1 loud; file untouched."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "review:round-1\rGoal: hacked")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.startswith("plan_card: FAIL —"), result.stdout
+    assert result.stdout.count("\n") == 1, "message must be one line"
+    assert plan_path.read_text(encoding="utf-8") == text, "file must be untouched"
+
+
+def test_set_status_degrades_to_card_unavailable_when_goal_missing(tmp_path):
+    """The flip runs and succeeds even when the resulting plan cannot
+    render a card (no Goal: header) — the render runs AFTER the write,
+    and a raise there degrades to one line rather than reporting the
+    successful flip as a failure."""
+    text = _plan_text(goal=None, tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-status", "T1=done(abc1234)")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "old: - Status: pending\n" in result.stdout
+    assert "new: - Status: done(abc1234)\n" in result.stdout
+    assert "plan_card: card unavailable —" in result.stdout
+    assert "- Status: done(abc1234)" in plan_path.read_text(encoding="utf-8")
+
+
+def test_set_status_write_lands_before_render_on_non_valueerror(tmp_path, monkeypatch):
+    """(Finding 3, fix round) The "render runs AFTER the write" claim
+    above is unfalsifiable on the ValueError-only path (a write-after-
+    render implementation is indistinguishable there — both orders
+    degrade to the same one-line message). This test distinguishes the
+    two orderings directly: monkeypatch build_card to raise a
+    NON-ValueError, call main() in-process (subprocess can't be
+    monkeypatched), and require BOTH that the flip already landed on
+    disk AND that the exception propagates uncaught (only ValueError is
+    a controlled degrade — _print_card_or_degrade doesn't catch this).
+    A write-after-render implementation would fail the file assertion:
+    build_card raises before the write ever runs."""
+    text = _plan_text(tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    def _boom(_text):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(plan_card, "build_card", _boom)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["plan_card.py", str(plan_path), "--set-status", "T1=done(abc1234)"],
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        plan_card.main()
+
+    assert "- Status: done(abc1234)" in plan_path.read_text(encoding="utf-8")
+
+
+def test_set_stage_degrades_to_card_unavailable_when_goal_missing(tmp_path):
+    """Same degradation guarantee on the --set-stage path: a valid flip
+    is never reported as a failure just because the resulting plan can't
+    render."""
+    text = _plan_text(goal=None, tasks=[("parser", "pending")])
+    plan_path = _write_plan(tmp_path, text)
+
+    result = _run_card(plan_path, "--set-stage", "sdd:wave-2")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "old: Stage: sdd:wave-1\n" in result.stdout
+    assert "new: Stage: sdd:wave-2\n" in result.stdout
+    assert "plan_card: card unavailable —" in result.stdout
+    assert "Stage: sdd:wave-2" in plan_path.read_text(encoding="utf-8")
