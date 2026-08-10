@@ -29,3 +29,7 @@ agreement of the per-task + whole-branch reviewers.
   fetches one 10-K (~3 comparative years). The full ~16-year live history needs fetching + stitching
   multiple filings across eras (the offline era-stitching + declared-break machinery already handles
   the cross-era join; only the multi-filing FETCH is missing). Unlocks the deep live trend.
+- 2026-08-10 audit: the closing multi-filing-historical-fetch bullet was delivered
+  next day by PR #573 (2.21.0, merged 2026-07-16) — `sec_edgar_client.py`
+  gained range-bounded consecutive multi-filing fetch. The four preceding
+  bullets remain live.

@@ -1,6 +1,6 @@
 # Monkey Skills
 
-Personal agent skills organized into two plugins: domain teams and Obsidian workflows.
+Personal agent skills organized into multiple plugins — domain teams, Obsidian workflows, the loom family, investing/research toolkits, and more.
 
 ## Architecture: Checkpoint-Based Quality Gates + Open Domain Knowledge
 
@@ -151,6 +151,22 @@ Role boundaries enforced by behavior, not reading restrictions:
   schedule doc). Pure stdlib plus pytest, so no dedicated venv is required;
   this directory IS already covered by CI, since `loom-code-ci.yml` runs
   `pytest … scripts/ …` over the whole tree.
+- **Print/update a plan-ledger progress card**:
+  `python3 scripts/plan_card.py <plan-path> [--set-status "T<N>=<status>"] [--set-stage "<text>"]`
+  — reads (or flips, with a `--set-*` flag) a plan's ledger fields and
+  prints the progress card. Resolution is two-tier: the repo-root
+  `scripts/plan_card.py` when it exists, otherwise the loom-code
+  plugin-shipped copy
+  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_card.py" …` — where
+  `${CLAUDE_PLUGIN_ROOT}` is a load-time substitution performed when
+  skill text is rendered, not a run-time shell variable.
+- **Validate/regenerate the backlog index and DIRECTION `## Now`**:
+  `python3 scripts/backlog_index.py {--ready | --validate | --write | --check | --direction-write <path> | --direction-check <path>}`
+  — the backlog store's generator/validator (charter:
+  `docs/loom/backlog/README.md`). Same two-tier resolution: repo-root
+  `scripts/backlog_index.py` first, else the loom-code plugin-shipped
+  copy via `"${CLAUDE_PLUGIN_ROOT}/scripts/backlog_index.py"`
+  (load-time substitution, as above).
 <!-- END command-surface (managed) -->
 
 ## Plugin: domain-teams
@@ -193,10 +209,14 @@ Role boundaries enforced by behavior, not reading restrictions:
 |-------|------|-------|
 | `obsidian-vault-organizer` | Vault maintenance (standalone) | haiku |
 
-## Plugin: philosophers-toolkit (v0.1.0 — roadmap only)
+## Plugin: philosophers-toolkit (v1.0.4 — 12 skills)
 
-Philosophical thinking frameworks for problem clarification and deeper reasoning.
-See `philosophers-toolkit/ROADMAP.md` for planned skills.
+Philosophical thinking frameworks for problem clarification and deeper
+reasoning — 12 shipped skills (11 frameworks + 1 router).
+`philosophers-toolkit/ROADMAP.md` is a historical design record that
+holds the original planned-frameworks list; future planned work, when
+it exists, lives in repo-root `docs/loom/DIRECTION.md` and
+`docs/loom/backlog/` entries.
 
 ## Installation
 

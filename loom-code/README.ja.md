@@ -2,7 +2,7 @@
 
 > **Process-discipline + canon-grounded コーディングワークフロー for Claude Code (+ Codex CLI)。** 13-skill プラグイン。SessionStart で router charter を自動注入し、エージェントが合理化をやめて defer し始めるよう仕向ける — 各ルールは一次情報源に grounded（Beck on TDD / Martin on naming / Fowler on refactoring / Feathers on legacy code / OWASP ASVS on security / 徳丸本 on encoding security）。
 
-**状態**：v0.66.0 — 13 skills；v0.3.0 以来フル Superpowers parity。バージョンごとの詳細（rule-sheet 注入、reviewer-discipline、parallel dispatch、spec→code seam、memory verify gate など）は [CHANGELOG.md](CHANGELOG.md) を参照。
+**状態**：v0.71.0 — 13 skills；v0.3.0 以来フル Superpowers parity。バージョンごとの詳細（rule-sheet 注入、reviewer-discipline、parallel dispatch、spec→code seam、memory verify gate など）は [CHANGELOG.md](CHANGELOG.md) を参照。
 **言語**：[English](README.md) | **日本語** | [繁體中文](README.zh-TW.md)
 **Repository**：[`monkey-skills`](https://github.com/kouko/monkey-skills) の一部
 
@@ -73,6 +73,7 @@ claude plugin install loom-code@monkey-skills --scope local
 | 4 | [`tdd-iron-law`](skills/tdd-iron-law/) | Discipline | "FAILING TEST なしに production code を書くな"（Beck 2002 Preface, ISBN 978-0321146533）；§Feathers (2004) 正当な legacy code backfill 区別 |
 | 5 | [`systematic-debugging`](skills/systematic-debugging/) | Repair | 4 フェーズ REPRODUCE → ISOLATE → HYPOTHESIZE → VERIFY；HARD-GATE "再現せず fix するな" |
 | 6 | [`requesting-code-review`](skills/requesting-code-review/) | Review | 全ブランチレビュー 11 次元スコア（cross-task-coherence はブランチ限定次元）；v0.7.0+ verdict に `standards_version` スタンプ、findings は `where:` file:line 必須；push-as-trigger |
+| 6b | [`requesting-docs-review`](skills/requesting-docs-review/) | Review（docs 側） | 変更された全 `.md` を丸ごとレビュー — 散文 5 次元、instruction/evidence ブロッキング区分、収束キャップ付き（0.42.0+） |
 | 7 | [`verification-before-completion`](skills/verification-before-completion/) | Verification | "PACKAGE-LEVEL TEST 実行なしに DONE するな"；20+ stack の canonical コマンドを網羅 |
 | 7b | [`ui-verification`](skills/ui-verification/) | Verification（条件付き） | `ui-flows.md` が列挙する状態をホストの browser/device 自動化で実機走査；条件・ツール不在時は N/A を明示；token 適合チェックは対象外（park 済み） |
 | 8 | [`finishing-a-development-branch`](skills/finishing-a-development-branch/) | Branch close | 7 ステップ orchestrator（review → verify → git-memory 必須 → commit → push → 任意 PR + worktree cleanup） |
@@ -178,7 +179,7 @@ SessionStart hook は portable な JSON shape を発出し、Claude Code の `ho
 
 - [PRODUCT-SPEC.md](PRODUCT-SPEC.md) — 設計意図、ターゲットユーザ、Q-lock 決定
 - [TECH-SPEC.md](TECH-SPEC.md) — アーキテクチャ、SSOT メカニズム、hook contract
-- [ROADMAP.md](ROADMAP.md) — phase 計画、決定台帳、Phase 1.5 rolling backlog
+- [ROADMAP.md](ROADMAP.md) — phase 計画、決定台帳、Phase 1.5 rolling backlog（過去の設計記録 — 今後の方向はリポジトリルートの `docs/loom/DIRECTION.md`）
 - [CHANGELOG.md](CHANGELOG.md) — Journey overview + バージョンごと詳細
 - [docs/examples/](docs/examples/) — 3 つの end-to-end 完全例（Python / TypeScript / Swift）
 - [docs/announcement/v1.0.0-announcement.md](docs/announcement/v1.0.0-announcement.md) — 公開 announcement ドラフト（v1.0.0 で公開）
