@@ -35,10 +35,11 @@ spec's lint (`npx @google/design.md`) where available.
 ## Scope — visual system only, NOT flows
 
 `DESIGN.md` documents the product's **visual system** only — brand, color,
-type, spacing, elevation, shape, and component tokens. It does **NOT** address
-user **flows**, screen/command inventory, navigation, or interaction — those
-live in **`ui-flows.md`**, produced by the **`interaction-flows`** skill. Do
-not put flows, screen inventories, or render-variant tables in `DESIGN.md`.
+type, spacing, elevation, shape, and component-token defaults. It does
+**NOT** address user **flows**, screen/command inventory, navigation, or
+interaction — those live in **`ui-flows.md`**, produced by the
+**`interaction-flows`** skill. Do not put flows, screen inventories, or
+render-variant tables in `DESIGN.md`.
 
 The emitted **`DESIGN.md` tokens are a side-channel** straight to
 loom-code's frontend implementation (styling / lint) — the design system
@@ -111,18 +112,22 @@ Emit a **`DESIGN.md`** following the schema contract from Step 1:
 1. Confirm the exact YAML token keys against the authoritative Google
    `DESIGN.md` spec at generation time.
 2. **Run the surface-treatment candidate round** (below) — the pick is the
-   generative choice the concept and the depth/shape tokens hang off.
+   generative choice the concept, the shape tokens, and Elevation & Depth's
+   prose hang off.
 3. **Commit the visual concept** in **Overview / Brand** — one specific
    art-direction idea plus the **3-5 generative visual principles** it leans on
    (per the schema's *Derivation contract*), with the chosen surface treatment
    named in its prose. This is the conceptual ground for
    everything below; a generic identity here is what makes output look
    "AI-generated."
-4. Emit **all 8 `##` sections in order**, each with a short prose rationale
-   plus its YAML token block (Overview / Brand → Colors → Typography → Layout →
-   Elevation & Depth → Shapes → Components → Do's & Don'ts), then **derive every
-   token from that committed concept + the `PRINCIPLES.md` constraints** — each
-   token defensible against the concept, never an arbitrary default.
+4. Emit **all 8 `##` sections in order** (Overview / Brand → Colors →
+   Typography → Layout → Elevation & Depth → Shapes → Components → Do's &
+   Don'ts), each with a short prose rationale. Only five of the eight carry a
+   YAML token block — **colors**, **typography**, **spacing** (Layout),
+   **rounded** (Shapes), **components**; Overview / Brand, Elevation & Depth
+   and Do's & Don'ts stay prose-only. Then **derive every token from that
+   committed concept + the `PRINCIPLES.md` constraints** — each token
+   defensible against the concept, never an arbitrary default.
 5. **Verify WCAG-AA contrast** for every foreground/background pairing (body
    text ≥ 4.5:1, large text ≥ 3:1). Treat an AA failure as a **blocker**.
 6. Run the spec lint `npx @google/design.md` where available and resolve
@@ -130,9 +135,10 @@ Emit a **`DESIGN.md`** following the schema contract from Step 1:
 
 **Surface treatment — the candidate round (step 2 above, in full).** The
 surface-treatment axis (skeuomorphic / flat / material-elevation / neumorphic /
-glassmorphic / neubrutalist …) is a **choice over the very tokens the schema
-already ships** — `surface`, `shadows`, radii and borders. This station owns
-that choice; it is never an unnamed default.
+glassmorphic / neubrutalist …) is a **choice over how depth is conveyed and
+how corners/borders are shaped** — the `rounded` and border tokens in Shapes,
+plus Elevation & Depth's prose description. This station owns that choice; it
+is never an unnamed default.
 
 - **This round is downstream of the tone & manner anchor** (Step 2): the
   inherited **3-5 tone & manner adjectives** are the governing mood and they
@@ -154,10 +160,12 @@ that choice; it is never an unnamed default.
   `Surface treatment: X — because <the tone & manner adjectives> +
   <constraint>`. It rides inside that existing section — **do not add a 9th
   `##` section**; the 8-section contract is frozen.
-- **The pick then constrains the `## Elevation & Depth` and `## Shapes` token
-  blocks** — `surface`, `shadows`, `radius` and border tokens are **derived
-  from the chosen treatment**, never an arbitrary default. A flat pick with a
-  deep shadow ramp is a defect.
+- **The pick then constrains the `## Elevation & Depth` prose and the
+  `## Shapes` token block** — Elevation & Depth stays prose-only, describing
+  how the chosen treatment conveys depth (shadow spread/blur/colour, or the
+  flat-design alternative); Shapes' `rounded` and border tokens are
+  **derived from the chosen treatment**, never an arbitrary default. A flat
+  pick with a deep shadow ramp is a defect.
 - **Anti-costume law.** A treatment may enrich candidates but **never
   overrides a PRINCIPLES value**. Its vocabulary is inspiration; the values are
   non-negotiable — when the two collide, the treatment loses.

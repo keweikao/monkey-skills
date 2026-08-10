@@ -8,7 +8,12 @@ Apache-2.0-licensed `DESIGN.md` format — the **visual system** for a product.
 > Apache-2.0) and its lint CLI (reported as `npx @google/design.md`) are documented from
 > secondary sources, not a frozen in-repo copy of the spec. **Verify the format's current
 > shape, exact license, and the exact lint package/command against the authoritative Google
-> `DESIGN.md` spec at generation time** before relying on any of them.
+> `DESIGN.md` spec at generation time** before relying on any of them. The frozen key sets
+> this reference checks against (`design_md_spec_keys.py`), and the
+> unrecognized-component-property-gets-a-warning behaviour this reference cites
+> under Components below (the spec's Consumer Behavior for Unknown Content),
+> were both verified against
+> `@google/design.md` version `0.4.0` on 2026-08-10.
 
 > **Scope — visual system only.** `DESIGN.md` documents the product's
 > *visual* design system: brand, color, type, spacing, elevation, shape,
@@ -38,8 +43,11 @@ Apache-2.0-licensed `DESIGN.md` format — the **visual system** for a product.
 
 ## The 8 canonical sections (in order)
 
-The artifact MUST contain these eight `##` sections, **in this order**. Each
-section carries a short prose rationale plus a YAML token block.
+The artifact MUST contain these eight `##` sections, **in this order**. Five
+of the eight carry a YAML token block, one per spec token group — `colors`
+(Colors), `typography` (Typography), `rounded` (Shapes), `spacing` (Layout),
+`components` (Components). The remaining three (Overview / Brand, Elevation
+& Depth, Do's & Don'ts) are prose.
 
 ## Overview / Brand
 
@@ -78,19 +86,23 @@ Carry, in the **prose body** of this section (the YAML keys below stay thin):
   palette).
 
 **Derivation contract:** every token in Colors / Typography / Layout /
-Elevation / Shapes / Components MUST be derivable from, and defensible against,
+Shapes / Components MUST be derivable from, and defensible against,
 this concept + its principles (and the governing `PRINCIPLES.md`). A token you
 cannot trace back to the concept is an arbitrary default — the exact failure the
 Anti-patterns section bans. A committed concept makes most of those bans
 redundant: a design that commits to "restrained editorial" does not reach for a
 purple gradient on its own.
 
-Expected YAML frontmatter / token keys (confirm against the spec):
+`name` / `description` / `version` / `omitted` are spec frontmatter keys
+below (confirm against the spec at generation time); `brand_voice` /
+`theme` are documented loom extensions, not spec keys:
 
 - `name` — product / system name
 - `description` — one-line design-system intent
-- `brand_voice` — adjectives describing personality / mood (e.g. calm, precise)
-- `theme` — `light` / `dark` / `system`
+- `version` — the `DESIGN.md` spec version this document targets (e.g. `0.4.0`; confirm exact semantics against the spec)
+- `omitted` — token groups intentionally left out of this document (spec meta key; confirm exact semantics against the spec)
+- `brand_voice` — adjectives describing personality / mood (e.g. calm, precise) — **loom extension: `export` does not carry this token.**
+- `theme` — `light` / `dark` / `system` — **loom extension: `export` does not carry this token.**
 
 ## Colors
 
@@ -105,53 +117,90 @@ Expected token keys (confirm against the spec):
 - `foreground`
 - `destructive`
 - `muted`
+- `surface` — surface tint per elevation level (relocated from Elevation & Depth; `surface` is a spec-recommended color token name, not an extension)
 
 Each token is a color value (hex / oklch / CSS variable). Every
 foreground/background pairing MUST satisfy WCAG-AA contrast (see above).
 
 ## Typography
 
-The type system — font families, the modular scale, and the weight ramp.
+The type system — a set of **named typography levels**, each a nested
+mapping of properties (not a flat list of scale/weight/family keys). A real
+product's `DESIGN.md` typically names **9-15 levels** spanning display,
+headline, title, body, and label roles at multiple sizes (e.g.
+`display-lg`, `headline-lg`/`md`/`sm`, `title-lg`/`md`/`sm`,
+`body-lg`/`md`/`sm`, `label-lg`/`md`/`sm`) — this reference shows 3
+representative levels; extend the pattern to the full ramp when emitting.
 
-Expected token keys (confirm against the spec):
+Level names are open — pick names that fit the product's voice. Each
+level's properties are drawn only from this closed set (confirm against
+the spec):
 
-- `font_family` — base / heading / mono font stacks
-- `scale` — the type scale (e.g. ratio or explicit step sizes)
-- `weights` — the weight ramp (e.g. regular / medium / bold)
-- `line_height` — base leading
-- `letter_spacing` — tracking, where it deviates from default
+- `fontFamily` — base / heading / mono font stack for this level
+- `fontSize`
+- `fontWeight`
+- `lineHeight`
+- `letterSpacing` — tracking, where it deviates from default
+- `fontFeature` — OpenType feature settings, where used
+- `fontVariation` — variable-font axis settings, where used
+
+```yaml
+typography:
+  headline-lg:
+    fontFamily: "Fraktion Mono, monospace"
+    fontSize: "32px"
+    fontWeight: 600
+    lineHeight: 1.2
+  body-md:
+    fontFamily: "Fraktion Sans, sans-serif"
+    fontSize: "16px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "0.01em"
+  label-sm:
+    fontFamily: "Fraktion Sans, sans-serif"
+    fontSize: "12px"
+    fontWeight: 500
+    lineHeight: 1.4
+    letterSpacing: "0.02em"
+```
 
 ## Layout
 
-Spacing, container width, and grid — the spatial skeleton.
+The `spacing` token group — the spatial skeleton. Container width, grid, and
+breakpoints are entries nested under `spacing`, not separate token groups of
+their own.
 
-Expected token keys (confirm against the spec):
+Expected keys (confirm against the spec):
 
-- `spacing` — the spacing scale (e.g. base unit + steps)
-- `max_width` — content container max width
-- `grid` — column count / gutter
-- `breakpoints` — responsive breakpoints
+- `spacing` — the spacing scale (e.g. base unit + steps), nesting:
+  - `max_width` — content container max width
+  - `grid` — column count / gutter
+  - `breakpoints` — responsive breakpoints
 
 ## Elevation & Depth
 
 The elevation system — shadows and layering used to express depth and
-stacking order.
+stacking order. `elevation` is not one of the spec's five token groups; both
+keys below are documented loom extensions — plain prose, not YAML tokens,
+listed here for reference:
 
-Expected token keys (confirm against the spec):
+- `shadows` — the shadow ramp (e.g. sm / md / lg / xl) — **loom extension: `export` does not carry this token.**
+- `z_index` — named stacking layers (e.g. base / overlay / modal / toast) — **loom extension: `export` does not carry this token.**
 
-- `shadows` — the shadow ramp (e.g. sm / md / lg / xl)
-- `z_index` — named stacking layers (e.g. base / overlay / modal / toast)
-- `surface` — surface tints per elevation level
+This section carries no fenced YAML block.
 
 ## Shapes
 
 Corner radii and border treatment — the shape language of components.
 
-Expected token keys (confirm against the spec):
+`rounded` is the spec key below (confirm against the spec at generation
+time); `border_width` / `border_style` are documented loom extensions, not
+spec keys:
 
 - `rounded` — the corner-radius scale (e.g. none / sm / md / lg / full). Token key is `rounded` per the Google DESIGN.md spec (not `radius`).
-- `border_width` — border weight tokens
-- `border_style` — default border style where it matters
+- `border_width` — border weight tokens — **loom extension: `export` does not carry this token.**
+- `border_style` — default border style where it matters — **loom extension: `export` does not carry this token.**
 
 ## Components
 
@@ -160,27 +209,78 @@ inherit from the system (buttons, inputs, cards, etc.). This section maps
 the global tokens above onto named component slots; it does **not** describe
 component *behavior* or *flows* (those are out of scope — see the scope note).
 
-Expected token keys (confirm against the spec):
+Component names (`button`, `input`, `card`, …) are open, matching
+Typography's open level-name position. Each component's properties are
+drawn from this recognised set — the spec accepts an unrecognized
+component property with a warning rather than rejecting it, so this list
+guides, but does not gate, what a property key may be:
 
-- `button` — variants (primary / secondary / destructive) and their token bindings
-- `input` — field styling tokens
-- `card` — surface / rounded / elevation bindings
-- `states` — visual states (hover / focus / active / disabled) as token deltas
+- `backgroundColor` — fill color, typically a `{colors.*}` reference
+- `textColor` — foreground/text color, typically a `{colors.*}` reference
+- `typography` — which typography level the component's text uses,
+  typically a `{typography.*}` reference
+- `rounded` — corner-radius token, typically a `{rounded.*}` reference
+- `padding` — internal spacing (CSS shorthand or per-side)
+- `size` — named size variant (e.g. `sm` / `md` / `lg`), where the
+  component has one
+- `height` — fixed height, where applicable
+- `width` — fixed width, where applicable
 
-> Note: `states` here is **presentational** (hover/focus/disabled styling).
-> The behavioral lifecycle (empty / loading / error / success domain states)
-> belongs to `ui-flows.md` + `spec-expansion`, not to `DESIGN.md`.
+**`{token.reference}` syntax** — a component property can point at another
+token group's value instead of repeating a literal, e.g.
+`backgroundColor: "{colors.primary}"` means "resolve to whatever
+`colors.primary` currently is," not the literal string. Prefer references
+over duplicated literals so a palette or type-scale change propagates.
+
+**Variants live under related keys, not a nested map.** A component's
+stylistic variants (primary / secondary / destructive) and its visual
+states (hover / focus / active / disabled) are each their own top-level
+entry named `<component>-<variant>` (and `<component>-<variant>-<state>`
+for a variant's state) — e.g. `button-primary` and `button-primary-hover`
+are separate entries, each carrying only the properties that differ from
+the base component, **not** a `states` sub-key nested under `button`. This
+is **presentational** styling (hover/focus/disabled token deltas); the
+behavioral lifecycle (empty / loading / error / success domain states)
+still belongs to `ui-flows.md` + `spec-expansion`, not to `DESIGN.md`.
+
+```yaml
+components:
+  button:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.background}"
+    typography: "{typography.label-lg}"
+    rounded: "{rounded.md}"
+    padding: "12px 20px"
+    height: "40px"
+  button-primary:
+    backgroundColor: "{colors.primary}"
+  button-primary-hover:
+    backgroundColor: "{colors.primaryHover}"
+  input:
+    backgroundColor: "{colors.background}"
+    textColor: "{colors.foreground}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.sm}"
+    padding: "8px 12px"
+    size: "md"
+  card:
+    backgroundColor: "{colors.background}"
+    rounded: "{rounded.lg}"
+    padding: "24px"
+    width: "100%"
+```
 
 ## Do's & Don'ts
 
-Usage guardrails — the prose rules that keep the system coherent when applied.
-Pairs of recommended / discouraged usage (e.g. "DO use `accent` sparingly for
-single primary actions; DON'T tint large surfaces with `accent`").
+Usage guardrails — plain prose, not YAML tokens, matching the spec's own
+Do's-and-Don'ts example (a bullet list). Pairs of recommended / discouraged
+usage (e.g. "DO use `accent` sparingly for single primary actions; DON'T
+tint large surfaces with `accent`") under two prose lists:
 
-Expected token keys (confirm against the spec):
+- `dos` — recommended-usage rules, as prose bullets
+- `donts` — discouraged-usage rules, as prose bullets
 
-- `dos` — list of recommended-usage rules
-- `donts` — list of discouraged-usage rules
+This section carries no fenced YAML block.
 
 ## Generation checklist
 
@@ -191,9 +291,17 @@ When emitting `DESIGN.md`, the `design-system` skill MUST:
 2. **Commit the visual concept first** (Overview / Brand: an art-direction idea
    + the 3-5 generative visual principles, per the *Derivation contract*), then
    emit all 8 `##` sections in the order above.
-3. Populate each section's YAML token block.
+3. Populate the YAML token block for the five token-group sections —
+   `colors`, `typography`, `rounded`, `spacing`, `components` — and write
+   prose for the rest.
 4. Verify every color pairing meets WCAG-AA contrast.
-5. Run `npx @google/design.md` lint and resolve violations before declaring done.
+5. Run `npx @google/design.md` lint. A **failure** (e.g. a WCAG-AA contrast
+   violation) is a blocker — resolve it before declaring done. A **warning**
+   on a component property outside `## Components`'s recognised list is
+   expected, and legitimate, when that property is a deliberately-chosen
+   extension: the spec accepts an unrecognized component property with a
+   warning rather than rejecting it (see `## Components`), so this step
+   does not require resolving that warning away.
 6. Keep flows / screens / navigation **out** — those go in `ui-flows.md`.
 
 ## Anti-patterns — NEVER ship these (the "AI-generated" tells)

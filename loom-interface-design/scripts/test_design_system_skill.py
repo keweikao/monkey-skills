@@ -27,6 +27,8 @@ Stdlib only (pathlib + re). Resolve SKILL.md relative to this test file.
 import re
 from pathlib import Path
 
+from design_md_spec_keys import TOKEN_GROUPS as SPEC_TOKEN_GROUPS
+
 SKILL = (
     Path(__file__).parents[1]
     / "skills"
@@ -259,6 +261,19 @@ def test_surface_treatment_candidate_pick_protocol():
     assert "`## shapes`" in block[constrains_at:], \
         "the pick must constrain BOTH the Elevation & Depth and Shapes tokens"
 
+    # (f2) but Elevation & Depth carries NO token group at all (spec reality
+    # per design_md_spec_keys.TOKEN_GROUPS — only `rounded` under Shapes) —
+    # the block must not claim both sections share a "token blocks" plural,
+    # and must use the spec's real key `rounded`, never `radius`
+    assert "elevation & depth` and `## shapes` token blocks" not in block, \
+        "must not claim Elevation & Depth carries a YAML token block " \
+        "(it is prose-only per Step 4 / TOKEN_GROUPS)"
+    assert "`radius`" not in block, \
+        "the corner-radius token key is `rounded`, not `radius` " \
+        "(see references/design-md-schema.md's explicit note)"
+    assert "`rounded`" in block, \
+        "the Shapes token block must be named with its real spec key `rounded`"
+
     # (g) the anti-costume law carries over
     assert "anti-costume law" in block, \
         "the anti-costume law must carry over to the surface axis"
@@ -282,6 +297,135 @@ def test_surface_treatment_candidate_pick_protocol():
         "the anchor constraint must be stated BEFORE the proposal instruction "
         "— it governs which treatments are proposable at all"
     )
+
+
+def test_surface_treatment_paragraph_does_not_name_surface_shadows_as_schema_tokens():
+    """The surface-treatment axis paragraph must not claim `surface` and
+    `shadows` are schema-shipped tokens — `TOKEN_GROUPS`
+    (`design_md_spec_keys.py`, Task 1's frozen copy) has no
+    elevation/shadow/surface token group. The paragraph's real subject — this
+    station owns the depth/shape choice — survives via the real `rounded` +
+    border tokens in Shapes and Elevation & Depth's prose description.
+    """
+    block = _surface_block()
+
+    assert (
+        "the very tokens the schema already ships` — `surface`, `shadows`, "
+        "radii and borders"
+    ) not in block, (
+        "must not claim `surface`/`shadows` are schema-shipped tokens — "
+        "TOKEN_GROUPS has no elevation/shadow/surface group"
+    )
+    assert "`surface`" not in block, \
+        "`surface` is not a TOKEN_GROUPS member; do not name it as a " \
+        "schema-shipped token"
+    assert "`shadows`" not in block, \
+        "`shadows` is not a TOKEN_GROUPS member; do not name it as a " \
+        "schema-shipped token"
+    assert "choice over how depth is conveyed" in block, \
+        "the paragraph must still frame the surface-treatment axis as this " \
+        "station's choice, now grounded in depth + shape rather than a " \
+        "fictitious shipped-token claim"
+    assert "`rounded`" in block, \
+        "the reworded claim must point at the real Shapes token key `rounded`"
+
+
+def _scope_block() -> str:
+    """The `## Scope` section — lowercased, whitespace-flattened."""
+    text = _text()
+    start = text.index("## Scope — visual system only")
+    end = text.index("## Procedure", start)
+    return re.sub(r"\s+", " ", text[start:end]).lower()
+
+
+def test_scope_section_lists_component_token_defaults_not_bare_tokens():
+    """The Scope section's list ('brand, color, type, spacing, elevation,
+    shape, and component ... tokens') must not let a trailing bare 'tokens'
+    distribute across the whole list — that reading asserts an 'elevation
+    tokens' group, and `TOKEN_GROUPS` has none. Hyphenate so 'tokens' binds
+    only to 'component', matching the file's own already-correct phrasing at
+    `SKILL.md:11` ('component-token defaults').
+    """
+    block = _scope_block()
+    assert "and component tokens" not in block, \
+        "trailing bare 'tokens' distributes across the whole list, " \
+        "implying an 'elevation tokens' group that TOKEN_GROUPS does not have"
+    assert "and component-token defaults" in block, \
+        "must hyphenate so 'tokens' binds only to 'component', matching " \
+        "the file's own correct phrasing elsewhere"
+
+
+def _step4_block() -> str:
+    """Step 4's emit instruction — lowercased, whitespace-flattened.
+
+    Scoped to Step 4's own numbered item (not the whole Step 4a list), so a
+    whole-file pin would not false-green on the phrase appearing anywhere in
+    the skill (see docs/loom/memory/
+    grep-tests-scope-to-measured-neighborhood.md). Whitespace-flattened
+    because the source phrase this test targets is itself split across a
+    hard line break at SKILL.md:121-122 — a raw-file substring check would
+    never match it and the test would false-RED (pass before any edit).
+    """
+    text = _text()
+    start = text.index("4. Emit **all 8")
+    end = text.index("5. **Verify WCAG-AA", start)
+    return re.sub(r"\s+", " ", text[start:end]).lower()
+
+
+def test_step4_names_the_five_token_groups():
+    """Step 4 must stop implying all 8 `##` sections carry a YAML token
+    block (Overview / Brand, Elevation & Depth and Do's & Don'ts do not) and
+    instead name the five sections that actually do — the spec's frozen
+    `TOKEN_GROUPS` set (`design_md_spec_keys.py`, Task 1's frozen copy).
+    """
+    block = _step4_block()
+
+    # the old blanket claim — every one of the 8 sections gets a rationale
+    # PLUS a token block — must be gone
+    assert "each with a short prose rationale plus its yaml token block" \
+        not in block, \
+        "Step 4 must no longer claim every section carries a token block"
+
+    # every TOKEN_GROUPS member must be named (spec reality, not re-typed)
+    for group in SPEC_TOKEN_GROUPS:
+        assert group.lower() in block, \
+            f"Step 4 must name the token group '{group}' from TOKEN_GROUPS"
+
+
+def _step4a_item2_block() -> str:
+    """Step 4a's item 2 — the surface-treatment round pointer — lowercased,
+    whitespace-flattened.
+
+    Scoped to just this numbered item (not the whole Step 4a list), so a
+    whole-file pin would not false-green on the phrase appearing elsewhere
+    (see docs/loom/memory/grep-tests-scope-to-measured-neighborhood.md).
+    Whitespace-flattened because the source sentence is split across a hard
+    line break at SKILL.md:114-115.
+    """
+    text = _text()
+    start = text.index("2. **Run the surface-treatment candidate round**")
+    end = text.index("3. **Commit the visual concept**", start)
+    return re.sub(r"\s+", " ", text[start:end]).lower()
+
+
+def test_step4a_item2_does_not_pair_depth_with_tokens():
+    """Item 2 must not claim 'depth/shape tokens' — shape tokens are real
+    (`rounded` + border keys in Shapes), but depth tokens do not exist:
+    `TOKEN_GROUPS` has no elevation/depth member, and this same file
+    correctly states Elevation & Depth is prose-only at `:126` and
+    `:162-167`. The slash-compound asserts two parallel token categories
+    where only one exists — self-contradicting the file's own later prose.
+    """
+    block = _step4a_item2_block()
+    assert "depth/shape tokens" not in block, \
+        "must not pair 'depth' with 'tokens' in a slash-compound — " \
+        "TOKEN_GROUPS has no depth/elevation member; Elevation & Depth " \
+        "is prose-only"
+    assert "depth tokens" not in block, \
+        "must not claim depth tokens exist in any phrasing"
+    assert "shape tokens" in block, \
+        "the sentence must still credit the real shape tokens (`rounded` " \
+        "+ border keys) hanging off this pick"
 
 
 def _schema_overview_block() -> str:
