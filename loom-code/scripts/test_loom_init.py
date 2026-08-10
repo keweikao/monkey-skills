@@ -21,6 +21,14 @@ through the PRODUCTION path — the real loom_init.py run, and for the
 charter probe the production test function itself (`ACTIVE_SCRIPTS` is
 monkeypatched so the green test re-executes against the mutated
 scaffold) — never a re-implemented predicate beside the production one.
+
+External-surface grounding (source a — live verification): the one git
+flag the script depends on (`git -C <target> rev-parse --show-toplevel`,
+the nested-cwd advisory) is exercised LIVE by
+`test_nested_cwd_run_warns_but_proceeds` against a throwaway `git init`
+repo — the asserted stderr line must carry the real toplevel path the
+installed git printed, so a flag regression surfaces here, not via
+belief.
 """
 
 import json
@@ -89,20 +97,36 @@ def _scratch_scripts(tmp_path: Path) -> Path:
     return scratch
 
 
-def test_loom_init_ships_with_its_templates_and_runs():
+def test_loom_init_ships_with_its_templates_and_runs(tmp_path):
     assert LOOM_INIT.is_file(), f"loom_init.py does not exist at {LOOM_INIT}"
     assert TEMPLATE_README.is_file(), f"missing template {TEMPLATE_README}"
     assert TEMPLATE_DIRECTION.is_file(), f"missing template {TEMPLATE_DIRECTION}"
-    # Run probe against THIS repo (an adopted store): the refusal branch is
-    # a positive fact only a real run produces.
+    # Run probe against a tmp fixture with a pre-made store: the refusal
+    # branch is a positive fact only a real run produces — and probing a
+    # fixture keeps the suite decoupled from the live repo's adoption state.
+    (tmp_path / "docs" / "loom" / "backlog").mkdir(parents=True)
     result = subprocess.run(
-        [sys.executable, str(LOOM_INIT)],
+        [sys.executable, str(LOOM_INIT), str(tmp_path)],
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
     )
     assert "already exists" in result.stdout, result.stdout + result.stderr
     assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_agents_md_declares_loom_init():
+    """Command-surface accretion obligation: AGENTS.md's managed
+    command-surface block must declare loom_init.py so the bootstrap
+    verb shipped in #683 has a declared entry point (pin convention:
+    test_writing_plans_change_binding.py::test_agents_md_declares_coverage_script)."""
+    agents_md = REPO_ROOT / "AGENTS.md"
+    assert agents_md.is_file(), f"AGENTS.md is absent at {agents_md}"
+    text = agents_md.read_text(encoding="utf-8")
+    start = text.index("BEGIN command-surface (managed)")
+    end = text.index("END command-surface (managed)")
+    managed_block = text[start:end]
+    assert "loom_init.py" in managed_block, \
+        "AGENTS.md managed command-surface block must declare loom_init.py"
 
 
 def test_direction_template_carries_the_placeholder_line_verbatim():
@@ -286,6 +310,43 @@ def test_refuses_before_any_write_when_a_file_blocks_a_scaffold_path(tmp_path):
     assert not (target / "docs" / "loom" / "DIRECTION.md").exists(), (
         "residue: DIRECTION.md was created before the refusal"
     )
+
+
+def test_nested_cwd_run_warns_but_proceeds(tmp_path):
+    """Task 3 (plan 2026-08-10-cheap-hardening-batch.md): a target nested
+    inside a git repo gets ONE advisory line on stderr naming the repo
+    root — and the scaffold still proceeds with exit 0, because monorepo
+    subdirs adopting their own queue layer are legitimate (advisory,
+    never refusal; PR #683 debt)."""
+    init = subprocess.run(
+        ["git", "init", str(tmp_path)], capture_output=True, text=True
+    )
+    assert init.returncode == 0, init.stdout + init.stderr
+    sub = tmp_path / "sub"
+    sub.mkdir()
+
+    result = _run_init(sub)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "loom-init: OK" in result.stdout, result.stdout + result.stderr
+    assert (sub / "docs" / "loom" / "backlog" / "README.md").is_file(), (
+        "advisory must never block the scaffold"
+    )
+    assert (sub / "docs" / "loom" / "DIRECTION.md").is_file(), (
+        "advisory must never block the scaffold"
+    )
+    assert "not the git repo root" in result.stderr, result.stderr
+    assert str(tmp_path.resolve()) in result.stderr, (
+        "the advisory must name the repo root, got: " + result.stderr
+    )
+
+
+def test_non_git_target_stays_silent_on_stderr(tmp_path):
+    """Companion pin: the plain success run (target not inside any git
+    repo) emits NOTHING on stderr — the nested-cwd advisory is the only
+    stderr speaker and it stays quiet outside a repo."""
+    result = _scaffold_ok(tmp_path / "repo")
+    assert result.stderr == "", result.stderr
 
 
 def test_stray_file_at_store_path_is_not_called_adoption(tmp_path):
