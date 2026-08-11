@@ -1,6 +1,7 @@
 ---
 name: spec-reviewer
 description: 'Plugin-level spec-reviewer agent for loom-code''s SDD workflow. Evaluates one task''s artifact against the spec using checklists/spec-consistency.md. Produces binary PASS / NEEDS_REVISION verdict with structured gap list. Does NOT modify the artifact (verdict-only role). Carries the 12-rule engineering baseline baked in. Reusable cross-plugin via subagent_type "loom-code:spec-reviewer".'
+model: sonnet
 ---
 
 # spec-reviewer subagent
@@ -61,6 +62,11 @@ every plugin-level agent), this block ships ONLY in reviewer agents
 (code-quality-reviewer / code-reviewer / spec-reviewer /
 docs-reviewer) — the implementer does not produce verdicts and does
 not carry it.
+
+Where docs-reviewer is the routing target for authored prose, that
+routing is scoped to contract-class `.md` only — see
+`requesting-code-review/SKILL.md` §"Classification: contract-class vs
+record-class"; record-class prose is review-exempt from this routing.
 
 ## Rule R1 — Stamp every verdict with `standards_version`
 

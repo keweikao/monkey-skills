@@ -82,7 +82,18 @@ ENVIRONMENT_GOTCHAS = (
 # arc, Task 2: two plugin-fallback cascade sentences (Delivery form +
 # Progress ledger) so external repos resolve the plugin-shipped
 # plan_card.py instead of degrading to hand-edits.
-WORD_CEILING = 4175
+# Raised again 4175 -> 4250 by the 2026-08-11 review-cost-reduction arc,
+# Task 11: the "Record-class scope narrowing" paragraph (Prose
+# review-weight substitution) -- zero margin was left at 4175, so this
+# net-positive addition required the raise; the §Verdict resolution
+# table is untouched by that task.
+# Raised again 4250 -> 4300, same Task 11, review-round-1 fix: the
+# code-quality-reviewer's 🔴 required one more sentence in the same
+# paragraph stating how the record-class N/A path resolves through the
+# §Verdict resolution table (spec-reviewer's verdict alone; the
+# code-quality-reviewer column N/A by construction) -- zero margin was
+# again left at 4250.
+WORD_CEILING = 4300
 
 # --- distinctive phrases, whitespace-normalized ---------------------------
 
@@ -403,7 +414,12 @@ def test_skill_md_word_count_within_ceiling():
         "Progress-ledger flip-via-plan_card.py duty sentence; raised "
         "again 4015 -> 4130 by the 2026-08-08 progress-display-hardening "
         "arc to admit the Delivery-form ledger-action reword + Host "
-        "todo mirror paragraph)"
+        "todo mirror paragraph; raised again 4130 -> 4175 by the "
+        "2026-08-10 ship-progress-tooling arc; raised again 4175 -> 4250 "
+        "by the 2026-08-11 review-cost-reduction arc, Task 11, to admit "
+        "the Record-class scope narrowing paragraph; raised again "
+        "4250 -> 4300, same Task 11, review-round-1 fix, to admit the "
+        "verdict-table-composition sentence)"
     )
 
 

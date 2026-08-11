@@ -104,13 +104,49 @@ Architectural differences from Claude Code's `Agent()` tool that matter for re-b
 - **Explicit-trigger claim corrected (live-verified 2026-07-06).** The manual/superpowers-sourced claim that Codex spawns subagents "only on explicit user instruction" does **not** hold as stated. Live probes on codex-cli 0.139.0 (`multi_agent` stable + on, via `codex exec`) showed **model-initiated spawning** — the model itself decided to spawn, with no per-spawn user approval — from two setups: (a) a plain prompt instruction telling the model to delegate a sub-task, and (b) an AGENTS.md standing delegation instruction paired with a delegation-free prompt (the prompt itself never mentioned spawning; the model spawned off the standing instruction alone). Probe recipe (dated provenance, reproducible) — setup (a): `codex exec` a prompt that instructs delegation; setup (b): write an AGENTS.md delegation directive + send a delegation-free prompt; both: observe `collab:`-prefixed events in the transcript confirming a spawn occurred. **Not yet exercised**: interactive mode — only `codex exec` (non-interactive) was probed; do not assume the same holds there without a fresh probe. A loom-code skill that instructs an autonomous dispatch now has a live-verified Codex path via a standing AGENTS.md directive; framing the request as an explicit per-dispatch spawn instruction (the old workaround) still works too, but is no longer the only route.
 - **No blocking/non-blocking toggle.** Codex's own runtime automatically waits for and consolidates all subagent results — there is no per-call parameter that flips a dispatch between blocking and mailbox-style async. This is why [environment-gotchas §A1](environment-gotchas.md) (Claude Code's `name:`-triggers-mailbox-semantics pitfall) is scoped Claude-Code-only: three explicit verbs (spawn/wait/close), not one overloaded call with an easy-to-miss extra parameter, structurally rules out that specific failure mode on Codex.
 - **`name` means something different.** Custom agent *identity* in Codex lives in TOML files under `~/.codex/agents/` (`name` / `description` / `developer_instructions` required fields) — a reusable, session-level profile roughly analogous to Claude Code's `subagent_type`, not a per-dispatch ephemeral tracking label.
-- **No plugin-bundled agent definitions.** Codex's plugin manifest schema has no field for shipping reusable custom-agent definitions alongside a plugin (only `skills`). loom-code's `agents/*.md` role-prompt files (`implementer.md`, `spec-reviewer.md`, `code-quality-reviewer.md`, `code-reviewer.md`) still have **no confirmed Codex-native equivalent** — this remains an open gap. See [`loom-code/research/2026-07-05-claude-code-codex-dual-compat-patterns.md`](../../../research/2026-07-05-claude-code-codex-dual-compat-patterns.md) for the full survey.
+- **No plugin-bundled agent definitions.** Codex's plugin manifest schema has no field for shipping reusable custom-agent definitions alongside a plugin (only `skills`). loom-code's `agents/*.md` role-prompt files (`implementer.md`, `spec-reviewer.md`, `code-quality-reviewer.md`, `code-reviewer.md`, `docs-reviewer.md` — five files) still have **no confirmed Codex-native equivalent** — this remains an open gap. See [`loom-code/research/2026-07-05-claude-code-codex-dual-compat-patterns.md`](../../../research/2026-07-05-claude-code-codex-dual-compat-patterns.md) for the full survey.
+- **No mailbox/SendMessage confirmation primitive.** Claude Code's delta-confirmation mechanism (`requesting-docs-review` Directive 2) addresses an unnamed agent's dispatch handle via `SendMessage` to resume it in-session — Codex has no equivalent primitive (per the `spawn_agent`/`wait_agent`/`close_agent` verbs above, none of which resume a closed agent). N/A-with-route on Codex hosts: confirm a gating-verdict fix via ONE fresh single round instead — the same session-death fallback the contract already defines (Directive 4), reused here as the Codex substitute.
 
 The agent prompts in `loom-code/agents/*.md` are plain Markdown specifically so they re-bind cleanly to whatever the actual Codex dispatch surface is — that design intent holds, but the target primitive is now known to be `spawn_agent`/`wait_agent`/`close_agent`, not a guessed `Agent(subagent_type, prompt)`-shaped call. (Path corrected 2026-07-05: these role-prompt files live at `loom-code/agents/*.md`, not the pre-P15-12 `skills/subagent-driven-development/agents/*.md` path this section previously named.)
 
 ### Re-binding loom-code's dispatch points onto Codex (doc-sourced, not session-exercised)
 
 Where a loom-code SKILL.md says "dispatch a `<role>` subagent" (e.g. `subagent-driven-development`'s implementer / spec-reviewer / code-quality-reviewer, or `requesting-code-review`'s code-reviewer panel), the Codex-side equivalent is: `spawn_agent` with the corresponding `loom-code/agents/<role>.md` content as the agent's instructions, then `wait_agent` for its result, then `close_agent` when done (per `subagent-driven-development`'s own guidance to close implementer/reviewer subagents once finished). Live probes now show Codex can spawn autonomously off a standing AGENTS.md directive (see "Explicit-trigger claim corrected" above), so the orchestrator has two live-verified routes: an explicit per-dispatch spawn instruction ("spawn an implementer agent for task N using `loom-code/agents/implementer.md`'s instructions") — the more session-exercised of the two, still the safer default — or a standing AGENTS.md delegation directive that lets the model decide to spawn without restating the instruction each time. Either way, `wait_agent` + `close_agent` follow the same as before.
+
+### Per-subagent model selection (doc-sourced, not session-exercised)
+
+Claude Code lets each subagent role pin its own model via the agent-definition frontmatter (loom-code's `spec-reviewer.md` etc. do this). Codex has a native equivalent, but it is easy to configure and have it silently do nothing — read the gotcha below before relying on it.
+
+**The mechanism.** A per-subagent `.codex/agents/<name>.toml` file (same file that carries the required `name` / `description` / `developer_instructions` fields from §"`name` means something different" above) accepts two additional keys:
+
+```toml
+# .codex/agents/spec-reviewer.toml
+name = "spec-reviewer"
+description = "Checklist verdict against the task spec, per loom-code/agents/spec-reviewer.md"
+developer_instructions = "Follow loom-code/agents/spec-reviewer.md verbatim."
+model = "<codex-native-model-alias>"
+model_reasoning_effort = "medium"
+```
+
+- The file's `model =` / `model_reasoning_effort =` values take precedence over the session's default model/effort when that named agent is spawned.
+- Project-level `.codex/agents/` (repo-local) overrides personal `~/.codex/agents/` (same-named file wins at the project scope) — mirrors the personal-vs-project precedence Codex already uses for skills.
+- Either field may be omitted; an omitted field inherits from the parent session's own model/effort rather than defaulting to some fixed value.
+
+**Suggested defaults, mirroring loom-code's Claude Code frontmatter tiering:**
+- Checklist-verdict roles that check a fixed rubric rather than exercise judgment — `spec-reviewer`, `code-quality-reviewer`, `docs-reviewer` — pin `model` to a mid-tier Codex-native alias (cheaper than the session default) plus a lower `model_reasoning_effort`. Substitute whatever your Codex install's mid-tier alias currently is (check `codex --help` or your `~/.codex/config.toml` — alias names drift across Codex releases, so no specific string is pinned here as canonical).
+- Judgment roles — `implementer`, `code-reviewer` — omit `model`/`model_reasoning_effort` entirely so they inherit the parent session's (typically top-tier) model; these roles produce the artifact or the verdict that other roles get checked against, so they should not be downgraded by default.
+
+**MANDATORY gotcha — Multi Agent V2 can silently disable this whole mechanism.** When the newer `[features.multi_agent_v2]` surface is active with `hide_spawn_agent_metadata = true` (a documented option, not the default in every install), Codex strips the model/reasoning-effort fields from the `spawn_agent` tool definition itself. The practical effect: a subagent's `.codex/agents/<name>.toml` `model =` / `model_reasoning_effort =` values are silently ignored, and the subagent runs on the parent session's model instead — with no error, no warning, and the toml file still present and apparently correct. This defeats the per-subagent model selection above without any visible symptom other than "the cheap reviewer role is using the expensive model." Workaround: set
+
+```toml
+# ~/.codex/config.toml or project .codex/config.toml
+[features.multi_agent_v2]
+hide_spawn_agent_metadata = false
+```
+
+before relying on any `.codex/agents/*.toml` model pin under Multi Agent V2.
+
+**Delivery decision.** `.codex/agents/*.toml` files are documentation-only for this arc — users author them by hand from this section; automated emission from `loom-code/agents/<role>.md` via `sync_codex_manifests.py` is filed as debt, not shipped here.
 
 ### Panel dispatch mapping — `requesting-code-review`'s 2-reviewer panel (v0.26.0+) (shape derived from the 2026-07-06 probes; not yet session-exercised as a panel)
 
