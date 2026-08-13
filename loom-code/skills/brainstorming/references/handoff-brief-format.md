@@ -47,6 +47,8 @@ Axis 3 — the minimum shippable resolution.
 
 Format: 2-5 sentences describing what will be true when this change ships. Include success criteria (how do we know it solved the Problem?) and explicit non-criteria (what we will NOT measure).
 
+Each outcome declared here takes a brief item identifier — see [§Brief item identifiers](#brief-item-identifiers) for the shape and, since this section is prose, for where the declarations go.
+
 ### `## Current State Evidence`
 
 **Required when this change touches existing code or process.** Documents what the agent actually read while exploring (Axes 1, 4, 5) so `writing-plans` and downstream reviewers can verify the brief was grounded, not invented.
@@ -73,6 +75,8 @@ One paragraph: what we will build, what we will NOT build, and the trade-off sum
 
 Format: 3-6 sentences.
 
+Each outcome declared here takes a brief item identifier — see [§Brief item identifiers](#brief-item-identifiers) for the shape and, since this section is prose, for where the declarations go.
+
 ### `## Out of Scope`
 
 Bulleted list of adjacent things explicitly NOT in this change. Each bullet should be a thing someone might reasonably ask *"why didn't you also do…"* — the bullet preempts that question.
@@ -90,6 +94,8 @@ If `dev-workflow:proposal-critique` was invoked during discovery, paste its KEEP
 ### `## What Becomes Obsolete`
 
 Axis 5 — what existing code / process / convention this change removes. Bulleted list. Each bullet should be a thing that gets deleted **in the same PR**. If it's not getting deleted in the same PR, name the cleanup ticket and link it.
+
+Each outcome declared here takes a brief item identifier — see [§Brief item identifiers](#brief-item-identifiers) for the shape.
 
 ### `## Open Questions`
 
@@ -111,6 +117,25 @@ needs no diagram — the slot forces the declaration, not the drawing.
 Channel rule SSOT: `loom-pipeline/hooks/family-relay.md §(b) Visual defaults`.
 
 When-to-draw judgment: see [visual-companion.md](visual-companion.md).
+
+## Brief item identifiers
+
+Every outcome-declaring item in a brief carries an identifier, so that a downstream plan can cite that exact item instead of re-quoting its wording. The identifier and the item's human-readable text travel together: the identifier is the half that stays stable, the text is the half that stays readable.
+
+- **Form.** An identifier is written `BI-<n>` — the literal prefix `BI`, a hyphen, then a decimal number. `BI-1`, `BI-2`, `BI-17` are identifiers; `BI1`, `bi-1` and `B-1` are not.
+- **Authored, never derived.** The brief's author types the identifier. It is never slugified, hashed, or otherwise generated from the item's heading or from the item's text. Authored-not-derived is what stops the identifier desyncing from its item when the item's text is later reworded.
+- **Monotonic, never renumbered, never reused.** A new item takes the next unused number — the highest number this brief has ever used, plus one — regardless of where in the document the new item sits. Items already present keep the numbers they already have; an item inserted above `BI-3` does not become `BI-3`. When an item is deleted, its number is retired: no later item may carry it. Monotonic-never-reused is what keeps the id immutable when an item is inserted, since no insertion can shift a number that was never position-derived in the first place.
+- **Scope: three named sections, plus any other that declares an outcome.** Identifiers go on the items of `## Smallest End State`, `## What Becomes Obsolete`, and `## Decision` — not only `## Smallest End State`. Those three are the known in-scope set, so an author satisfies this rule by matching a section name, never by adjudicating a category. The rule that generated the list still holds: identifiers belong on the items of every section that declares an outcome a task could deliver. When a brief carries such a section outside the three — the test being whether a reader could point at a line and say *"a task could ship that"* — its absence from the list is never an exemption: assign that section's identifiers now, in this brief, exactly as for a listed section. Extending the list above is a maintainer's edit to this file, not something a brief's author makes mid-session; record the unlisted section as an open question in this brief's own `## Open Questions` instead, so the pending extension stays visible rather than silently absent. The identifiers you already assigned stand whichever way that question is resolved.
+- **Prose-form sections declare beneath the prose.** `## Decision` and `## Smallest End State` are written as prose, not as a bulleted list. Their identifiers go in a declaration list placed directly beneath the prose, one line per outcome the prose declares, in the same declaration shape as any other item. A section declaring a single umbrella outcome gets a single line. A prose-form section is not exempt, and its prose is not restructured into bullets to make room for the identifiers.
+- **Adopting identifiers is all-or-nothing within one plan.** Declaring even a single `BI-<n>` in a brief switches its plan's coverage check into brief mode, and from that moment every task in that plan must cite a referent that resolves — an identifier, a change-folder join key, or `none — <reason>`. Tasks still carrying a bare quote from the brief become errors **at once**, not gradually: one identifier added to an otherwise-legacy brief produced ten unresolvable-citation errors in a measured probe. So adopt identifiers when starting a brief, or migrate a brief and its whole plan in one pass — never partway. A brief that declares no identifiers keeps working unchanged, indefinitely; legacy mode is not deprecated.
+- **Split and merge retire both sides.** When one item is split into two, the original number is retired and both halves take new numbers — neither half inherits it. When two items are merged into one, both numbers are retired and the merged item takes a new number. Retiring both sides is what keeps a downstream citation from silently re-pointing at an item whose outcome has since narrowed or widened; the stale citation fails loudly against a retired number instead.
+
+Write each declaration as the identifier first, then the human-readable item text, on the same line:
+
+```markdown
+- BI-1 — Brief items carry an identifier that survives rewording.
+- BI-2 — The coverage checker resolves a cited identifier to a declared item.
+```
 
 ## Template
 
@@ -136,6 +161,9 @@ Copy-paste this skeleton:
 
 (what will be true when shipped; success criteria; non-criteria)
 
+- BI-1 — (outcome this change ships)
+- BI-2 — (second outcome, if the end state declares more than one)
+
 ## Current State Evidence
 
 (Required when touching existing code. Five sub-bullets; each with file:line or `N/A — <reason>`. Use `N/A — greenfield` only when nothing pre-existing is touched.)
@@ -151,6 +179,8 @@ Copy-paste this skeleton:
 
 (what we will build, what we will NOT build, why)
 
+- BI-3 — (the umbrella outcome this decision commits to)
+
 ## Out of Scope
 
 - (adjacent thing 1 we are NOT doing)
@@ -163,8 +193,8 @@ Copy-paste this skeleton:
 
 ## What Becomes Obsolete
 
-- (existing thing 1 deleted in same PR)
-- (existing thing 2 deleted in same PR)
+- BI-4 — (existing thing 1 deleted in same PR)
+- BI-5 — (existing thing 2 deleted in same PR)
 
 ## Open Questions
 
@@ -184,6 +214,10 @@ Copy-paste this skeleton:
 - ❌ **Open Questions left unanswered going into `writing-plans`.** `writing-plans` is **blocked** until resolved. Don't slip ahead.
 - ❌ **Current State Evidence bullets without `file:line` citations.** Hallucinated reconnaissance — the section exists precisely to be verifiable. Bullets that read *"this probably calls X somewhere"* defeat the purpose; run `grep` / `Read` / `Explore` and quote what you actually read.
 - ❌ **`N/A — greenfield` on a brief that clearly touches existing code.** Dodge. If the change adds a new method to an existing class, integrates with an existing API, or modifies an existing config — that is not greenfield. Fill the sub-bullets.
+- ❌ **Skipping the identifier on an in-scope item.** An item in `## Smallest End State`, `## What Becomes Obsolete`, or `## Decision` with no `BI-<n>` cannot be cited by a plan; the plan re-quotes its wording instead, and the quote rots at the first reword.
+- ❌ **Renumbering on insert.** Inserting an item above `BI-3` and shifting the existing items down makes every already-written citation point at the wrong item, silently. The new item takes the next unused number wherever it sits in the document.
+- ❌ **Reusing a retired number.** A deleted item's number stays dead. Handing `BI-2` to a new item makes an old citation resolve — to something the citing plan never meant.
+- ❌ **Deriving the identifier from the heading.** Slugs and hashes of the item's text (`BI-smallest-end-state`, `BI-a1b2c3`) desync the moment the text is reworded. The author types the number.
 - ❌ **Empty `Evidence paths` while sub-bullets are populated.** The appendix proves the recon happened. If you cited file:line in any sub-bullet, the same file:line belongs in Evidence paths.
 
 ## See also

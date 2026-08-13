@@ -11,7 +11,12 @@ move; A4 (maintainer-facing fragments in §BLOCKED fallback, §Plan size
 ceiling, §Consuming) move to references/design-evidence.md (author-facing
 header) while the rules they qualify, and the 5-step process / anti-pattern
 paragraph / detection-cascade rule sentences, stay inline verbatim. Word
-ceiling <=4200 — raised deliberately from 4099 by the 2026-08-11
+ceiling <=4250 — raised deliberately TWICE by the 2026-08-13
+brief-item-addressability arc: 4220 -> 4250 for T8's fix round (the gate's
+reachability pointer in §Self-review, where a brief-only author acts), and
+before that 4210 -> 4220 by the same arc (coverage gate learns brief mode; the
+docstring had also drifted, still saying 4200 after the 08-12 raise to
+4210), and before that from 4099 by the 2026-08-11
 review-cost-reduction arc's misroute fix (plan-document-reviewer routing
 substitution-proofing: §Self-review prompt-file/no-substitution/model-default
 sentences + SUBAGENT-STOP disambiguation; new count 4134; prior raises
@@ -23,7 +28,10 @@ test_post_pass_amendment_gate.py) and the splitting framework are
 untouched anti-vacuous survivors.
 """
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 SKILL_DIR = Path(__file__).resolve().parents[1] / "skills" / "writing-plans"
 SKILL_MD = SKILL_DIR / "SKILL.md"
@@ -227,13 +235,269 @@ def test_needs_revision_loop_self_screens_the_revision_delta():
     assert "every line the fix added or changed" in norm
 
 
+# --- (i) the coverage gate names brief mode (2026-08-13) --------------------
+
+_GATE_LEAD = "**Coverage self-check"
+
+# A scope-restricting token. A sentence carrying one of these AND naming the
+# change-folder is asserting this gate is change-folder-only, which brief
+# mode falsifies. The pin is an ABSENCE over the WHOLE sliced paragraph
+# rather than a named sentence to fix, because the claim sat on TWO
+# sentences — the bold lead-in and the body — and an earlier revision of
+# this change fixed the lead-in and left the body asserting the same
+# falsehood.
+_SCOPE_RESTRICTIONS = ("only", "not apply", "no change-folder")
+
+
+_GATE_SECTION_HEADING = "\n## Consuming a loom-spec change-folder"
+
+
+def _coverage_gate_paragraph() -> str:
+    """The coverage-self-check paragraph, sliced from its bold lead-in to the
+    next blank line, ANCHORED INSIDE the section that owns it.
+
+    Slicing binds PLACEMENT, not vocabulary: a duty relocated intact into a
+    neighbouring paragraph leaves this slice and fails the pin.
+
+    The anchor is the owning section's heading, not the file-wide first
+    occurrence of the lead-in: §Self-review sits ABOVE this section and
+    legitimately mentions the gate, so a file-wide `index` re-anchors onto
+    any bolded mention above and validates text the shipped paragraph never
+    earned. Last-occurrence would also dodge that decoy, but it is rejected
+    because it fails SILENTLY — it would follow a second gate paragraph
+    added below, exactly the class of bug this fix removes. The heading
+    anchor fails LOUDLY when the document is restructured.
+    """
+    assert _GATE_SECTION_HEADING in _skill_text(), (
+        f"cannot locate the section {_GATE_SECTION_HEADING.strip()!r} that "
+        "owns the coverage-gate paragraph — if it was renamed or moved, "
+        "re-point _GATE_SECTION_HEADING at its new heading text"
+    )
+    section = _section(_GATE_SECTION_HEADING)
+    assert _GATE_LEAD in section, (
+        f"the section {_GATE_SECTION_HEADING.strip()!r} carries no "
+        f"{_GATE_LEAD!r} lead-in — the coverage-gate paragraph has left the "
+        "section that owns it"
+    )
+    start = section.index(_GATE_LEAD)
+    end = section.index("\n\n", start)
+    return _norm(section[start:end])
+
+
+def _sentences(paragraph: str) -> list[str]:
+    return [s for s in re.split(r"(?<=\.)\s+", paragraph) if s]
+
+
+def test_brief_mode_coverage_gate_is_named():
+    para = _coverage_gate_paragraph()
+
+    # (1) brief mode is named in this paragraph, in its own sentence, with
+    # the shipped `--brief` invocation form, the reviewer-dispatch ordering,
+    # and the blocking condition brief mode ACTUALLY carries.
+    #
+    # This assertion previously required the word "non-zero" and its comment
+    # claimed brief mode blocks by "the same rule the change-folder mode
+    # carries". Whole-branch review falsified that against the code: brief
+    # mode's exit 1 fires for an unresolvable citation only, while an id no
+    # task cites is warned and the run still exits 0. The pin was therefore
+    # holding a false statement in place — a passing test guaranteeing the
+    # prose stayed wrong. Strengthened rather than dropped: it now pins the
+    # distinction itself, so prose that re-flattens the two gates into one
+    # rule fails here.
+    brief_sentences = [s for s in _sentences(para) if "--brief" in s]
+    assert len(brief_sentences) == 1, (
+        "the coverage-gate paragraph must name brief mode in exactly one "
+        f"sentence of its own; found {len(brief_sentences)}"
+    )
+    sentence = brief_sentences[0]
+    assert "BI-" in sentence
+    assert "brief mode" in sentence.lower()
+    assert "plan-document-reviewer" in sentence
+    assert "unresolvable" in sentence.lower(), (
+        "the brief-mode sentence must name the condition that actually "
+        "blocks (an unresolvable citation), not a generic non-zero exit"
+    )
+    assert "uncovered" in sentence.lower(), (
+        "the brief-mode sentence must also say what does NOT block — an "
+        "uncovered id only warns — or a reader infers the change-folder "
+        "path's stronger rule applies here too"
+    )
+
+    # (2) and no sentence in the same paragraph still restricts the check to
+    # the change-folder input path.
+    offenders = [
+        s for s in _sentences(para)
+        if "change-folder" in s.lower()
+        and any(token in s.lower() for token in _SCOPE_RESTRICTIONS)
+    ]
+    assert not offenders, (
+        "the coverage-gate paragraph still restricts the check to the "
+        f"change-folder input path: {offenders}"
+    )
+
+
+# --- (i1) the slice cannot be captured by a decoy above it -----------------
+
+# A synthetic SKILL.md in which §Self-review carries a paragraph satisfying
+# every substring `test_brief_mode_coverage_gate_is_named` checks for, while
+# the REAL gate paragraph — in the section that owns it — violates the pin.
+# A file-wide first-occurrence anchor validates the decoy and reports a pass
+# the shipped text has not earned. Reproduced live on this branch: T8's own
+# fix round bolded a §Self-review mention and the pin followed it.
+_DECOY_DOC = """# writing-plans
+
+## Self-review — plan-document-reviewer
+
+**Coverage self-check.** When the brief declares `BI-` ids, run the script \
+in brief mode — `python3 check_scenario_coverage.py --brief <brief> <plan>` \
+— before the plan-document-reviewer dispatch, blocking on a non-zero exit.
+
+Other self-review prose.
+
+## Consuming a loom-spec change-folder
+
+**Coverage self-check.** After producing the plan, run the script. It applies \
+only to a change-folder input.
+
+Trailing section prose.
+"""
+
+
+def _patched_skill_text(monkeypatch, doc: str) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_skill_text", lambda: doc)
+
+
+def test_decoy_paragraph_above_the_gate_cannot_capture_the_pin(monkeypatch):
+    """The production pin — not a helper stand-in — must reject the decoy.
+
+    `test_brief_mode_coverage_gate_is_named` is invoked directly so the
+    assertion under test is the shipped one.
+    """
+    _patched_skill_text(monkeypatch, _DECOY_DOC)
+
+    # sanity: the decoy really does carry everything the pin checks for, so a
+    # pass here would come from the decoy and not from the real paragraph.
+    decoy = _norm(_DECOY_DOC[_DECOY_DOC.index(_GATE_LEAD):])
+    for token in ("--brief", "BI-", "brief mode", "plan-document-reviewer",
+                  "non-zero"):
+        assert token in decoy
+
+    with pytest.raises(AssertionError):
+        test_brief_mode_coverage_gate_is_named()
+
+
+def test_renamed_owning_section_fails_loudly_not_silently(monkeypatch):
+    """Restructure probe: the anchor's whole point is WHICH failure it picks.
+
+    Renaming the owning section must name the heading it could not find,
+    not silently re-slice whatever `**Coverage self-check` appears first.
+    """
+    _patched_skill_text(
+        monkeypatch,
+        _DECOY_DOC.replace(
+            "## Consuming a loom-spec change-folder",
+            "## Consuming a loom-spec spec-folder",
+        ),
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        _coverage_gate_paragraph()
+    assert "Consuming a loom-spec change-folder" in str(excinfo.value)
+
+
+def test_gate_paragraph_missing_from_its_section_fails_loudly(monkeypatch):
+    """The complementary restructure: heading intact, paragraph moved away."""
+    _patched_skill_text(
+        monkeypatch,
+        _DECOY_DOC.replace(
+            "**Coverage self-check.** After producing the plan, run the "
+            "script. It applies only to a change-folder input.",
+            "Only unrelated prose lives here now.",
+        ),
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        _coverage_gate_paragraph()
+    assert _GATE_LEAD in str(excinfo.value)
+
+
+# --- (i2) the brief-mode duty is reachable from the brief-only path ---------
+
+_SELF_REVIEW_HEADING = "\n## Self-review"
+
+
+def _section(heading: str) -> str:
+    """The slice from `heading` to the next top-level `## ` heading.
+
+    Slicing is the point: this pin asserts REACHABILITY, i.e. that the
+    pointer sits in the section the acting author is actually reading at
+    the moment of the reviewer dispatch. A pointer parked anywhere else in
+    the file leaves this slice and fails.
+    """
+    text = _skill_text()
+    start = text.index(heading)
+    nxt = text.find("\n## ", start + len(heading))
+    return text[start:len(text) if nxt == -1 else nxt]
+
+
+def test_coverage_gate_reachable_from_self_review():
+    """A brief-only author never opens §Consuming a loom-spec change-folder,
+    so the brief-mode coverage duty must be reachable from §Self-review —
+    where the plan-document-reviewer dispatch it gates is described.
+
+    The pointer's TARGET is resolved from the pointer's own text, not
+    hardcoded here: a pointer aimed at the wrong section fails because the
+    gate is not found there.
+    """
+    self_review = _norm(_section(_SELF_REVIEW_HEADING))
+
+    pointers = [s for s in _sentences(self_review) if _GATE_LEAD[2:] in s]
+    assert len(pointers) == 1, (
+        "§Self-review must carry exactly one pointer to the Coverage "
+        f"self-check; found {len(pointers)}"
+    )
+    pointer = pointers[0]
+
+    # the duty it makes reachable is the BRIEF-mode one, with the shipped
+    # invocation form and the gate ordering that binds it to this dispatch.
+    assert "--brief" in pointer
+    assert "brief mode" in pointer.lower()
+    assert "before dispatching the reviewer" in pointer.lower()
+
+    # follow the pointer: the section it names must exist and must be where
+    # the gate paragraph actually lives.
+    target = re.search(r"§([^—]+?)\s+—", pointer)
+    assert target, f"the pointer names no resolvable §section: {pointer}"
+    heading = "\n## " + target.group(1).strip()
+    assert heading in _skill_text(), (
+        f"the pointer aims at {heading.strip()!r}, which is not a section "
+        "of this SKILL.md"
+    )
+    assert _GATE_LEAD in _section(heading), (
+        f"the pointer aims at {heading.strip()!r}, but the coverage-gate "
+        "paragraph does not live there"
+    )
+
+
 # --- (f) word cap ------------------------------------------------------------
 
-def test_word_count_at_most_4210():
+def test_word_count_at_most_4250():
     word_count = len(_skill_text().split())
-    assert word_count <= 4210, (
-        f"SKILL.md is {word_count} words, over the 4210 cap (raised "
-        "deliberately from 4200 by the 2026-08-12 adjudication-view "
+    assert word_count <= 4250, (
+        f"SKILL.md is {word_count} words, over the 4250 cap (raised "
+        "deliberately from 4220 by the 2026-08-13 brief-item-addressability "
+        "arc's T8 fix round: the gate's reachability pointer in §Self-review "
+        "— a duty stated only under §Consuming a loom-spec change-folder is "
+        "unreachable from the brief-only path, and relocating the gate "
+        "paragraph instead would drag the change-folder mechanics with it; "
+        "SECOND raise in one arc, deliberate — flagged for the reviewer "
+        "rather than resolved by shrinking the contract; prior raise from "
+        "4210 by the same arc's T8: the coverage gate's brief-mode "
+        "sentence, net +11 after "
+        "deleting the two change-folder-only claims it falsifies — the "
+        "duty is untrimmable without dropping either the `--brief` form "
+        "or the gate order; prior raise from 4200 by the 2026-08-12 "
+        "adjudication-view "
         "arc's T10 document-view pointer sentences at the kickoff "
         "briefing and post-PASS card relay — pointer-not-copy, "
         "untrimmable without losing the duty; prior raise from 4099 "
