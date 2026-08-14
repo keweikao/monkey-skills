@@ -11,12 +11,14 @@ move; A4 (maintainer-facing fragments in §BLOCKED fallback, §Plan size
 ceiling, §Consuming) move to references/design-evidence.md (author-facing
 header) while the rules they qualify, and the 5-step process / anti-pattern
 paragraph / detection-cascade rule sentences, stay inline verbatim. Word
-ceiling <=4250 — raised deliberately TWICE by the 2026-08-13
-brief-item-addressability arc: 4220 -> 4250 for T8's fix round (the gate's
-reachability pointer in §Self-review, where a brief-only author acts), and
-before that 4210 -> 4220 by the same arc (coverage gate learns brief mode; the
-docstring had also drifted, still saying 4200 after the 08-12 raise to
-4210), and before that from 4099 by the 2026-08-11
+ceiling <=4350 — raised deliberately by the 2026-08-14
+language-layering arc's T1 (the §Language policy section + the §Progress
+surface reword reference; new count 4312), and before that TWICE by the
+2026-08-13 brief-item-addressability arc: 4220 -> 4250 for T8's fix round
+(the gate's reachability pointer in §Self-review, where a brief-only author
+acts), and before that 4210 -> 4220 by the same arc (coverage gate learns
+brief mode; the docstring had also drifted, still saying 4200 after the
+08-12 raise to 4210), and before that from 4099 by the 2026-08-11
 review-cost-reduction arc's misroute fix (plan-document-reviewer routing
 substitution-proofing: §Self-review prompt-file/no-substitution/model-default
 sentences + SUBAGENT-STOP disambiguation; new count 4134; prior raises
@@ -194,6 +196,9 @@ def test_inline_fallback_field_list_present():
 def test_progress_surface_steps_and_gloss_emit_duty_present():
     # N2 clause (2026-08-06 progress-card-roadmap-view arc): plan-time
     # emission of Steps titles + Gloss lines, in the user's language.
+    # 2026-08-14 language-layering arc: the per-field statement now
+    # references the umbrella §Language policy (BI-7 consolidation,
+    # reworded not deleted).
     norm = _norm(_skill_text())
     assert (
         "an optional `Steps:` title block, and per-task `Gloss:` lines"
@@ -201,8 +206,30 @@ def test_progress_surface_steps_and_gloss_emit_duty_present():
     )
     assert (
         "Steps titles and Gloss lines are written at plan time in the "
-        "user's conversation language" in norm
+        "user's conversation language per §Language policy" in norm
     )
+
+
+# --- (g1) layered language policy (2026-08-14 language-layering arc) --------
+
+def test_layered_language_policy_declared():
+    # BI-1 + BI-4 (2026-08-14 language-layering arc): the plan document
+    # is written in two layers — Description/Acceptance in English, the
+    # human-facing fields in the conversation language — and
+    # adjudication-view is cited as the display layer for careful
+    # reading of the English precision content in zh-Hant/ja.
+    norm = _norm(_skill_text())
+    assert "## Language policy" in _skill_text()
+    assert (
+        "**Description** bodies and **Acceptance** (RED/GREEN) are "
+        "written in English" in norm
+    )
+    assert (
+        "**Steps** titles, **Gloss**, **Goal**, task titles, and "
+        "**Notes** stay in the session's conversation language" in norm
+    )
+    assert "adjudication-view" in norm
+    assert "zh-Hant/ja" in norm
 
 
 def test_minimal_structure_block_carries_progress_schema_lines():
@@ -599,11 +626,15 @@ def test_open_questions_gate_owning_heading_missing_fails_loudly(monkeypatch):
 
 # --- (f) word cap ------------------------------------------------------------
 
-def test_word_count_at_most_4250():
+def test_word_count_at_most_4350():
     word_count = len(_skill_text().split())
-    assert word_count <= 4250, (
-        f"SKILL.md is {word_count} words, over the 4250 cap (raised "
-        "deliberately from 4220 by the 2026-08-13 brief-item-addressability "
+    assert word_count <= 4350, (
+        f"SKILL.md is {word_count} words, over the 4350 cap (raised "
+        "deliberately from 4250 by the 2026-08-14 language-layering "
+        "arc's T1: the §Language policy section + the §Progress surface "
+        "reword reference — the policy is untrimmable without dropping "
+        "the layered statement or the adjudication-view citation; prior "
+        "raise from 4220 by the 2026-08-13 brief-item-addressability "
         "arc's T8 fix round: the gate's reachability pointer in §Self-review "
         "— a duty stated only under §Consuming a loom-spec change-folder is "
         "unreachable from the brief-only path, and relocating the gate "
