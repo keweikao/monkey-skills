@@ -5,6 +5,32 @@ You have the loom family of plugins available. One rule covers all of it:
 > **要用 loom-X, 就從 using-loom-X 開始.** Every plugin's entry point is its
 > `using-loom-*` skill — start there, it routes you the rest of the way.
 
+## Plain-relay trigger card
+
+<PLAIN-RELAY>
+Before EVERY user-visible reply while a loom skill is active:
+- 1st line = plain-language conclusion, in the conversation language.
+- Translate every internal token (PASS_WITH_NOTES, Axis, Wave, 🔴🟡🟢) — glossary: loom-pipeline/hooks/plain-relay.md.
+- Default reply ≤10 lines; ONE decision per ask (≤3 options + a recommended default).
+- Never lead with a raw gate/error string — plain words first.
+</PLAIN-RELAY>
+
+## Brief before a complex fork
+
+When a fork this router surfaces is genuinely complex — **≥3 trade-offs,
+≥2 implementation paths, or architectural blast radius** — brief before
+you ask: run `dev-workflow:brief-before-asking` first, then fire the
+ask. The brief's first line states, in plain words, *what this choice
+changes for the user and why it matters* — the stakes come before the
+options, because a user can read three well-framed options and still
+not see the point. `dev-workflow:brief-before-asking` owns the 6-block
+briefing format (Mental Model first); the trigger threshold above is
+the canonical gate for when a fork is complex enough to warrant it.
+This is a floor, not politeness: an unbriefed complex fork hands the
+user a choice they cannot evaluate. The 6 router/skill copies of this
+rule point here — edit the threshold or framing in this section, not
+in the copies.
+
 ## Family map
 
 - `using-loom-discovery` — jurisdiction: problem space (user-insights: needs
