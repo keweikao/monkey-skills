@@ -65,7 +65,7 @@ Walk through these stages in order. Skip a stage only when its precondition is a
 
 ## Continuous mode (opt-in): spec-frozen → PR auto-advance
 
-**Continuous mode** is an **opt-in** convention that lets the orchestrator auto-advance stage→stage from a frozen spec to a PR without a human "go" between stages (the default stays human-pumped). **Entry precondition:** the user opts in explicitly **and** a **human-approved** frozen entry artifact exists — either the `brainstorming` brief or a validated loom-spec change-folder.
+**Continuous mode** is an **opt-in** convention that lets the orchestrator auto-advance stage→stage from a frozen spec to a PR without a human "go" between stages (the default stays human-pumped). **Entry precondition:** the user opts in explicitly **and** a **human-approved** frozen entry artifact exists — either the `brainstorming` brief or a validated loom-design change-folder.
 
 **Opt-in is also recognized from the request itself**: a kickoff
 request that names a publish endpoint — "finish this branch", "ship
@@ -93,7 +93,7 @@ It adds a STOP rule, not a brain; the full doctrine lives in the reference.
 | "Subagents add overhead." | Context-window logic, not quality logic. | If task >1 hour or >1 module, SDD is mandatory. |
 | "User said skip TDD." | Valid only if user is explicit *and* the work matches `tdd-iron-law/SKILL.md` §When NOT to Use (throwaway / generated / pure config). | Quote §When NOT to Use back; ask for explicit confirmation. |
 | 「我先快速試一下 / ちょっと試すだけ」 | Same rationalization, localized. | Same refusal — load `tdd-iron-law`. |
-| "I'll skip straight to the brief." | Skipping `brainstorming`'s Axis 0 upstream check before writing a brief = violation — new product-shaped work may need `using-loom-product-principles` / `using-loom-interface-design` / `using-loom-spec` first. | Load `brainstorming`; Axis 0 checks the reception criteria before Axis 1. |
+| "I'll skip straight to the brief." | Skipping `brainstorming`'s Axis 0 upstream check before writing a brief = violation — new product-shaped work may need `using-loom-design` (the design side's entry — it routes on to the principles / interface / spec station) first. | Load `brainstorming`; Axis 0 checks the reception criteria before Axis 1. |
 
 ## Skill types
 
@@ -105,7 +105,7 @@ It adds a STOP rule, not a brain; the full doctrine lives in the reference.
 - **`domain-teams:code-team`** — passive gate entry. Use it to audit existing artifacts; this toolkit is for building from scratch. The knowledge layer (`standards/`, `rubrics/`, `checklists/`) here is a byte-identical functional copy of `code-team/`; sync via `scripts/distribute.py`, drift-checked by `scripts/verify-drift.py`.
 - **`dev-workflow:{git-memory, complexity-critique, proposal-critique}`** — loom-code **delegates** to these at the right moments. Never duplicate their logic.
 - **`obra/superpowers`** — overlapping skill names + dual SessionStart hook. To disable loom-code's hook injection: `export LOOM_CODE_MODE=off` in shell rc.
-- **loom family reception** — `loom-pipeline`'s SessionStart hook carries the family map (the six `using-loom-*` entries) + the on-ramp criteria table; `brainstorming`'s Axis 0 points to it rather than duplicating it here.
+- **loom family reception** — `loom-code`'s SessionStart hook carries the family map (the six `using-loom-*` entries) + the on-ramp criteria table; `brainstorming`'s Axis 0 points to it rather than duplicating it here.
 
 ## What this router does NOT do
 

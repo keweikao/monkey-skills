@@ -19,11 +19,13 @@ Canned fixtures only — no live `claude` calls, no network.
 import json
 import os
 import stat
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
 import loom_firing_harness
+
 from loom_firing_harness import (
     CorpusError,
     MaxTurnsBelowFloorError,
@@ -37,11 +39,31 @@ from loom_firing_harness import (
 )
 
 
+@lru_cache(maxsize=None)
+def _installed_skill_ids(repo_root):
+    """Every `<plugin>:<skill>` id the repo actually ships.
+
+    Read from the plugin manifests + skill dirs on disk, so the corpus
+    guard below cannot drift the way a hand-maintained list would.
+    Cached: the corpus guard calls this once per record.
+    """
+    ids = set()
+    for manifest in repo_root.glob("*/.claude-plugin/plugin.json"):
+        plugin = json.loads(manifest.read_text(encoding="utf-8"))["name"]
+        skills_dir = manifest.parent.parent / "skills"
+        if not skills_dir.is_dir():
+            continue
+        for skill in skills_dir.iterdir():
+            if (skill / "SKILL.md").is_file():
+                ids.add(f"{plugin}:{skill.name}")
+    return frozenset(ids)
+
+
 def test_corpus_parse_and_contamination_discard():
     # --- corpus parsing: one JSON record per line ---
     raw = (
         '{"query": "幫我做一個記帳 app，從零開始規劃功能與畫面", '
-        '"expected": "loom-product-principles:product-principles", '
+        '"expected": "loom-design:product-principles", '
         '"notes": "goal-oriented, product-shaped"}\n'
         '{"query": "make an app", '
         '"expected": "NONE", "notes": "control, too short to be self-contained"}\n'
@@ -49,7 +71,7 @@ def test_corpus_parse_and_contamination_discard():
     records = parse_corpus(raw)
     assert len(records) == 2
     assert records[0]["query"].startswith("幫我做一個記帳")
-    assert records[0]["expected"] == "loom-product-principles:product-principles"
+    assert records[0]["expected"] == "loom-design:product-principles"
     assert records[1]["expected"] == "NONE"
 
     # --- self-containedness validator: warns, never fails, on short queries ---
@@ -70,7 +92,7 @@ def test_corpus_parse_and_contamination_discard():
         {"result_subtype": "success", "text": "Skill tool_use: brainstorming"},
         {"result_subtype": "error_max_turns", "text": "hit max turns"},
         {"result_subtype": "success", "text": "Session limit reached, try later"},
-        {"result_subtype": "success", "text": "Skill tool_use: using-loom-spec"},
+        {"result_subtype": "success", "text": "Skill tool_use: using-loom-design"},
     ]
     kept, discarded_count = filter_contaminated(run_results)
     assert discarded_count == 1
@@ -165,17 +187,17 @@ def test_grade_exact_family_miss_over():
 
     # --- sibling-family hit: same plugin prefix, different skill ---
     family = {
-        "expected": "loom-spec:completeness-critic",
-        "fired": "loom-spec:spec-expansion",
+        "expected": "loom-design:completeness-critic",
+        "fired": "loom-design:spec-expansion",
     }
     assert grade_record(family) == "FAMILY"
 
     # --- miss: expected a skill, nothing fired ---
-    miss_nothing = {"expected": "loom-product-principles:product-principles", "fired": None}
+    miss_nothing = {"expected": "loom-design:product-principles", "fired": None}
     assert grade_record(miss_nothing) == "MISS"
 
     # --- miss: expected a skill, a non-loom skill fired instead ---
-    miss_non_loom = {"expected": "loom-interface-design:design-system", "fired": "dataviz"}
+    miss_non_loom = {"expected": "loom-design:design-system", "fired": "dataviz"}
     assert grade_record(miss_non_loom) == "MISS"
 
     # --- over-trigger: expected NONE, a loom-family skill fired anyway ---
@@ -371,9 +393,15 @@ def test_run_corpus_refuses_below_floor(monkeypatch):
 
 
 def test_shipped_corpus_validates():
-    """F2: the three shipped firing corpora parse and validate cleanly.
+    """F2: EVERY shipped firing corpus parses and validates cleanly.
 
-    Each of goal-oriented.jsonl / near-miss.jsonl / direct-ask.jsonl must:
+    The file list is ENUMERATED from the corpus directory, never hard-coded:
+    a hard-coded tuple silently under-covers when a corpus is added, and
+    reads as complete while doing so. research-asks.jsonl was validated by
+    nothing for exactly that reason — a bogus skill id in it passed the
+    whole suite.
+
+    Each corpus must:
     parse via `parse_corpus`, have >= 8 entries, produce zero
     self-containedness warnings (trap #2 — no context-less fragments),
     and every `expected` value must be a well-formed "<plugin:skill>" id
@@ -381,8 +409,13 @@ def test_shipped_corpus_validates():
     """
     repo_root = Path(__file__).resolve().parents[2]
     corpus_dir = repo_root / "docs" / "loom" / "firing-corpus"
-    for name in ("goal-oriented.jsonl", "near-miss.jsonl", "direct-ask.jsonl"):
-        path = corpus_dir / name
+    corpora = sorted(corpus_dir.glob("*.jsonl"))
+    assert len(corpora) >= 4, (
+        f"expected at least the 4 shipped corpora in {corpus_dir}, "
+        f"found {[c.name for c in corpora]}"
+    )
+    for path in corpora:
+        name = path.name
         assert path.exists(), f"missing shipped corpus file: {path}"
         records = parse_corpus(path.read_text(encoding="utf-8"))
         assert len(records) >= 8, f"{name}: expected >= 8 entries, got {len(records)}"
@@ -394,3 +427,14 @@ def test_shipped_corpus_validates():
                 f"{name}: malformed expected value {expected!r} "
                 "(must be 'NONE' or '<plugin:skill>')"
             )
+            # WHY resolvability, not just shape: the corpus is the grading
+            # oracle, and `_family()` keys on the plugin prefix. A retired
+            # plugin id keeps its colon, so a shape-only check stays green
+            # while a CORRECT fire grades MISS — the oracle inverts silently.
+            # The 6->2 merge left 28 such records passing this assertion.
+            if expected != "NONE":
+                assert expected in _installed_skill_ids(repo_root), (
+                    f"{name}: expected {expected!r} names no installed skill — "
+                    "a renamed or retired id makes the oracle grade correct "
+                    "fires as MISS"
+                )

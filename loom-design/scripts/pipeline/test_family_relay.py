@@ -1,0 +1,381 @@
+"""Mechanical marker-grep tests for the family relay-discipline SSOT.
+
+Task 4 (this file) writes ALL SIX assertion targets. Only
+test_relay_section is expected GREEN after Task 4 — the other five stay
+RED by design until Tasks 5-11 add their one-line pointers / catalog
+edits to files this task must NOT touch. Each test's docstring is the
+contract: the exact marker string(s) a later implementer must add,
+verbatim, to flip that test green.
+
+Canonical pointer phrase (reused by tests 2-5): every seam that relays
+to the family relay SSOT must contain this exact substring somewhere in
+its file — never a copy of the section body. The SSOT body lives in its
+own sibling file (loom-code/hooks/family-relay.md) because
+family-reception.md is injected verbatim every SessionStart and is
+test-pinned to ≤60 non-empty lines; reception carries only a pointer.
+
+Task 3 (2026-07-10 ascii-graph-trigger-fix plan) adds
+test_reception_includes_visual_defaults: session-start additionally
+extracts family-relay.md §(b) Visual defaults AT RUNTIME and appends it
+to the injected reception context.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+import pytest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+POINTER_PHRASE = "family-relay.md §Family relay discipline"
+
+FAMILY_RECEPTION = REPO_ROOT / "loom-code/hooks/family-reception.md"
+FAMILY_RELAY = REPO_ROOT / "loom-code/hooks/family-relay.md"
+HOOKS_DIR = REPO_ROOT / "loom-code/hooks"
+SESSION_START = HOOKS_DIR / "session-start"
+SDD_SKILL = REPO_ROOT / "loom-code/skills/subagent-driven-development/SKILL.md"
+REVIEW_SKILL = REPO_ROOT / "loom-code/skills/requesting-code-review/SKILL.md"
+BRAINSTORM_VISUAL_COMPANION = REPO_ROOT / "loom-code/skills/brainstorming/references/visual-companion.md"
+BRAINSTORM_HANDOFF_BRIEF = REPO_ROOT / "loom-code/skills/brainstorming/references/handoff-brief-format.md"
+BRAINSTORM_SKILL = REPO_ROOT / "loom-code/skills/brainstorming/SKILL.md"
+BRIEF_BEFORE_ASKING_SKILL = REPO_ROOT / "dev-workflow/skills/brief-before-asking/SKILL.md"
+
+DESIGN_SIDE_FILES = {
+    "using-loom-design": REPO_ROOT / "loom-design/skills/using-loom-design/SKILL.md",
+}
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def test_relay_section():
+    """
+    Markers required in loom-code/hooks/family-relay.md
+    (this task writes them):
+      1. "## Family relay discipline"        — section heading
+      2. rollup-card slot names, all five, verbatim:
+         "task restated", "current state", "what changed",
+         "impact on you", "next + decision"
+      3. "ascii-graph-toolkit"                — visual default (flow/state)
+      4. "markdown comparison table"          — visual default (>=2 options)
+      5. "never bury a briefing and an AskUserQuestion" — turn-ordering rule
+
+    Discovery path: family-reception.md (the SessionStart-injected file)
+    must contain a pointer naming "family-relay.md" so readers can find
+    the SSOT — the body itself stays out of reception (line budget).
+
+    Anti-copy: the distinctive ③ rule-body phrase "Outcome, not
+    mechanism." (requesting-code-review/SKILL.md ③, rule 1) must NOT
+    appear in family-relay.md — this section points at the loom-code
+    gate, it never copies the rule text.
+    """
+    text = _read(FAMILY_RELAY)
+    assert "## Family relay discipline" in text
+
+    for slot in (
+        "task restated",
+        "current state",
+        "what changed",
+        "impact on you",
+        "next + decision",
+    ):
+        assert slot in text, f"missing rollup-card slot: {slot!r}"
+
+    assert "ascii-graph-toolkit" in text
+    assert "markdown comparison table" in text
+    assert "never bury a briefing and an AskUserQuestion" in text
+
+    assert "Outcome, not mechanism." not in text, (
+        "family-relay.md must POINT at requesting-code-review's ③ "
+        "gate, never copy its rule bodies"
+    )
+
+    reception = _read(FAMILY_RECEPTION)
+    assert "family-relay.md" in reception, (
+        "family-reception.md must point readers to family-relay.md "
+        "(discovery path for the pull-on-demand SSOT)"
+    )
+
+
+def test_relay_progress_card_renderer_ships_in_plugin():
+    """
+    Task 4 (2026-08-10 ship-progress-tooling plan): §(a2)'s sentence
+    describing the mechanical renderer must state that plan_card.py
+    ships in the loom-code plugin (repo-root scripts/ copy wins when
+    present) — post-T1 the script is no longer repo-root-only, and an
+    external repo has no repo-root copy at all.
+
+    Raw-read constraint (plan §Notes kickoff decision): this file is a
+    hook reference read RAW — load-time substitutions never expand
+    here — so the "${CLAUDE_PLUGIN_ROOT}" literal must NOT appear
+    anywhere in family-relay.md; the cascade is prose only.
+    """
+    text = _read(FAMILY_RELAY)
+    a2_idx = text.find("### (a2) Progress card")
+    b_idx = text.find("### (b) Visual defaults")
+    assert a2_idx != -1 and b_idx != -1
+    # whitespace-normalized: the source wraps sentences across lines
+    section = " ".join(text[a2_idx:b_idx].split())
+    assert "plan_card.py" in section, "missing the mechanical-renderer sentence"
+    assert "ships in the loom-code plugin" in section, (
+        "the renderer sentence must state plan_card.py ships in the "
+        "loom-code plugin (repo-root copy wins when present)"
+    )
+    assert "${CLAUDE_PLUGIN_ROOT}" not in text, (
+        "family-relay.md is read RAW — never write the substitution "
+        "literal into it; prose only"
+    )
+
+
+def test_sdd_pointer():
+    """
+    Task 5 originally added the canonical pointer phrase to BOTH
+    narration seams in
+    loom-code/skills/subagent-driven-development/SKILL.md. Fix round 1
+    (2026-08-06, progress-cards-and-plan-ledger arc) corrected the
+    Status handling seam's wording — it had wrongly called the
+    progress card a "rollup card" — and, instead of re-duplicating
+    POINTER_PHRASE there, made it cross-reference the '### ③ How to
+    phrase' seam's own Delivery form paragraph. Fix round 2 (same day)
+    reworded that cross-reference from the pseudo-heading "§Delivery
+    form above" to "the **Delivery form** paragraph above" (there is no
+    actual '§Delivery form' heading in the file), which still carries
+    POINTER_PHRASE. No template body is copied in either seam either
+    way.
+    """
+    text = _read(SDD_SKILL)
+    assert text.count(POINTER_PHRASE) >= 1, (
+        "expected the pointer phrase at least once, in the ③ seam's "
+        "Delivery form paragraph"
+    )
+    assert "the **Delivery form** paragraph above" in text, (
+        "expected the Status handling seam to cross-reference the "
+        "Delivery form paragraph (no pseudo-§ heading) instead of "
+        "duplicating the pointer"
+    )
+
+
+def test_review_pointer():
+    """
+    Task 6 adds the canonical pointer phrase to
+    loom-code/skills/requesting-code-review/SKILL.md ③ (lines ~34-56),
+    signalling the verdict-relay + remediation-option seam now defers
+    to the shared family relay section instead of a locally-copied rule.
+    Marker: POINTER_PHRASE present at least once.
+    """
+    text = _read(REVIEW_SKILL)
+    assert POINTER_PHRASE in text
+
+
+def test_brainstorming_visuals():
+    """
+    Task 7 edits three files under loom-code/skills/brainstorming/:
+      - references/visual-companion.md: adds "ascii-graph-toolkit" (the
+        named tool for flow/state shapes) AND "channel-aware
+        degradation" (the catalog's new channel-table heading/phrase)
+      - references/handoff-brief-format.md: adds "channel-aware
+        degradation" to its `## Diagrams` section
+      - SKILL.md: adds POINTER_PHRASE near its plain-language summary
+        rule (~line 181)
+    """
+    visual_companion = _read(BRAINSTORM_VISUAL_COMPANION)
+    handoff_brief = _read(BRAINSTORM_HANDOFF_BRIEF)
+    skill = _read(BRAINSTORM_SKILL)
+
+    assert "ascii-graph-toolkit" in visual_companion
+    assert "channel-aware degradation" in visual_companion
+    assert "channel-aware degradation" in handoff_brief
+    assert POINTER_PHRASE in skill
+
+
+def test_brainstorming_fork_table_default():
+    """
+    Dogfood F1 fix: the fork-guidance region in brainstorming/SKILL.md
+    (the "lead with the stakes" rule, ~line 58) must carry the
+    "markdown comparison table" default marker at the FORK moment
+    itself — not only at the summary seam (~line 181, already covered
+    by test_brainstorming_visuals). A weak-model actor rendering a
+    2-option fork as bullet lists is the failure this closes.
+    """
+    skill = _read(BRAINSTORM_SKILL)
+    assert "markdown comparison table" in skill
+
+
+@pytest.mark.parametrize("skill_id", ["using-loom-design"])
+def test_design_side_pointers(skill_id):
+    """
+    Post-merge (6->2 plugin merge, loom-design-merge branch): the four
+    former per-station design-side routers (spec, interface-design,
+    product-principles, discovery) collapsed into ONE merged router,
+    loom-design/skills/using-loom-design/SKILL.md. Its §Intake section
+    carries the single line containing POINTER_PHRASE that all four used
+    to carry separately.
+
+    Whitespace-normalized match: the source wraps the pointer phrase
+    across a line break inside its backtick span (`...family-relay.md\n
+    §Family relay discipline`), so this collapses runs of whitespace
+    before checking — it must still fail if the pointer phrase is
+    removed or the rule text is inlined instead of referenced.
+    """
+    text = _read(DESIGN_SIDE_FILES[skill_id])
+    normalized = " ".join(text.split())
+    assert POINTER_PHRASE in normalized
+
+
+def test_brief_before_asking_ordering():
+    """
+    Task 11 edits dev-workflow/skills/brief-before-asking/SKILL.md:
+      - turn-ordering marker: "never bury a briefing and an
+        AskUserQuestion" (same phrase as the relay section, ~line 20-22)
+      - anti-diagram carve-out marker: "explicit user request for a
+        visual is always honored" (rescoped wording, ~lines 73/185)
+    """
+    text = _read(BRIEF_BEFORE_ASKING_SKILL)
+    assert "never bury a briefing and an AskUserQuestion" in text
+    assert "explicit user request for a visual is always honored" in text
+
+
+def test_reception_includes_visual_defaults():
+    """
+    session-start must extract the "### (b) Visual defaults" section of
+    family-relay.md at RUNTIME and append it to the injected reception
+    context — never duplicate the rule text into session-start itself
+    (pointer-not-copy stays intact; family-relay.md remains SSOT).
+
+    (a) Running the real session-start emits additionalContext containing
+        both "ascii-graph-toolkit" and "markdown comparison table" (the
+        two canonical §(b) markers already pinned in family-relay.md by
+        test_relay_section above).
+    (b) Runtime-extraction proof: copy hooks/ to a temp plugin root,
+        mutate the COPIED family-relay.md's §(b) body with a unique
+        sentinel, run the byte-identical, unmodified session-start
+        script from that temp root, and assert the sentinel shows up in
+        its output. session-start's own code is untouched in this
+        step — only the data file changed — so a passing assertion
+        proves the section is read from family-relay.md at runtime, not
+        hard-coded into the script.
+    """
+    env = dict(os.environ)
+    env["CLAUDE_PLUGIN_ROOT"] = str(HOOKS_DIR.parent)
+    result = subprocess.run(
+        [str(SESSION_START)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 0, f"session-start exited {result.returncode}: {result.stderr}"
+    payload = json.loads(result.stdout)
+    nested = payload["hookSpecificOutput"]["additionalContext"]
+    assert "ascii-graph-toolkit" in nested
+    assert "markdown comparison table" in nested
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_hooks = Path(tmp) / "hooks"
+        shutil.copytree(HOOKS_DIR, tmp_hooks)
+
+        relay_path = tmp_hooks / "family-relay.md"
+        original = relay_path.read_text(encoding="utf-8")
+        sentinel = "SENTINEL-RUNTIME-EXTRACTION-9f3a"
+        mutated = original.replace(
+            "markdown comparison table", f"markdown comparison table {sentinel}"
+        )
+        assert mutated != original, "expected to find the marker text to mutate"
+        relay_path.write_text(mutated, encoding="utf-8")
+
+        tmp_session_start = tmp_hooks / "session-start"
+        result2 = subprocess.run(
+            [str(tmp_session_start)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result2.returncode == 0, f"session-start exited {result2.returncode}: {result2.stderr}"
+        payload2 = json.loads(result2.stdout)
+        nested2 = payload2["hookSpecificOutput"]["additionalContext"]
+        assert sentinel in nested2, (
+            "session-start did not reflect the mutated family-relay.md content — "
+            "extraction is not happening at runtime"
+        )
+
+
+def test_close_out_card():
+    """
+    Close-out card specialization block (finishing Step 13 / any loom
+    seam reporting a PR-open) must live in family-relay.md §(a), AFTER
+    the existing user-rollup card table and BEFORE §(b) Visual defaults.
+
+    Required markers:
+      - "Close-out card" heading
+      - 7 of 10 distinctive labels (PR/Review/Version omitted as
+        false-positive-prone); English anchor form, language-neutral
+      - " ・ " separator (half-width space + U+30FB interpunct +
+        half-width space) and the "3 points per cell" cap
+      - the chat-cards-never-use-<br> degradation rule
+      - the two conditional rows: screenshots, rollback plan
+      - a one-line provenance note citing Google eng-practices CL
+        descriptions AND the JA 影響範囲/動作確認/レビューポイント
+        template convention (no URL dump)
+    """
+    text = _read(FAMILY_RELAY)
+    assert "Close-out card" in text
+
+    rollup_idx = text.find("next + decision")
+    close_out_idx = text.find("Close-out card")
+    visual_defaults_idx = text.find("### (b) Visual defaults")
+    assert rollup_idx != -1 and close_out_idx != -1 and visual_defaults_idx != -1
+    assert rollup_idx < close_out_idx < visual_defaults_idx, (
+        "Close-out card block must sit after the user-rollup card and "
+        "before §(b) Visual defaults"
+    )
+
+    for label in (
+        "Purpose",
+        "Changes",
+        "Impact scope",
+        "Verification",
+        "Review focus",
+        "🌐 Web merge",
+        "💻 CLI merge",
+    ):
+        assert label in text, f"missing close-out card row label: {label!r}"
+
+    assert " ・ " in text, "expected the half-width-space + U+30FB + half-width-space separator"
+    assert "3 points per cell" in text
+
+    assert "chat cards" in text.lower() and "never" in text.lower() and "<br>" in text, (
+        "expected the chat-cards-never-use-<br> degradation rule"
+    )
+
+    assert "screenshots" in text.lower()
+    assert "rollback plan" in text.lower()
+
+    assert "Google eng-practices" in text
+    assert "影響範囲" in text or "動作確認" in text or "レビューポイント" in text
+
+
+def test_brainstorming_visual_operative_line():
+    """
+    Task 4 (2026-07-10 ascii-graph-trigger-fix plan) adds an operative
+    one-liner to brainstorming/SKILL.md's "## Visual companion" section:
+    flow/state diagrams in briefs and user-facing summaries are
+    GENERATED via ascii-graph-toolkit (or Mermaid where the channel
+    renders it), never hand-drawn box art — pointing at
+    family-relay.md §(b) Visual defaults as SSOT for the channel rule.
+    Markers required WITHIN that section specifically (not just
+    anywhere in the file):
+      - "ascii-graph-toolkit"
+      - "never hand-drawn" (operative not-hand-drawn phrase)
+    """
+    text = _read(BRAINSTORM_SKILL)
+    match = re.search(r"## Visual companion\n(.*?)(?=\n## )", text, re.DOTALL)
+    assert match, "expected a '## Visual companion' section in brainstorming/SKILL.md"
+    section = match.group(1)
+    assert "ascii-graph-toolkit" in section
+    assert "never hand-drawn" in section

@@ -7,7 +7,7 @@ PRESENCE + POSITION of a compact new subsection: "Axis 0 — Upstream artifacts
 (family §Intake)" placed immediately BEFORE "Axis 1 — Problem". Axis 0 must:
 
 1. Point at the loom family reception's on-ramp criteria table
-   (`loom-pipeline/hooks/family-reception.md`) rather than copy it — SSOT
+   (`loom-code/hooks/family-reception.md`) rather than copy it — SSOT
    drift prevention (plan-level note "Reception SSOT rule").
 2. On a triggered row, surface the recommendation ONCE (naming the concrete
    design-side sequence), then record the user's choice in the brief under a
@@ -56,7 +56,7 @@ def test_axis0_references_reception_criteria():
     """Axis 0 must name the loom family reception file / label as the
     criteria SSOT — never copy the on-ramp table body into this SKILL.md."""
     text = _text()
-    assert "loom-pipeline/hooks/family-reception.md" in text or \
+    assert "loom-code/hooks/family-reception.md" in text or \
         "family-reception.md" in text, \
         "Axis 0 must name the reception file (point, don't copy)"
     low = text.lower()
@@ -83,7 +83,7 @@ def test_axis0_recommend_once_and_record_choice():
         or "do not re-raise" in low or "never re-ask" in low, \
         "Axis 0 must forbid re-raising the recommendation after a decline"
     # the concrete sequence must be named, not left abstract
-    assert "using-loom-product-principles" in text, \
+    assert "using-loom-design" in text, \
         "Axis 0 must name a concrete station in the design-side sequence"
 
 
@@ -144,7 +144,7 @@ def test_router_axis0_red_flag():
     """using-loom-code/SKILL.md must:
     (a) carry a red-flag row naming skipping brainstorming's Axis 0 upstream
         check before writing a brief as a violation;
-    (b) point to the loom family reception (loom-pipeline's SessionStart
+    (b) point to the loom family reception (loom-code's SessionStart
         hook) as the family map + on-ramp criteria SSOT;
     (c) update rule #1's '5-axis framework' mention with one clause noting
         the walk now starts at Axis 0, without rewriting the rule;
@@ -164,10 +164,10 @@ def test_router_axis0_red_flag():
     assert any("violation" in line.lower() for line in axis0_red_flag_lines), \
         "the Axis 0 red-flag row must call the skip a violation"
 
-    # (b) family pointer — loom-pipeline reception as the family map SSOT,
+    # (b) family pointer — loom-code reception as the family map SSOT,
     # attributed to the SessionStart hook mechanism.
-    assert "loom-pipeline" in text, \
-        "router must point to loom-pipeline (the reception's home plugin)"
+    assert "loom-code" in text, \
+        "router must point to loom-code (the reception's home plugin)"
     assert "family reception" in low or "family-reception.md" in text, \
         "router must name the loom family reception by name/path"
     assert "sessionstart" in low or "session-start" in low, \
