@@ -9,10 +9,11 @@ PRESENCE + POSITION of a compact new subsection: "Axis 0 — Upstream artifacts
 1. Point at the loom family reception's on-ramp criteria table
    (`loom-code/hooks/family-reception.md`) rather than copy it — SSOT
    drift prevention (plan-level note "Reception SSOT rule").
-2. On a triggered row, surface the recommendation ONCE (naming the concrete
-   design-side sequence), then record the user's choice in the brief under a
-   `## Design-side on-ramp` line, and proceed either way — never re-raise
-   after a decline.
+2. On a triggered row, first honor a DIRECTION.md standing choice; otherwise
+   write `pending` in the brief's `## Design-side on-ramp` line and surface
+   the recommendation ONCE as a standalone ask (naming the concrete
+   design-side sequence); only the user's answer is recorded — never an
+   agent default, never re-raised after the answer.
 3. Carry a negative-guard verbatim-equivalent: bug fix / refactor /
    test-covered increment → Axis 0 is skipped silently (no noise on
    incremental work).
@@ -32,6 +33,21 @@ SKILL = Path(__file__).parents[1] / "skills" / "brainstorming" / "SKILL.md"
 def _text() -> str:
     assert SKILL.is_file(), f"SKILL.md is absent at {SKILL}"
     return SKILL.read_text(encoding="utf-8")
+
+
+def _axis0_section() -> str:
+    """Just the `### Axis 0 …` section body, up to the next `### ` heading.
+
+    Whole-document greps false-green on a token that happens to appear
+    ANYWHERE in SKILL.md — the failure this slicer exists to prevent
+    (round-1 review D4: the record-choice assertion passed on an
+    'offered' living in a different paragraph)."""
+    text = _text()
+    start = re.search(r"^###\s*Axis 0\b.*$", text, re.MULTILINE)
+    assert start is not None, "Axis 0 heading missing"
+    rest = text[start.end():]
+    end = re.search(r"^###\s", rest, re.MULTILINE)
+    return rest[: end.start()] if end else rest
 
 
 # --- presence + position -----------------------------------------------
@@ -69,22 +85,53 @@ def test_axis0_references_reception_criteria():
 
 def test_axis0_recommend_once_and_record_choice():
     """On a triggered row: surface the recommendation ONCE naming a concrete
-    sequence, then record the user's choice in the brief, and never re-raise
-    after a decline."""
+    sequence, then record the USER'S OWN answer in the brief, and never
+    re-raise after a decline.
+
+    The record-choice assertions are scoped to the Axis 0 section and
+    pinned to the current contract's tokens (`user chose` / `pending` /
+    `standalone ask`). The previous whole-document `"offered"` grep was a
+    false green — that word lives in the loom-init paragraph and would
+    have stayed satisfied even if the on-ramp answer machinery vanished."""
     text = _text()
     low = text.lower()
+    axis0 = _axis0_section().lower()
     assert "recommend" in low, "Axis 0 must describe surfacing a recommendation"
     assert "once" in low, "Axis 0 must state the recommendation fires ONCE"
     assert "design-side on-ramp" in low, \
         "Axis 0 must name the brief line '## Design-side on-ramp'"
-    assert "offered" in low and ("chose" in low or "choice" in low), \
-        "Axis 0 must record the user's choice (offered — user chose <X>)"
+    assert "user chose" in axis0, \
+        "Axis 0 must record the USER's answer ('user chose <X>'), not a default"
+    assert "pending" in axis0, \
+        "Axis 0 must name the 'pending' state held until the user answers"
+    assert "standalone ask" in axis0, \
+        "Axis 0 must surface the recommendation as a standalone ask"
     assert "never re-raise" in low or "not re-raise" in low \
         or "do not re-raise" in low or "never re-ask" in low, \
         "Axis 0 must forbid re-raising the recommendation after a decline"
     # the concrete sequence must be named, not left abstract
     assert "using-loom-design" in text, \
         "Axis 0 must name a concrete station in the design-side sequence"
+
+
+def test_axis0_standalone_ask_pending_no_agent_default():
+    """A fired row must first check DIRECTION.md's standing choices; absent
+    a standing entry, the brief line starts `pending` and the recommendation
+    fires as a standalone ask — never an agent-recorded default. The old
+    'proceed either way' phrasing (which let an unanswered ask sit
+    unresolved) must be gone."""
+    text = _text()
+    low = text.lower()
+    assert "standalone ask" in low, \
+        "Axis 0 must fire the recommendation as a standalone ask"
+    assert "pending" in low, \
+        "Axis 0 must name the 'pending' brief-line state before the user answers"
+    assert "standing" in low, \
+        "Axis 0 must check DIRECTION.md's standing choices before asking"
+    assert "direction.md" in low, \
+        "Axis 0 must name DIRECTION.md as the standing-choice source"
+    assert "proceed either way" not in low, \
+        "Axis 0 must drop the old 'proceed either way' phrasing"
 
 
 # --- inclusive mandate ----------------------------------------------------

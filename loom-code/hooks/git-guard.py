@@ -3,7 +3,7 @@
 
 Claude Code pipes the hook-event JSON (`tool_name`, `tool_input`,
 `cwd`) to stdin before every tool call. For Bash commands this guard
-blocks two families of gate bypass:
+blocks these families of gate bypass:
 
 1. ``git commit --no-verify`` (or the ``-n`` short form, incl. inside
    bundled short-option clusters like ``-anm``; commit subcommand
@@ -48,6 +48,20 @@ blocks two families of gate bypass:
    undeletable waiver (e.g. read-only dir) is treated as absent,
    loudly, and the marker gates still apply (fail-closed against both
    the permanent-bypass and the TOCTOU double-spend).
+
+3. ``git commit`` staging a NEWLY ADDED ``docs/loom/plans/*.md``
+   (``--diff-filter=A``; a modified plan is never gated) whose source
+   brief — the path on the plan's ``**Source brief**:`` header line —
+   has not recorded the user's Design-side on-ramp choice. The brief's
+   ``## Design-side on-ramp`` line is evaluated by
+   ``loom-code/scripts/check_onramp_choice.py`` (imported from the
+   sibling ``scripts/`` directory); ``unresolved`` blocks with the
+   checker's own question plus ``MSG_ONRAMP``. This gate fails OPEN and
+   LOUDLY — a failed checker import, an unreadable brief, or a plan
+   with no ``**Source brief**:`` line prints exactly one
+   ``loom git-guard: on-ramp choice gate inactive (<reason>)`` line and
+   allows, mirroring ``.codex/hooks/git-guard-shim.sh``'s posture; a
+   silent allow would recreate the invisible default this gate closes.
 
 Escape hatches / fail-open behavior: ``LOOM_CODE_MODE=off`` disables
 the guard; non-Bash tools, non-git/gh segments, ``git push
@@ -104,6 +118,7 @@ import re
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 # Segment separators: ||, &&, ;, |, single & (background — a safe
 # superset of &&), and newlines (multiline Bash commands are routine).
@@ -127,6 +142,17 @@ MSG_REVIEW = (
     "loom-code:requesting-code-review to a PASS / PASS_WITH_NOTES verdict "
     "first, or ask the user to waive this push (the orchestrator then "
     "writes the waiver via loom-code/scripts/loom_gate_markers.py)."
+)
+MSG_ONRAMP = (
+    "What happened: this commit ADDS a new plan, and its source brief "
+    "({brief}, named by {plan}'s `**Source brief**:` header) does not "
+    "record the user's Design-side on-ramp choice. Your two options: put "
+    "the question above to the user and write their answer into {brief}'s "
+    "`## Design-side on-ramp` line, or — when a standing choice covers it "
+    "— cite it there in the `standing <detour|direct> (DIRECTION.md)` "
+    "form. Do not answer on the user's behalf. "
+    "loom gate: a newly added plan's source brief must record the "
+    "on-ramp answer before the plan enters git (loom-code gate)."
 )
 MSG_VERIFIED = (
     "What happened: this push needs a verified green test run that is not "
@@ -268,17 +294,18 @@ def _is_gh_api_merge(tokens):
 
 def _parse_git(tokens):
     """Split a ``git ...`` argv into (subcommand, sub_args, -C path,
-    --git-dir path).
+    --git-dir path, --work-tree path).
 
     Value-taking global flags (-C / -c / --git-dir / --work-tree /
     --namespace / --config-env / --attr-source, in both
     ``--flag value`` and ``--flag=value`` forms) are skipped so their
     VALUES are never mistaken for the subcommand. The ``=`` forms are
-    single tokens, so all but ``--git-dir=`` (whose value we capture)
-    fall through to the generic ``-``-prefix skip.
+    single tokens, so all but ``--git-dir=`` / ``--work-tree=`` (whose
+    values we capture) fall through to the generic ``-``-prefix skip.
     """
     c_path = None
     git_dir = None
+    work_tree = None
     i = 1
     while i < len(tokens):
         tok = tokens[i]
@@ -291,17 +318,22 @@ def _parse_git(tokens):
         elif tok.startswith("--git-dir="):
             git_dir = tok.split("=", 1)[1]
             i += 1
+        elif tok == "--work-tree" and i + 1 < len(tokens):
+            work_tree = tokens[i + 1]
+            i += 2
+        elif tok.startswith("--work-tree="):
+            work_tree = tok.split("=", 1)[1]
+            i += 1
         elif (
-            tok in ("-c", "--work-tree", "--namespace",
-                    "--config-env", "--attr-source")
+            tok in ("-c", "--namespace", "--config-env", "--attr-source")
             and i + 1 < len(tokens)
         ):
             i += 2
         elif tok.startswith("-"):
             i += 1
         else:
-            return tok, tokens[i + 1:], c_path, git_dir
-    return None, [], c_path, git_dir
+            return tok, tokens[i + 1:], c_path, git_dir, work_tree
+    return None, [], c_path, git_dir, work_tree
 
 
 def _git(args, cwd, git_globals=()):
@@ -432,6 +464,32 @@ def _has_no_verify(args):
     return False
 
 
+def _cwd_for(effective_cwd, c_path):
+    """The cwd a git segment's gate must run in: the segment's own ``-C``
+    path (relative forms resolved against the effective cwd), or the
+    effective cwd when it carries none."""
+    if not c_path:
+        return effective_cwd
+    return c_path if os.path.isabs(c_path) else os.path.join(effective_cwd, c_path)
+
+
+def _repo_globals(git_dir, work_tree, gate_cwd):
+    """Global flags forwarding a segment's ``--git-dir`` / ``--work-tree``
+    to the gate, so it resolves the same repo the command itself would
+    hit (relative paths resolve against the gate cwd, like git's own
+    -C-then---git-dir ordering). Empty when the segment names neither."""
+    globals_ = ()
+    if git_dir:
+        if not os.path.isabs(git_dir):
+            git_dir = os.path.join(gate_cwd, git_dir)
+        globals_ += ("--git-dir", git_dir)
+    if work_tree:
+        if not os.path.isabs(work_tree):
+            work_tree = os.path.join(gate_cwd, work_tree)
+        globals_ += ("--work-tree", work_tree)
+    return globals_
+
+
 def _gate_push(cwd, git_globals=()):
     """Marker gate for one push-family segment → (exit_code, stderr_notes)."""
     notes = []
@@ -482,6 +540,157 @@ def _gate_push(cwd, git_globals=()):
     return 0, notes
 
 
+PLAN_DIR = "docs/loom/plans/"
+SOURCE_BRIEF_PREFIX = "**Source brief**:"
+
+
+def _inactive(reason):
+    """The one loud fail-open line — the gate did not run, and says so."""
+    return f"loom git-guard: on-ramp choice gate inactive ({reason})"
+
+
+def _import_onramp_checker():
+    """The check_onramp_choice module from this hook's sibling
+    ``scripts/`` directory (the single implementation — the gate never
+    reimplements the grammar)."""
+    scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    # A hook must not leave __pycache__/ behind in the plugin tree — this
+    # repo's skill-folder validator refuses nested subfolders there.
+    sys.dont_write_bytecode = True
+    import check_onramp_choice
+
+    return check_onramp_choice
+
+
+def _source_brief_path(plan_text):
+    """The path on the plan's ``**Source brief**:`` header line (plan-format
+    SSOT: writing-plans/references/plan-format.md), or None when the plan
+    carries no such line. Surrounding backticks are stripped — some plans
+    code-span the path."""
+    for line in plan_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(SOURCE_BRIEF_PREFIX):
+            value = stripped[len(SOURCE_BRIEF_PREFIX):].strip().strip("`").strip()
+            return value or None
+    return None
+
+
+def _brief_path_inside_repo(root, brief_rel):
+    """The absolute path of `brief_rel` when it names a file INSIDE
+    `root`, else None — the containment check that keeps a plan's
+    `**Source brief**:` value from steering the gate at an arbitrary
+    file (OWASP ASVS V5 path traversal / CHK-SEC-004). An absolute
+    value is refused outright (``root / "/etc/hosts"`` is
+    ``/etc/hosts`` under Path.__truediv__), and the relative case is
+    resolved — symlinks included — before being compared against the
+    resolved root, so ``../`` cannot climb out."""
+    if os.path.isabs(brief_rel):
+        return None
+    try:
+        candidate = (root / brief_rel).resolve()
+        candidate.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None
+    return candidate
+
+
+def _gate_commit_plans(cwd, git_globals=()):
+    """On-ramp choice gate for one ``git commit`` → (exit_code, stderr notes).
+
+    Gates only NEWLY ADDED ``docs/loom/plans/*.md`` files: each one's
+    source brief must record the user's on-ramp answer (checker verdict
+    other than ``unresolved``). Fails open — loudly, one ``_inactive``
+    note — whenever the verdict cannot be computed."""
+    notes = []
+    # Repo probe first, because `git diff --cached` OUTSIDE a repo does
+    # not say so — it falls back to --no-index mode and reports
+    # "unknown option `cached'" (live-verified, git 2.x), which would be
+    # indistinguishable from a real failure. `rev-parse --git-dir` names
+    # the condition instead.
+    if _git(["rev-parse", "--git-dir"], cwd, git_globals).returncode != 0:
+        if git_globals:
+            # The segment pointed the gate at a repo that is not there —
+            # the gate did not run, so say so (loud fail-open).
+            return 0, [_inactive(
+                "no git repository at " + " ".join(git_globals)
+            )]
+        # An ambient non-repo cwd is not this gate's business: git itself
+        # refuses such a commit, and a note on every one of them is noise.
+        return 0, notes
+    # grounding: `git diff --help` §--diff-filter — `A` selects Added
+    # paths only (the gate's added-only scope), `--cached` reads the
+    # index the commit is about to record. §-z makes the output
+    # NUL-terminated AND turns OFF the default `core.quotepath` C-quoting,
+    # which would otherwise render a non-ASCII plan name as
+    # `"docs/loom/plans/\350\250\210\347\224\273.md"` — a leading `"` that
+    # defeats the PLAN_DIR filter below and silently un-gates the commit.
+    staged = _git(
+        ["diff", "--cached", "--name-only", "-z", "--diff-filter=A"],
+        cwd,
+        git_globals,
+    )
+    if staged.returncode != 0:
+        first_line = next(
+            (ln for ln in staged.stderr.splitlines() if ln.strip()), ""
+        )
+        return 0, [_inactive(f"git diff --cached failed: {first_line}")]
+    plans = [
+        path
+        for path in staged.stdout.split("\0")
+        if path.startswith(PLAN_DIR) and path.endswith(".md")
+    ]
+    if not plans:
+        return 0, notes
+    try:
+        checker = _import_onramp_checker()
+    except Exception as exc:  # ImportError, or anything the module raises
+        return 0, [_inactive(f"checker unavailable: {exc}")]
+    top = _git(["rev-parse", "--show-toplevel"], cwd, git_globals)
+    if top.returncode != 0:
+        return 0, [_inactive("repo toplevel could not be resolved")]
+    root = Path(top.stdout.strip())
+    try:
+        standing = checker.load_standing(root)
+    except Exception as exc:  # OSError, UnicodeDecodeError, anything else
+        # Name the gate: an unreadable DIRECTION.md here would otherwise
+        # escape to __main__'s anonymous "internal error" line, hiding
+        # WHICH gate stopped working.
+        return 0, [_inactive(
+            f"cannot read DIRECTION.md standing choices: {exc}"
+        )]
+    for plan in plans:
+        try:
+            plan_text = (root / plan).read_text(encoding="utf-8")
+        except OSError as exc:
+            notes.append(_inactive(f"{plan} could not be read: {exc}"))
+            continue
+        brief_rel = _source_brief_path(plan_text)
+        if brief_rel is None:
+            notes.append(_inactive(f"{plan} has no '{SOURCE_BRIEF_PREFIX}' line"))
+            continue
+        brief_path = _brief_path_inside_repo(root, brief_rel)
+        if brief_path is None:
+            notes.append(
+                _inactive(f"source brief path escapes the repo: {brief_rel}")
+            )
+            continue
+        try:
+            brief_text = brief_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            notes.append(
+                _inactive(f"source brief {brief_rel} could not be read: {exc}")
+            )
+            continue
+        result = checker.resolve(brief_text, standing)
+        if result.status == "unresolved":
+            notes.append(checker.build_question(result))
+            notes.append(MSG_ONRAMP.format(brief=brief_rel, plan=plan))
+            return 2, notes
+    return 0, notes
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.read())
@@ -522,27 +731,26 @@ def main():
             gate_cwd = None
             gate_globals = ()
             if _is_git_token(gtoks[0]):
-                sub, args, c_path, git_dir = _parse_git(gtoks)
+                sub, args, c_path, git_dir, work_tree = _parse_git(gtoks)
                 if sub == "commit" and _has_no_verify(args):
                     print(MSG_NO_VERIFY, file=sys.stderr)
                     return 2
+                if sub == "commit":
+                    commit_cwd = _cwd_for(effective_cwd, c_path)
+                    code, notes = _gate_commit_plans(
+                        commit_cwd,
+                        _repo_globals(git_dir, work_tree, commit_cwd),
+                    )
+                    for note in notes:
+                        print(note, file=sys.stderr)
+                    if code != 0:
+                        return code
                 # push's -n means --dry-run (unlike commit's -n = --no-verify)
                 if sub == "push" and "--dry-run" not in args and "-n" not in args:
-                    gate_cwd = effective_cwd
-                    if c_path:
-                        gate_cwd = (
-                            c_path
-                            if os.path.isabs(c_path)
-                            else os.path.join(effective_cwd, c_path)
-                        )
-                    if git_dir:
-                        # Forward --git-dir so the gate resolves the same
-                        # repo the push itself would hit (relative paths
-                        # resolve against the effective cwd, like git's own
-                        # -C-then---git-dir ordering).
-                        if not os.path.isabs(git_dir):
-                            git_dir = os.path.join(gate_cwd, git_dir)
-                        gate_globals = ("--git-dir", git_dir)
+                    gate_cwd = _cwd_for(effective_cwd, c_path)
+                    # push's marker gate only resolves <git-dir>/loom —
+                    # no work tree involved, so --work-tree is not forwarded.
+                    gate_globals = _repo_globals(git_dir, None, gate_cwd)
             elif (
                 gtoks[0] == "gh"
                 and len(gtoks) >= 3
