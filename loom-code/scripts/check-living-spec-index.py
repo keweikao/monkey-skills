@@ -37,14 +37,27 @@ modes selected from argv:
   (stderr), a deferred req with 0 tests is surfaced informationally
   (stdout). The merge-boundary coverage gate (sound because CI runs it
   after the green pytest gate, so a linked test == a passing test).
+- ``--next-req-id [root]`` prints ``REQ-<max+1>`` where max is the
+  highest ``\\d+`` among ALL id-form ``### Requirement:`` headers found
+  by the T7 folded loader across live change-folders + archive + the
+  living-spec root (``REQ-1`` when none exist), exit 0 always. LIMIT:
+  it scans headers PRESENT, not every id ever minted — a retired
+  number (its declaration deleted) is free to be re-minted; this only
+  matches the "next unused = highest ever seen + 1" convention while
+  no declaration is ever deleted.
 
 The index modes default ``<path>`` to ``docs/loom/INDEX.md`` when
-omitted; ``--check-coverage`` takes only an optional trailing ``[root]``.
+omitted; ``--check-coverage`` and ``--next-req-id`` each take only an
+optional trailing ``[root]``.
 
 ``build_index(root)`` is the single regeneration path the CLI, the
 finishing step, and the CI verify lane all call — composing
-``collect_structural_records`` -> ``load_namespace`` -> ``generate_index``
-across the source tree into the index markdown string.
+``collect_structural_records`` -> ``_load_namespace_all`` ->
+``generate_index`` across the source tree into the index markdown
+string. The namespace is folded, via ``_namespace_roots(root)``, over
+every LIVE change-folder ``docs/loom/<change-id>/specs``, every
+ARCHIVED ``docs/loom/archive/<x>/specs``, and the living-spec root
+``docs/loom/spec`` (tolerated absent) — not a single hardcoded root.
 
 Alongside the structural FAIL lane, the runner drives an advisory WARN
 lane via ``run_drift_lane(root)`` — composing collect -> resolve ->
@@ -56,6 +69,7 @@ Stdlib only, plus the sibling living-spec modules it composes.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -70,8 +84,125 @@ from living_spec_index import (
     find_malformed_status,
     generate_index,
     load_namespace,
+    load_req_paths,
     load_req_status,
 )
+
+
+def _namespace_roots(root: Path) -> list[Path]:
+    """Return every ``specs`` dir that contributes to the req namespace.
+
+    In order: every LIVE change-folder ``docs/loom/<change-id>/specs``
+    (glob ``docs/loom/*/specs``, existing dirs only), every ARCHIVED
+    change-folder ``docs/loom/archive/<x>/specs``, then the living-spec
+    root ``docs/loom/spec`` (tolerated absent — the folded loaders below
+    already handle a missing dir by globbing nothing). Fixes BI-12: a
+    single hardcoded ``docs/loom/spec`` root that usually does not exist
+    once requirements live in change-folders instead.
+    """
+    root = Path(root)
+    loom_dir = root / "docs" / "loom"
+    roots = [
+        p / "specs"
+        for p in sorted(loom_dir.glob("*"))
+        if p.name != "archive" and (p / "specs").is_dir()
+    ]
+    archive_dir = loom_dir / "archive"
+    if archive_dir.is_dir():
+        roots += [
+            p / "specs"
+            for p in sorted(archive_dir.glob("*"))
+            if (p / "specs").is_dir()
+        ]
+    roots.append(loom_dir / "spec")
+    return roots
+
+
+def _load_namespace_all(root: Path) -> dict[str, str]:
+    """Fold ``load_namespace`` over every ``_namespace_roots(root)``.
+
+    Dict merge, later roots overwrite earlier ones on the same key. A
+    duplicate id declared under two roots is NOT resolved here — that
+    is a namespace-collision violation surfaced elsewhere (T8), not
+    silently picked here.
+    """
+    namespace: dict[str, str] = {}
+    for specs_dir in _namespace_roots(root):
+        namespace.update(load_namespace(specs_dir))
+    return namespace
+
+
+def _load_req_status_all(root: Path) -> dict[str, str]:
+    """Fold ``load_req_status`` over every ``_namespace_roots(root)``."""
+    statuses: dict[str, str] = {}
+    for specs_dir in _namespace_roots(root):
+        statuses.update(load_req_status(specs_dir))
+    return statuses
+
+
+def _find_malformed_status_all(root: Path) -> list[str]:
+    """Fold ``find_malformed_status`` over every ``_namespace_roots(root)``."""
+    offenders: list[str] = []
+    for specs_dir in _namespace_roots(root):
+        offenders += find_malformed_status(specs_dir)
+    return offenders
+
+
+def _collect_req_declarations_all(root: Path) -> dict[str, list[Path]]:
+    """Map each id-form req id to EVERY spec.md path that declares it.
+
+    Folds over ``_namespace_roots(root)``, walking the same
+    ``<specs_dir>/<capability>/spec.md`` files as ``_load_namespace_all``.
+    Unlike ``_load_namespace_all`` (a dict merge where the last root wins),
+    this collects every declaring path per id, so a duplicate declaration
+    across namespace files stays visible instead of being silently
+    overwritten.
+    """
+    declarations: dict[str, list[Path]] = {}
+    for specs_dir in _namespace_roots(root):
+        for req_id, paths in load_req_paths(specs_dir).items():
+            declarations.setdefault(req_id, []).extend(paths)
+    return declarations
+
+
+def find_duplicate_req_declarations(root: Path) -> list[str]:
+    """Return one violation per req id declared more than once.
+
+    Two distinct collision shapes, both BI-3 (a merge-boundary collision
+    on a change-folder spec.md), reported with distinct wording:
+
+    - CROSS-FILE: two branches each minting the same ``REQ-<n>`` in
+      different namespace files collide on the first CI run after both
+      merge (or earlier, on rebase). Names the id and every declaring
+      path.
+    - SAME-FILE: the same ``REQ-<n>`` heading appears twice in ONE
+      spec.md (a same-file authoring slip, or two branches appending to
+      the same capability spec.md that git merges cleanly line-by-line —
+      only this checker catches it post-merge). Names the id, the
+      occurrence count, and the single declaring path.
+
+    ``declarations`` (via ``load_req_paths``) carries one path entry per
+    DECLARING LINE, repeats included — the distinct-vs-repeated path set
+    is what tells the two shapes apart; deduping it would make the
+    same-file shape invisible.
+    """
+    declarations = _collect_req_declarations_all(root)
+    violations: list[str] = []
+    for req_id in sorted(declarations):
+        paths = declarations[req_id]
+        distinct_paths = sorted(set(paths))
+        if len(distinct_paths) > 1:
+            joined = ", ".join(str(p) for p in paths)
+            violations.append(
+                f"DUPLICATE requirement id {req_id} declared in "
+                f"multiple files: {joined}"
+            )
+        elif len(paths) > 1:
+            violations.append(
+                f"DUPLICATE requirement id {req_id} declared "
+                f"{len(paths)} times in {distinct_paths[0]}"
+            )
+    return violations
 
 
 def find_structural_violations(
@@ -181,18 +312,19 @@ def build_index(root: Path) -> str:
     - ``collect_structural_records(root)`` parses every ANCHORED ``@req``
       binding under ``root`` into ``{test, reqs, invariant_refs}``
       records;
-    - ``load_namespace(root / "docs/loom/spec")`` maps each
-      ``### Requirement: <id>`` to its capability (the subdir name);
+    - ``_load_namespace_all(root)`` maps each ``### Requirement: <id>``
+      across every namespace root (live change-folders, archive, and
+      the living-spec root) to its capability (the subdir name);
     - ``generate_index(records, namespace)`` renders the
       capability > requirement > test markdown tree.
 
-    Over a repo with no ``docs/loom/spec`` tree yet, ``load_namespace``
+    Over a repo with no namespace roots yet, ``_load_namespace_all``
     returns ``{}`` and the index is near-empty — the valid base case,
     not an error.
     """
     root = Path(root)
     tag_records = collect_structural_records(root)
-    namespace = load_namespace(root / "docs" / "loom" / "spec")
+    namespace = _load_namespace_all(root)
     return generate_index(tag_records, namespace)
 
 
@@ -241,6 +373,58 @@ def run_drift_lane(root: Path) -> list[str]:
 _DEFAULT_INDEX = Path("docs") / "loom" / "INDEX.md"
 
 
+def _run_check_coverage(root: Path) -> int:
+    """Run the ``--check-coverage`` merge-boundary coverage gate.
+
+    Composes the real-repo inputs and runs the hermetic ``active_coverage``.
+    SOUND because CI runs this AFTER the green pytest gate, so a linked
+    test == a passing test (0 linked == 0 passing). Deferred reqs with 0
+    tests are informational (stdout, never fail); uncovered active reqs
+    are violations (stderr, rc=1).
+    """
+    tag_records = collect_structural_records(root)
+    namespace = _load_namespace_all(root)
+    statuses = _load_req_status_all(root)
+    violations, surfaced = active_coverage(tag_records, namespace, statuses)
+    for line in surfaced:
+        print(line)
+    if violations:
+        for entry in violations:
+            print(entry, file=sys.stderr)
+        print(
+            f"\nFAIL: {len(violations)} living-spec coverage "
+            f"violation(s).",
+            file=sys.stderr,
+        )
+        return 1
+    print("OK: every active living-spec req is covered.")
+    return 0
+
+
+def _run_next_req_id(root: Path) -> int:
+    """Run the ``--next-req-id`` mode: print next free ``REQ-<n>``, exit 0.
+
+    Ignores the capability values, parses the trailing ``\\d+`` of every
+    id-form key in the T7 folded namespace, and prints the next free
+    ``REQ-<n>`` (``REQ-1`` on an empty namespace). Opens no new roots and
+    reads no header the structural lane does not already read.
+
+    LIMIT: it scans headers PRESENT, not every id ever minted. A retired
+    req id (declaration deleted) is NOT excluded from being re-minted once
+    nothing references it any more — the doc's minting rule ("next unused
+    = highest ever seen + 1") coincides with this tool's "highest present
+    + 1" only while no declaration is ever deleted.
+    """
+    namespace = _load_namespace_all(root)
+    highest = 0
+    for req_id in namespace:
+        match = re.search(r"\d+", req_id)
+        if match:
+            highest = max(highest, int(match.group()))
+    print(f"REQ-{highest + 1}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # argv shapes:
     #   []                              -> default lanes over cwd
@@ -248,11 +432,13 @@ def main(argv: list[str] | None = None) -> int:
     #   [--write-index, [path,] [root]] -> regenerate + WRITE path
     #   [--verify-index, [path,] [root]]-> regenerate + byte-identity gate
     #   [--check-coverage, [root]]      -> active-coverage merge gate
+    #   [--next-req-id, [root]]         -> print next free REQ-<n>, exit 0
     # A leading --write-index/--verify-index flag consumes an optional
-    # <path> arg (defaulting to docs/loom/INDEX.md); --check-coverage takes
-    # no <path>. The trailing positional, if present, still selects the
-    # source tree (the WARN-lane tests pass `[str(repo)]` with no flag, so
-    # the default path must preserve that behavior).
+    # <path> arg (defaulting to docs/loom/INDEX.md); --check-coverage and
+    # --next-req-id take no <path>. The trailing positional, if present,
+    # still selects the source tree (the WARN-lane tests pass
+    # `[str(repo)]` with no flag, so the default path must preserve that
+    # behavior).
     args = sys.argv[1:] if argv is None else argv
 
     mode = None
@@ -262,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
         index_path = Path(args[0]) if args else _DEFAULT_INDEX
         if args:
             args = args[1:]
-    elif args and args[0] == "--check-coverage":
+    elif args and args[0] in ("--check-coverage", "--next-req-id"):
         mode = args[0]
         args = args[1:]
 
@@ -283,28 +469,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     if mode == "--check-coverage":
-        # Merge-boundary coverage gate: compose the real-repo inputs and run
-        # the hermetic active_coverage. SOUND because CI runs this AFTER the
-        # green pytest gate, so a linked test ≡ a passing test (0 linked ≡
-        # 0 passing). Deferred reqs with 0 tests are informational (stdout,
-        # never fail); uncovered active reqs are violations (stderr, rc=1).
-        tag_records = collect_structural_records(root)
-        namespace = load_namespace(root / "docs" / "loom" / "spec")
-        statuses = load_req_status(root / "docs" / "loom" / "spec")
-        violations, surfaced = active_coverage(tag_records, namespace, statuses)
-        for line in surfaced:
-            print(line)
-        if violations:
-            for entry in violations:
-                print(entry, file=sys.stderr)
-            print(
-                f"\nFAIL: {len(violations)} living-spec coverage "
-                f"violation(s).",
-                file=sys.stderr,
-            )
-            return 1
-        print("OK: every active living-spec req is covered.")
-        return 0
+        return _run_check_coverage(root)
+    if mode == "--next-req-id":
+        return _run_next_req_id(root)
 
     # WARN lane: advisory only. Print each drift WARN to stderr but NEVER
     # let it fail the build or touch the structural FAIL list below.
@@ -316,12 +483,16 @@ def main(argv: list[str] | None = None) -> int:
     # malformed tag. This is the gate that fails the build (rc=1).
     tag_records = collect_structural_records(root)
     malformed = collect_malformed(root)
-    namespace = load_namespace(root / "docs" / "loom" / "spec")
+    namespace = _load_namespace_all(root)
     violations = find_structural_violations(tag_records, malformed, namespace)
     # Fold the malformed-status check into the SAME FAIL list: a bad status
     # token (`[activ]`) is a syntax defect, RED-safe to gate on every push
     # (not a coverage check) — surface it on stderr and count it toward rc=1.
-    violations += find_malformed_status(root / "docs" / "loom" / "spec")
+    violations += _find_malformed_status_all(root)
+    # Merge-boundary collision guard (BI-3): the same req id declared in
+    # more than one namespace file must fail loud rather than let one
+    # declaration silently overwrite the other.
+    violations += find_duplicate_req_declarations(root)
     if violations:
         for entry in violations:
             print(entry, file=sys.stderr)

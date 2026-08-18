@@ -214,6 +214,178 @@ def test_skeleton_tolerates_extra_content(tmp_path):
     assert ok, f"extra content must be tolerated, got: {problems}"
 
 
+def test_rejects_near_miss_requirement_id(tmp_path):
+    # No living-spec REQ-id: this task predates the living-spec namespace
+    # registry (T1 is the validator itself); untagged per implementer
+    # contract rule 11.
+    body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: req-1 — Foo\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    root = _write_skeleton(tmp_path, delta_body=body)
+    ok, problems = validate(root)
+    assert not ok
+    assert any("req-1" in p for p in problems), problems
+
+
+def test_accepts_id_form_requirement(tmp_path):
+    body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1 — Foo\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    root = _write_skeleton(tmp_path, delta_body=body)
+    ok, problems = validate(root)
+    assert ok, problems
+
+
+def test_accepts_legacy_prose_requirement(tmp_path):
+    body = _well_formed_delta()  # "### Requirement: User login", no id
+    root = _write_skeleton(tmp_path, delta_body=body)
+    ok, problems = validate(root)
+    assert ok, problems
+
+
+def test_rejects_id_only_requirement_missing_name(tmp_path):
+    # spec-reviewer round-2 gap: docs/loom/plans/2026-08-18-requirement-
+    # identity-hybrid.md Notes §Canonical grammar — name may be absent
+    # only in living-spec files, not change-folder deltas; an id with no
+    # name is a near-miss there. No living-spec REQ-id: untagged per
+    # implementer contract rule 11 (same as test_rejects_near_miss_requirement_id).
+    body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    root = _write_skeleton(tmp_path, delta_body=body)
+    ok, problems = validate(root)
+    assert not ok
+    assert any("REQ-1" in p for p in problems), problems
+
+
+def test_rejects_id_and_status_requirement_missing_name(tmp_path):
+    body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1 [active]\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    root = _write_skeleton(tmp_path, delta_body=body)
+    ok, problems = validate(root)
+    assert not ok
+    assert any("REQ-1" in p for p in problems), problems
+
+
+def test_mixed_id_and_prose_headers_in_one_file_is_invalid(tmp_path):
+    # No living-spec REQ-id: T2 (this task) predates the living-spec
+    # namespace registry (T1 is the validator itself); untagged per
+    # implementer contract rule 11.
+    mixed_body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1 — Foo\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+        "\n"
+        "### Requirement: Bar\n"
+        "The system MUST do another thing.\n"
+    )
+    root = _write_skeleton(tmp_path, delta_body=mixed_body)
+    ok, problems = validate(root)
+    assert not ok
+    assert any("Bar" in p for p in problems), problems
+
+
+def test_mixed_headers_split_across_two_files_is_valid(tmp_path):
+    # No living-spec REQ-id: same as above.
+    id_body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1 — Foo\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    prose_body = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: Bar\n"
+        "The system MUST do another thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    proposal = "# Proposal\n\nWhy this change.\n\n" + _well_formed_additive()
+    (tmp_path / "proposal.md").write_text(proposal, encoding="utf-8")
+    specs_a = tmp_path / "specs" / "a"
+    specs_a.mkdir(parents=True)
+    (specs_a / "spec.md").write_text(id_body, encoding="utf-8")
+    specs_b = tmp_path / "specs" / "b"
+    specs_b.mkdir(parents=True)
+    (specs_b / "spec.md").write_text(prose_body, encoding="utf-8")
+    ok, problems = validate(tmp_path)
+    assert ok, problems
+
+
+def test_duplicate_requirement_id_across_files_is_invalid(tmp_path):
+    # No living-spec REQ-id: T3 (this task) predates the living-spec
+    # namespace registry (T1 is the validator itself); untagged per
+    # implementer contract rule 11.
+    body_a = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1 — Foo\n"
+        "The system MUST do the thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    body_b = (
+        "## ADDED Requirements\n"
+        "\n"
+        "### Requirement: REQ-1 — Bar\n"
+        "The system MUST do another thing.\n"
+        "\n"
+        "#### Scenario: Valid\n"
+        "- GIVEN a user\n- WHEN login\n- THEN session\n"
+    )
+    proposal = "# Proposal\n\nWhy this change.\n\n" + _well_formed_additive()
+    (tmp_path / "proposal.md").write_text(proposal, encoding="utf-8")
+    specs_a = tmp_path / "specs" / "a"
+    specs_a.mkdir(parents=True)
+    path_a = specs_a / "spec.md"
+    path_a.write_text(body_a, encoding="utf-8")
+    specs_b = tmp_path / "specs" / "b"
+    specs_b.mkdir(parents=True)
+    path_b = specs_b / "spec.md"
+    path_b.write_text(body_b, encoding="utf-8")
+    ok, problems = validate(tmp_path)
+    assert not ok
+    dup_problems = [p for p in problems if "REQ-1" in p]
+    assert dup_problems, problems
+    assert any(str(path_a) in p and str(path_b) in p for p in dup_problems), \
+        problems
+
+
 # --- additive-section tests (Task 3) ---------------------------------------
 # The spec station's differentiating richness lives in proposal.md's additive
 # sections; the OpenSpec delta under specs/ stays pure. So additive checks

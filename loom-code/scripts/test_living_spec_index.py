@@ -10,10 +10,13 @@ fixtures (no on-disk fixture dir — mirrors `test_check_skill_crossrefs.py`).
 Stdlib only (pathlib + tmp_path fixture).
 """
 
+from pathlib import Path
+
 from living_spec_index import (
     find_malformed_status,
     generate_index,
     load_namespace,
+    load_req_paths,
     load_req_status,
 )
 
@@ -56,6 +59,56 @@ def test_load_req_status_parses_suffix_default_active(tmp_path):
     assert load_namespace(specs) == {"REQ-1": "orders", "REQ-2": "orders"}
 
 
+def test_namespace_parses_id_name_and_status_and_skips_prose(tmp_path):
+    # No living-spec REQ-id: this test drives T6 itself, not a
+    # requirement it implements.
+    # WHY: the canonical grammar is `REQ-<n> — <name> [status]`; a
+    # prose header (no `REQ-<n>` id) is legacy and must be invisible to
+    # load_namespace/load_req_status/find_malformed_status alike — it
+    # is neither a namespace entry nor a malformed-status offender.
+    # EXCEPT: a prose header that DOES carry a bracket outside the
+    # status vocabulary is still a find_malformed_status offender,
+    # because the suffix grammar (the bracket rule) applies regardless
+    # of whether the header is id-form or prose.
+    specs = tmp_path / "specs"
+    _make_spec(
+        specs,
+        "orders",
+        "### Requirement: REQ-7 — Operational extraction [deferred]\n"
+        "### Requirement: REQ-8 — Bare name\n"
+        "### Requirement: Legacy prose name\n",
+    )
+
+    assert load_namespace(specs) == {"REQ-7": "orders", "REQ-8": "orders"}
+    status = load_req_status(specs)
+    assert status["REQ-7"] == "deferred"
+    assert status["REQ-8"] == "active"
+    assert find_malformed_status(specs) == []
+
+    # Same grammar, but the prose header now carries an invalid bracket.
+    specs2 = tmp_path / "specs2"
+    _make_spec(
+        specs2,
+        "orders",
+        "### Requirement: REQ-7 — Operational extraction [deferred]\n"
+        "### Requirement: REQ-8 — Bare name\n"
+        "### Requirement: Legacy [activ]\n",
+    )
+
+    malformed = find_malformed_status(specs2)
+    assert len(malformed) == 1
+    assert "activ" in malformed[0] and "Legacy" in malformed[0]
+
+    # Lockstep property: the status vocabulary is declared in exactly
+    # ONE literal place in the module source — both regexes are built
+    # from that single `_STATUS_VOCAB` constant, so changing it can't
+    # miss a second copy.
+    source = Path(__file__).parent.joinpath("living_spec_index.py").read_text(
+        encoding="utf-8"
+    )
+    assert source.count("active|deferred") == 1
+
+
 def test_find_malformed_status(tmp_path):
     # WHY: load_req_status defaults any unrecognized suffix to "active"
     # by design, which silently swallows a typo'd status token like
@@ -84,6 +137,45 @@ def test_find_malformed_status(tmp_path):
     # the valid [deferred] and the bare heading are NOT flagged
     assert "REQ-2" not in joined
     assert "REQ-3" not in joined
+
+
+def test_load_req_paths_maps_id_to_every_declaring_path(tmp_path):
+    # WHY: the CI duplicate-declaration guard (BI-3) needs EVERY path that
+    # declares a given req id, not just the last one (load_namespace's dict
+    # merge silently drops earlier declarations). Two spec.md files each
+    # declaring REQ-5 must both surface under the same key, sorted, so a
+    # duplicate id across namespace files stays visible instead of being
+    # overwritten.
+    specs = tmp_path / "specs"
+    _make_spec(specs, "order", "### Requirement: REQ-5\n")
+    _make_spec(specs, "payment", "### Requirement: REQ-5\n")
+
+    result = load_req_paths(specs)
+
+    assert result == {
+        "REQ-5": sorted([specs / "order" / "spec.md", specs / "payment" / "spec.md"])
+    }
+
+
+def test_load_req_paths_preserves_repeats_when_req_declared_twice_in_one_file(tmp_path):
+    # WHY: find_duplicate_req_declarations (check-living-spec-index.py) must
+    # be able to tell a SAME-FILE duplicate REQ-<n> (a same-file authoring
+    # slip, e.g. a copy-paste heading duplicate) apart from a cross-file
+    # collision — the two need distinct violation wording. That requires
+    # the per-id path LIST to keep one entry per declaring line (repeats
+    # included), not dedupe within a file — deduping here made a same-file
+    # duplicate invisible to the CI structural lane entirely.
+    specs = tmp_path / "specs"
+    _make_spec(
+        specs, "order",
+        "### Requirement: REQ-5\nsome prose\n\n### Requirement: REQ-5\nmore prose\n",
+    )
+
+    result = load_req_paths(specs)
+
+    assert result == {
+        "REQ-5": [specs / "order" / "spec.md", specs / "order" / "spec.md"]
+    }
 
 
 def test_generate_index_tree():

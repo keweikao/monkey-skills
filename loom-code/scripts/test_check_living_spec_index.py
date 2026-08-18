@@ -380,6 +380,155 @@ def test_main_structural_lane_passes_on_resolvable_req(tmp_path, capsys):
     )
 
 
+def test_namespace_includes_live_change_folder_and_archive_specs(tmp_path, capsys):
+    # WHY: the namespace must be read from EVERY change-folder + archive
+    # `specs/` dir plus the living `docs/loom/spec`, not just the
+    # singular (often nonexistent) `docs/loom/spec` root (BI-12). A test
+    # tagged `@req: REQ-3` (declared under a LIVE change-folder) and
+    # another tagged `@req: REQ-4` (declared under an ARCHIVE
+    # change-folder) must both resolve even with no `docs/loom/spec` dir
+    # at all; a third tag `@req: REQ-9` (declared nowhere) must still be
+    # reported DANGLING.
+    checker = _load_checker()
+    repo = _init_repo(tmp_path)
+
+    (repo / "test_foo.py").write_text(
+        "def test_a():\n"
+        "    # @req: REQ-3\n"
+        "    assert True\n"
+        "\n"
+        "def test_b():\n"
+        "    # @req: REQ-4\n"
+        "    assert True\n"
+        "\n"
+        "def test_c():\n"
+        "    # @req: REQ-9\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    live_dir = repo / "docs" / "loom" / "2026-01-01-x" / "specs" / "cap"
+    live_dir.mkdir(parents=True)
+    (live_dir / "spec.md").write_text(
+        "### Requirement: REQ-3 — Foo\n", encoding="utf-8"
+    )
+    archive_dir = repo / "docs" / "loom" / "archive" / "2026-01-02-y" / "specs" / "cap2"
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "spec.md").write_text(
+        "### Requirement: REQ-4 — Bar\n", encoding="utf-8"
+    )
+    _commit(repo, "live + archive specs, no docs/loom/spec", date="2026-01-01T00:00:00 +0000")
+
+    rc = checker.main([str(repo)])
+    assert rc == 1, (
+        f"the dangling REQ-9 must still fail the structural lane, got rc={rc!r}"
+    )
+    captured = capsys.readouterr()
+    assert "REQ-9" in captured.err, (
+        f"REQ-9 must be named as dangling, got: {captured.err!r}"
+    )
+    assert "REQ-3" not in captured.err, (
+        f"REQ-3 (declared in a live change-folder) must resolve, "
+        f"got: {captured.err!r}"
+    )
+    assert "REQ-4" not in captured.err, (
+        f"REQ-4 (declared in an archive change-folder) must resolve, "
+        f"got: {captured.err!r}"
+    )
+
+
+def test_duplicate_req_id_across_namespace_files_fails_structural_lane(tmp_path, capsys):
+    # WHY: BI-3's merge-boundary collision guard. Two change-folders each
+    # declaring `REQ-5` (e.g. two branches independently minting the same
+    # id) must not silently share one identity — the structural lane must
+    # FAIL LOUD, naming the id and BOTH declaring spec.md paths. The same
+    # id declared exactly once must still pass (no false-positive).
+    checker = _load_checker()
+    repo = _init_repo(tmp_path)
+
+    dup_a = repo / "docs" / "loom" / "2026-01-01-a" / "specs" / "cap-a"
+    dup_a.mkdir(parents=True)
+    (dup_a / "spec.md").write_text(
+        "### Requirement: REQ-5 — First\n", encoding="utf-8"
+    )
+    dup_b = repo / "docs" / "loom" / "2026-01-02-b" / "specs" / "cap-b"
+    dup_b.mkdir(parents=True)
+    (dup_b / "spec.md").write_text(
+        "### Requirement: REQ-5 — Second\n", encoding="utf-8"
+    )
+    _commit(repo, "REQ-5 declared twice", date="2026-01-01T00:00:00 +0000")
+
+    rc = checker.main([str(repo)])
+    assert rc == 1, (
+        f"REQ-5 declared in two namespace files must fail the structural "
+        f"lane, got rc={rc!r}"
+    )
+    captured = capsys.readouterr()
+    assert "REQ-5" in captured.err, (
+        f"the duplicated id must be named on stderr, got: {captured.err!r}"
+    )
+    assert str(dup_a / "spec.md") in captured.err, (
+        f"the first declaring path must be named, got: {captured.err!r}"
+    )
+    assert str(dup_b / "spec.md") in captured.err, (
+        f"the second declaring path must be named, got: {captured.err!r}"
+    )
+
+
+def test_duplicate_req_id_declared_once_passes(tmp_path, capsys):
+    # WHY: no false-positive — a req id declared in exactly ONE namespace
+    # file must not trip the duplicate-declaration guard.
+    checker = _load_checker()
+    repo = _init_repo(tmp_path)
+
+    spec_dir = repo / "docs" / "loom" / "spec" / "cap"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "spec.md").write_text(
+        "### Requirement: REQ-5 — Only\n", encoding="utf-8"
+    )
+    _commit(repo, "REQ-5 declared once", date="2026-01-01T00:00:00 +0000")
+
+    rc = checker.main([str(repo)])
+    assert rc == 0, (
+        f"a req id declared exactly once must not fail, got rc={rc!r}"
+    )
+
+
+def test_same_file_duplicate_req_id_fails_structural_lane(tmp_path, capsys):
+    # WHY: BI-3's collision shape can also happen WITHOUT a merge — two
+    # `### Requirement: REQ-<n>` headings inside the SAME spec.md (e.g. a
+    # copy-paste slip, or two branches appending to the same capability
+    # spec.md that git merges cleanly line-by-line). Deduping per-file in
+    # `load_req_paths` (commit 1c27c39f) made this invisible: the
+    # structural lane must FAIL LOUD here too, naming the id, the "declared
+    # N times" count, and the single declaring path.
+    checker = _load_checker()
+    repo = _init_repo(tmp_path)
+
+    spec_dir = repo / "docs" / "loom" / "spec" / "cap"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "spec.md").write_text(
+        "### Requirement: REQ-5 — First\n\n### Requirement: REQ-5 — Second\n",
+        encoding="utf-8",
+    )
+    _commit(repo, "REQ-5 declared twice in one file", date="2026-01-01T00:00:00 +0000")
+
+    rc = checker.main([str(repo)])
+    assert rc == 1, (
+        f"REQ-5 declared twice in the same spec.md must fail the "
+        f"structural lane, got rc={rc!r}"
+    )
+    captured = capsys.readouterr()
+    assert "REQ-5" in captured.err, (
+        f"the duplicated id must be named on stderr, got: {captured.err!r}"
+    )
+    assert "2 times" in captured.err, (
+        f"the same-file occurrence count must be named, got: {captured.err!r}"
+    )
+    assert str(spec_dir / "spec.md") in captured.err, (
+        f"the declaring path must be named, got: {captured.err!r}"
+    )
+
+
 def test_verify_index_mode_fails_on_stale(tmp_path):
     # WHY: the merge-boundary stale-index gate. `--verify-index <path>`
     # regenerates the index from the source tree and asserts byte-identity
@@ -720,4 +869,52 @@ def test_committed_tree_has_no_structural_violations():
         "living-spec structural check failed over the real repo tree; run "
         "`python3 loom-code/scripts/check-living-spec-index.py .` to see "
         "each dangling @req / malformed tag"
+    )
+
+
+def test_next_req_id_prints_highest_plus_one_across_roots(tmp_path, capsys):
+    # No living-spec REQ-id: this test covers T9's own new CLI mode, a
+    # capability with no ### Requirement namespace entry of its own yet.
+    # WHY: `--next-req-id` must scan ALL namespace roots the T7 folded
+    # loader covers (live change-folders + archive + living root), not
+    # just one — REQ-3 lives in a live folder, REQ-11 in archive; the
+    # printed next-free id must be highest-present + 1 across BOTH.
+    checker = _load_checker()
+    repo = _init_repo(tmp_path)
+
+    live_dir = repo / "docs" / "loom" / "2026-01-01-x" / "specs" / "cap"
+    live_dir.mkdir(parents=True)
+    (live_dir / "spec.md").write_text(
+        "### Requirement: REQ-3 — Foo\n", encoding="utf-8"
+    )
+    archive_dir = (
+        repo / "docs" / "loom" / "archive" / "2026-01-02-y" / "specs" / "cap2"
+    )
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "spec.md").write_text(
+        "### Requirement: REQ-11 — Bar\n", encoding="utf-8"
+    )
+    _commit(repo, "REQ-3 live, REQ-11 archive", date="2026-01-01T00:00:00 +0000")
+
+    rc = checker.main(["--next-req-id", str(repo)])
+    captured = capsys.readouterr()
+    assert rc == 0, f"--next-req-id must exit 0, got rc={rc!r}"
+    assert captured.out.strip() == "REQ-12", (
+        f"expected 'REQ-12' (highest present REQ-11 + 1), "
+        f"got: {captured.out!r}"
+    )
+
+
+def test_next_req_id_prints_req_1_on_empty_namespace(tmp_path, capsys):
+    # No living-spec REQ-id: empty-namespace base case of the same mode.
+    checker = _load_checker()
+    repo = _init_repo(tmp_path)
+    (repo / "README.md").write_text("empty fixture\n", encoding="utf-8")
+    _commit(repo, "no specs at all", date="2026-01-01T00:00:00 +0000")
+
+    rc = checker.main(["--next-req-id", str(repo)])
+    captured = capsys.readouterr()
+    assert rc == 0, f"--next-req-id must exit 0 on empty namespace, got rc={rc!r}"
+    assert captured.out.strip() == "REQ-1", (
+        f"expected 'REQ-1' on an empty namespace, got: {captured.out!r}"
     )

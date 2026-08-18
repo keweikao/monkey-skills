@@ -9,13 +9,16 @@ Inputs (positional CLI args):
 - `<change-folder>` is a `docs/loom/<change-id>/` directory in the shape
   `loom-design/scripts/spec/validate_spec_output.py` validates: `specs/<capability>/
   spec.md` delta files, each containing `### Requirement:` blocks that each
-  contain one or more `#### Scenario:` headers. The heading regexes here
-  reuse that exact grammar (`^###\\s+Requirement:` / `^####\\s+Scenario:`),
-  only adding capture groups for the name text — not a new variant.
+  contain one or more `#### Scenario:` headers. The heading regex here
+  widens that grammar to the requirement-identity-hybrid plan's id-aware
+  form (`^###\\s+Requirement:` followed by either `REQ-<n> — <name>` or a
+  legacy prose name), not a new variant of it.
 - `<plan-path>` is a writing-plans plan (`docs/loom/plans/...`). Per
   `loom-code/skills/writing-plans/references/plan-format.md`, a task's
-  `Brief item covered` field MAY be the stable join key
-  `<change-id> / Requirement: <name> / Scenario: <name>` (referent kind (b)).
+  `Brief item covered` field MAY be the stable join key: for a legacy
+  (name-keyed) requirement, `<change-id> / Requirement: <name> / Scenario:
+  <name>`; for an id-mode requirement, `<change-id> / REQ-<n> / Scenario:
+  <name>` — bare id, no `Requirement:` prefix (referent kind (d)).
 
 The script builds the full scenario-key set from the change-folder, the
 covered-key set from the plan's join keys, and reports the difference:
@@ -68,11 +71,29 @@ from pathlib import Path
 
 from adjudication_split import iter_lines_outside_fences
 
-# Same underlying heading grammar as validate_spec_output.py's
-# `_REQUIREMENT_HDR` (`^###\s+Requirement:`) and the pattern
-# `_first_scenario_block` matches (`^####\s+Scenario:.*$`) — these add a
-# capture group for the name text, they do not change the grammar.
-_REQUIREMENT_HDR = re.compile(r"^###\s+Requirement:\s*(.*)$", re.MULTILINE)
+# The id-aware canonical grammar (requirement-identity-hybrid plan, Notes
+# §Canonical grammar) — same underlying heading level as
+# validate_spec_output.py's `_REQUIREMENT_HDR` (`^###\s+Requirement:`), now
+# with three named groups: `id` (present ⇒ id-form header, e.g.
+# `REQ-3 — Foo`), `name` (the id-form's optional display name), and
+# `name_legacy` (the whole legacy prose name, id-form's alternative branch).
+# Mode is decided per FILE, not per header, by `_requirement_scenario_pairs`
+# below: ≥1 id-form header in the file ⇒ id-mode for every header in it
+# (T2 validates that invariant; this script assumes it holds).
+#
+# Deliberate deviation from `_REQUIREMENT_HDR`'s canonical-grammar note: the
+# trailing `\[(?P<status>[^\]]*)\]` group is nested inside the id-form
+# branch only, so a legacy prose header keeps any `[status]` suffix INSIDE
+# `name_legacy` rather than stripping it — the coverage key for a legacy
+# heading must stay byte-identical to before this grammar change (plan
+# Decision Log #4).
+_REQUIREMENT_HDR = re.compile(
+    r"^###\s+Requirement:\s*"
+    r"(?:(?P<id>REQ-\d+)(?:\s+—\s+(?P<name>.+?))?\s*(?:\[(?P<status>[^\]]*)\])?"
+    r"|(?P<name_legacy>.+?))"
+    r"\s*$",
+    re.MULTILINE,
+)
 _SCENARIO_HDR = re.compile(r"^####\s+Scenario:\s*(.*)$", re.MULTILINE)
 
 # A requirement's scope ends at the next header of level 2-3 (a sibling
@@ -95,11 +116,28 @@ _SECTION_BOUNDARY = re.compile(r"^#{2,3}\s", re.MULTILINE)
 _BRIEF_ITEM_LINE = re.compile(
     r"^\s*-\s*(?:\*\*)?Brief item covered(?:\*\*)?\s*:\s*(.+)$", re.MULTILINE)
 
-# The stable join key grammar itself: `<change-id> / Requirement: <name> /
-# Scenario: <name>`, tolerant of optional surrounding quote/backtick chars.
+# The stable join key grammar itself. Legacy form: `<change-id> /
+# Requirement: <name> / Scenario: <name>`. Id-mode form (requirement-
+# identity-hybrid plan, Notes §Canonical grammar): `<change-id> / REQ-<n> /
+# Scenario: <name>` — bare id, no `Requirement:` prefix. The middle segment
+# is EITHER `Requirement:\s*<name>` OR a bare `REQ-\d+`; those two branches
+# need two distinct group names (`req_name` / `req_id`) rather than one
+# shared `req`, because Python's `re` rejects a duplicate group name even
+# across mutually-exclusive alternation branches. Tolerant of optional
+# surrounding quote/backtick chars.
 _JOIN_KEY = re.compile(
-    r"^[\"'`]?\s*(?P<change_id>.+?)\s*/\s*Requirement:\s*(?P<req>.+?)\s*/\s*"
+    r"^[\"'`]?\s*(?P<change_id>.+?)\s*/\s*"
+    r"(?:Requirement:\s*(?P<req_name>.+?)|(?P<req_id>REQ-\d+))\s*/\s*"
     r"Scenario:\s*(?P<scen>.+?)\s*[\"'`]?$")
+
+# A bare `REQ-<n>` citation — referent kind (d), Notes §Canonical grammar
+# OQ-3 option A. Unlike `_JOIN_KEY`, no `/ Scenario:` suffix: the value
+# names the whole requirement, and the caller expands it to every scenario
+# key under that requirement in the bound change-folder. Same
+# quote/backtick tolerance as `_JOIN_KEY`. The value must be EXACTLY the
+# token (plus optional quoting) — `REQ-3 — Foo` or `REQ-3 / Scenario: S1`
+# take the id-form-header / `_JOIN_KEY` branches instead, never this one.
+_BARE_REQ_ID = re.compile(r"^[\"'`]?\s*(?P<req_id>REQ-\d+)\s*[\"'`]?$")
 
 # Any markdown heading — used only to name which task an unparsed
 # `Brief item covered` value sits under. Same known limitation as
@@ -172,18 +210,33 @@ _NONE_VALUE = re.compile(
 # `adjudication_split.iter_lines_outside_fences`, tested there.
 
 
-def _requirement_scenario_pairs(text: str) -> list[tuple[str, str]]:
-    """(requirement name, scenario name) pairs found in one delta file's
-    text, per validate_spec_output.py's heading grammar."""
-    pairs: list[tuple[str, str]] = []
-    for req_match in _REQUIREMENT_HDR.finditer(text):
-        req_name = req_match.group(1).strip()
+def _requirement_scenario_pairs(text: str) -> list[tuple[bool, str, str]]:
+    """(is_id_mode, requirement identifier, scenario name) triples found in
+    one delta file's text, per the canonical grammar.
+
+    Mode is decided once per FILE — ≥1 id-form header (a header whose `id`
+    AND `name` groups both matched, same predicate as
+    validate_spec_output.py's `is_id_form`) makes every requirement in
+    this file id-mode, per the plan's per-file invariant (validated
+    elsewhere, by T2; assumed here).
+    In id-mode, `requirement identifier` is the bare `REQ-<n>`; in legacy
+    mode it is the prose name, exactly as before this change.
+    """
+    matches = list(_REQUIREMENT_HDR.finditer(text))
+    is_id_mode = any(m.group("id") and m.group("name") for m in matches)
+    pairs: list[tuple[bool, str, str]] = []
+    for req_match in matches:
+        if req_match.group("id"):
+            req_ident = req_match.group("id")
+        else:
+            req_ident = (req_match.group("name")
+                         or req_match.group("name_legacy") or "").strip()
         start = req_match.end()
         boundary = _SECTION_BOUNDARY.search(text, start)
         end = boundary.start() if boundary else len(text)
         body = text[start:end]
         for scen_match in _SCENARIO_HDR.finditer(body):
-            pairs.append((req_name, scen_match.group(1).strip()))
+            pairs.append((is_id_mode, req_ident, scen_match.group(1).strip()))
     return pairs
 
 
@@ -195,22 +248,31 @@ def _delta_files(change_folder: Path) -> list[Path]:
 
 
 def collect_folder_scenario_keys(change_folder: Path, change_id: str) -> set[str]:
-    """Every `<change-id> / Requirement: <name> / Scenario: <name>` join key
-    the change-folder's specs/ delta files define.
+    """Every scenario join key the change-folder's specs/ delta files
+    define — `<change-id> / REQ-<n> / Scenario: <name>` for an id-mode
+    file, `<change-id> / Requirement: <name> / Scenario: <name>` for a
+    legacy one (mode decided per file by `_requirement_scenario_pairs`).
 
-    Duplicate (requirement, scenario) name pairs collapse into one set
+    Duplicate (requirement, scenario) key pairs collapse into one set
     entry — the join-key grammar is fixed (per the plan), so occurrence
     indices can't be added to disambiguate. Instead, a duplicate is
     flagged with a warning on stderr naming the key, so an uncovered
     duplicate instance is at least visible rather than silently
-    undetectable.
+    undetectable. This is a legacy-path cost: the id-mode key is keyed by
+    the requirement's stable id, not its (possibly reused) display name,
+    so two id-mode requirements can share a name without ever colliding on
+    the key — only a genuine repeat of the SAME id in one file could, and
+    that is a different authoring error T2's validator already rejects.
     """
     keys: set[str] = set()
     occurrences: dict[str, int] = {}
     for delta in _delta_files(change_folder):
         text = delta.read_text(encoding="utf-8")
-        for req_name, scen_name in _requirement_scenario_pairs(text):
-            key = f"{change_id} / Requirement: {req_name} / Scenario: {scen_name}"
+        for is_id_mode, req_ident, scen_name in _requirement_scenario_pairs(text):
+            if is_id_mode:
+                key = f"{change_id} / {req_ident} / Scenario: {scen_name}"
+            else:
+                key = f"{change_id} / Requirement: {req_ident} / Scenario: {scen_name}"
             occurrences[key] = occurrences.get(key, 0) + 1
             keys.add(key)
     for key, count in occurrences.items():
@@ -218,6 +280,28 @@ def collect_folder_scenario_keys(change_folder: Path, change_id: str) -> set[str
             print(f"Warning: duplicate scenario key seen {count} times "
                   f"(coverage can't distinguish instances) — {key}", file=sys.stderr)
     return keys
+
+
+def collect_folder_scenarios_by_requirement(
+    change_folder: Path, change_id: str
+) -> dict[str, set[str]]:
+    """Every id-mode requirement's scenario key set, keyed by its bare
+    `REQ-<n>` id — the expansion table a bare `REQ-<n>` citation (referent
+    kind (d)) resolves against in `collect_plan_join_keys`.
+
+    Legacy (name-keyed) requirements have no bare-id form, so they never
+    appear here — a bare `REQ-<n>` citation can only ever mean an id-mode
+    requirement, per the canonical grammar.
+    """
+    by_req: dict[str, set[str]] = {}
+    for delta in _delta_files(change_folder):
+        text = delta.read_text(encoding="utf-8")
+        for is_id_mode, req_ident, scen_name in _requirement_scenario_pairs(text):
+            if not is_id_mode:
+                continue
+            key = f"{change_id} / {req_ident} / Scenario: {scen_name}"
+            by_req.setdefault(req_ident, set()).add(key)
+    return by_req
 
 
 def _enclosing_heading(plan_text: str, pos: int) -> str:
@@ -232,39 +316,73 @@ def _enclosing_heading(plan_text: str, pos: int) -> str:
     return nearest
 
 
-def collect_plan_join_keys(plan_text: str) -> set[str]:
+def collect_plan_join_keys(
+    plan_text: str, by_req: dict[str, set[str]] | None = None
+) -> tuple[set[str], list[str]]:
     """Every join key referenced by a `Brief item covered` field in the
-    plan. A `Brief item covered` line whose value is prose (referent kind
-    (a), not the join-key grammar) contributes nothing — that is the
-    malformed-plan / zero-coverage case.
+    plan, plus a list of ERROR messages for undeclared bare `REQ-<n>`
+    citations (see below). A `Brief item covered` line whose value is
+    prose (referent kind (a), not the join-key grammar) contributes
+    nothing — that is the malformed-plan / zero-coverage case.
 
-    Every such non-contributing value is named on stderr with its task and
-    its verbatim text. It is reported, never an error: on this path a
-    prose quote IS a legal referent kind, so an unparsed value cannot be
-    told apart from a typo, and erroring would punish the legal form. What
-    is being fixed is the silence — dropping the value outright made a
-    mistyped citation read as 'this scenario has no task', which is a
-    different repair from 'this citation did not parse'. Exit-code
-    semantics are unchanged: coverage alone decides them.
+    Every such non-contributing prose value is named on stderr with its
+    task and its verbatim text. It is reported, never an error: on this
+    path a prose quote IS a legal referent kind, so an unparsed value
+    cannot be told apart from a typo, and erroring would punish the legal
+    form. What is being fixed is the silence — dropping the value outright
+    made a mistyped citation read as 'this scenario has no task', which is
+    a different repair from 'this citation did not parse'. Exit-code
+    semantics are unchanged for this case: coverage alone decides them.
+
+    A bare `REQ-<n>` value (referent kind (d), Notes §Canonical grammar
+    OQ-3) is different: unlike prose, it is unambiguous, so it does NOT
+    fall into the prose-tolerant path above. When `by_req` is given and the
+    id is one of its keys, every scenario key under that requirement is
+    added — one citation discharges the whole requirement. When the id is
+    NOT one of `by_req`'s keys (or `by_req` is None, e.g. the plan file
+    could not be read), it is an ERROR naming the task and quoting the
+    value, returned rather than printed so the caller controls the exit
+    code — mirroring `resolve_plan_brief_citations`' unresolvable-citation
+    diagnostic, because a `REQ-<n>` token naming no requirement the folder
+    declares is exactly as unambiguous a defect as an undeclared `BI-<n>`.
     """
     keys: set[str] = set()
     unparsed: list[tuple[str, str]] = []
+    errors: list[str] = []
     for line_match in _BRIEF_ITEM_LINE.finditer(plan_text):
         value = line_match.group(1).strip()
         m = _JOIN_KEY.match(value)
-        if m is None:
-            unparsed.append(
-                (_enclosing_heading(plan_text, line_match.start()), value))
+        if m is not None:
+            if m.group('req_id'):
+                keys.add(f"{m.group('change_id')} / {m.group('req_id')} / "
+                          f"Scenario: {m.group('scen')}")
+            else:
+                keys.add(f"{m.group('change_id')} / Requirement: "
+                          f"{m.group('req_name')} / Scenario: {m.group('scen')}")
             continue
-        keys.add(f"{m.group('change_id')} / Requirement: {m.group('req')} / "
-                  f"Scenario: {m.group('scen')}")
+        bare = _BARE_REQ_ID.match(value)
+        if bare is not None:
+            where = (_enclosing_heading(plan_text, line_match.start())
+                     or "(no enclosing heading)")
+            req_id = bare.group('req_id')
+            scenarios = by_req.get(req_id) if by_req is not None else None
+            if scenarios:
+                keys.update(scenarios)
+            else:
+                errors.append(
+                    f"Error: 'Brief item covered' value under '{where}' cites "
+                    f"{req_id}, which matches no id-form requirement header "
+                    f"in the change-folder. Value: {value}")
+            continue
+        unparsed.append(
+            (_enclosing_heading(plan_text, line_match.start()), value))
     for heading, value in unparsed:
         where = heading or "(no enclosing heading)"
         print(f"Warning: 'Brief item covered' value under '{where}' is not the "
               f"join-key grammar, so it contributes no coverage — a prose "
               f"referent is legal here, a mistyped key is not. Value: {value}",
               file=sys.stderr)
-    return keys
+    return keys, errors
 
 
 def collect_brief_item_ids(brief_text: str) -> dict[str, int]:
@@ -406,6 +524,14 @@ def resolve_plan_brief_citations(
                       f"change-folder check for it. Value: {value}",
                       file=sys.stderr)
                 continue
+            if _BARE_REQ_ID.match(value):
+                print(f"Warning: 'Brief item covered' under '{where}' is a "
+                      f"bare REQ-<n> citation, which is a legal referent kind "
+                      f"here but resolves against no brief item, so it "
+                      f"contributes no coverage in brief mode — run the "
+                      f"change-folder check for it. Value: {value}",
+                      file=sys.stderr)
+                continue
             errors.append(
                 f"Error: 'Brief item covered' under '{where}' cites no BI-<n> "
                 f"identifier, but the brief declares them — so this value "
@@ -515,11 +641,15 @@ def check_brief_coverage(brief_path: Path, plan_path: Path) -> int:
 
 def check_coverage(
     change_folder: Path, plan_path: Path
-) -> tuple[bool, list[str], str]:
-    """Returns (ok, dropped_keys_sorted, note).
+) -> tuple[bool, list[str], str, list[str]]:
+    """Returns (ok, dropped_keys_sorted, note, citation_errors).
 
     `note` is a human-facing status line for the vacuous-empty-folder case
     or the missing-plan-file case; empty string when neither applies.
+    `citation_errors` holds one message per bare `REQ-<n>` citation naming
+    a requirement the folder never declares (referent kind (d)) — this
+    fails the run regardless of coverage, mirroring brief mode's
+    unresolvable-citation errors.
     """
     change_id = change_folder.name or change_folder.resolve().name
     folder_keys = collect_folder_scenario_keys(change_folder, change_id)
@@ -527,7 +657,7 @@ def check_coverage(
         return True, [], (
             f"No '#### Scenario:' headers found under {change_folder} — "
             f"vacuously covered (nothing to drop)."
-        )
+        ), []
 
     note = ""
     if not plan_path.is_file():
@@ -536,9 +666,10 @@ def check_coverage(
     else:
         plan_text = plan_path.read_text(encoding="utf-8")
 
-    plan_keys = collect_plan_join_keys(plan_text)
+    by_req = collect_folder_scenarios_by_requirement(change_folder, change_id)
+    plan_keys, citation_errors = collect_plan_join_keys(plan_text, by_req)
     dropped = sorted(folder_keys - plan_keys)
-    return (not dropped), dropped, note
+    return (not dropped), dropped, note, citation_errors
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -574,20 +705,23 @@ def main(argv: list[str] | None = None) -> int:
 
     change_folder = Path(args.change_folder)
 
-    ok, dropped, note = check_coverage(change_folder, plan_path)
+    ok, dropped, note, citation_errors = check_coverage(change_folder, plan_path)
     if note:
         print(note)
+    for message in citation_errors:
+        print(message, file=sys.stderr)
 
-    if ok:
+    if ok and not citation_errors:
         if not note:
             print(f"Full coverage: every scenario under {change_folder} is "
                   f"mapped by a task in {plan_path}.")
         return 0
 
-    print(f"Dropped scenario(s) — not covered by any task's 'Brief item "
-          f"covered' field in {plan_path}:", file=sys.stderr)
-    for key in dropped:
-        print(f"  - {key}", file=sys.stderr)
+    if dropped:
+        print(f"Dropped scenario(s) — not covered by any task's 'Brief item "
+              f"covered' field in {plan_path}:", file=sys.stderr)
+        for key in dropped:
+            print(f"  - {key}", file=sys.stderr)
     return 1
 
 

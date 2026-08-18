@@ -103,6 +103,75 @@ def test_dropped_scenario_named_on_stderr_exit_1(tmp_path):
     assert "Empty result set" not in result.stderr
 
 
+_LEGACY_BRACKET_SPEC = """\
+## ADDED Requirements
+
+### Requirement: Legacy thing [deferred]
+The system MUST allow something legacy.
+
+#### Scenario: S1
+- GIVEN a precondition
+- WHEN an action
+- THEN an outcome
+"""
+
+
+def test_legacy_header_with_bracket_suffix_keys_by_full_header_text(tmp_path):
+    """A legacy (non-id-form) `### Requirement:` header keeps its trailing
+    `[status]` bracket suffix AS PART OF the key's requirement segment —
+    the legacy path must stay byte-identical to the pre-id-aware grammar
+    (`^###\\s+Requirement:\\s*(.*)$`), which captured the whole header text
+    including any bracket. A plan citing the key with the bracket included
+    must resolve (exit 0)."""
+    change_folder = tmp_path / "2026-07-10-my-change"
+    _write_spec(change_folder, _LEGACY_BRACKET_SPEC)
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — foo\n"
+        "- Brief item covered: 2026-07-10-my-change / Requirement: Legacy thing [deferred] / Scenario: S1\n",
+        encoding="utf-8",
+    )
+    result = _run(change_folder, plan)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+_ID_ONLY_NO_NAME_SPEC = """\
+## ADDED Requirements
+
+### Requirement: REQ-3
+The system MUST allow something with an id but no display name.
+
+#### Scenario: S1
+- GIVEN a precondition
+- WHEN an action
+- THEN an outcome
+"""
+
+
+def test_id_only_header_without_name_does_not_flip_file_to_id_mode(tmp_path):
+    """A header whose `id` group matched but whose `name` group did NOT
+    (`### Requirement: REQ-3`, no `— <name>` suffix) must not flip the
+    whole file into id-mode — aligned with validate_spec_output.py's own
+    `is_id_form = bool(m.group("id")) and bool(m.group("name"))`
+    predicate. The file stays legacy-keyed: the key's requirement segment
+    is `Requirement: REQ-3` (legacy form), not the bare `REQ-3` id-mode
+    form."""
+    change_folder = tmp_path / "2026-07-10-my-change"
+    _write_spec(change_folder, _ID_ONLY_NO_NAME_SPEC)
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — foo\n"
+        "- Brief item covered: 2026-07-10-my-change / Requirement: REQ-3 / Scenario: S1\n",
+        encoding="utf-8",
+    )
+    result = _run(change_folder, plan)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
 def test_malformed_plan_prose_only_zero_coverage_exit_1(tmp_path):
     """A plan whose 'Brief item covered' fields are all prose referents
     (kind (a) — no join-key grammar) has zero join keys — treat as zero
@@ -254,6 +323,159 @@ def test_duplicate_scenario_key_warns_on_stderr(tmp_path):
     )
     assert "Empty result set" in warnings[0], \
         "the announcement must name the duplicated key"
+
+
+_ID_MODE_SPEC = """\
+## ADDED Requirements
+
+### Requirement: REQ-3 — Foo
+The system MUST allow filtering.
+
+#### Scenario: S1
+- GIVEN one record matches
+- WHEN filter applied
+- THEN one item returned
+
+### Requirement: REQ-4 — Foo
+The system MUST allow something else, same name as REQ-3 on purpose.
+
+#### Scenario: S1
+- GIVEN a different record matches
+- WHEN filter applied
+- THEN one item returned
+"""
+
+
+def test_id_mode_folder_keys_use_req_id_and_plan_key_resolves(tmp_path):
+    """An id-mode requirement header (`### Requirement: REQ-3 — Foo`) keys
+    its scenario as `<change-id> / REQ-3 / Scenario: <name>` — bare id, no
+    `Requirement:` prefix — so a plan citing that same bare-id join key
+    resolves and the folder is fully covered (exit 0).
+
+    A second id-mode requirement (`REQ-4 — Foo`) shares REQ-3's exact NAME
+    and also declares a `Scenario: S1`. Under the legacy name-keyed grammar
+    this would collide into one set entry and trip the duplicate-key
+    warning; keyed by id instead, `REQ-3 / Scenario: S1` and `REQ-4 /
+    Scenario: S1` are two distinct keys, so no collision and no warning —
+    that is the whole point of moving the key off the (unstable,
+    coincidentally shared) name and onto the (stable, always-distinct) id.
+    """
+    change_folder = tmp_path / "2026-07-10-my-change"
+    _write_spec(change_folder, _ID_MODE_SPEC)
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — foo\n"
+        "- Brief item covered: 2026-07-10-my-change / REQ-3 / Scenario: S1\n\n"
+        "## Task 2 — bar\n"
+        "- Brief item covered: 2026-07-10-my-change / REQ-4 / Scenario: S1\n",
+        encoding="utf-8",
+    )
+    result = _run(change_folder, plan)
+    assert result.returncode == 0, result.stderr
+    assert "duplicate scenario key" not in result.stderr
+
+
+_ID_MODE_TWO_SCENARIO_SPEC = """\
+## ADDED Requirements
+
+### Requirement: REQ-3 — Foo
+The system MUST allow filtering.
+
+#### Scenario: S1
+- GIVEN one record matches
+- WHEN filter applied
+- THEN one item returned
+
+#### Scenario: S2
+- GIVEN a second record matches
+- WHEN filter applied
+- THEN a second item returned
+"""
+
+
+def test_bare_req_id_citation_covers_all_scenarios_of_that_requirement(tmp_path):
+    """A `Brief item covered` value that is exactly a bare `REQ-<n>` token
+    (referent kind (d), OQ-3 option A) covers EVERY scenario under that
+    requirement in the bound change-folder — one task citing `REQ-3` is
+    enough to discharge both `S1` and `S2`.
+
+    A bare id naming a requirement the folder never declares (`REQ-9`) is
+    unambiguous, unlike prose: it is an ERROR (exit 1) naming the task and
+    quoting the value, mirroring the brief-mode unresolvable-citation
+    diagnostic shape.
+    """
+    change_folder = tmp_path / "2026-07-10-my-change"
+    _write_spec(change_folder, _ID_MODE_TWO_SCENARIO_SPEC)
+
+    covered_plan = tmp_path / "plan.md"
+    covered_plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — foo\n"
+        "- Brief item covered: REQ-3\n",
+        encoding="utf-8",
+    )
+    result = _run(change_folder, covered_plan)
+    assert result.returncode == 0, (
+        f"a bare REQ-3 citation must cover both of REQ-3's scenarios\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+
+    undeclared_plan = tmp_path / "plan_bad.md"
+    undeclared_plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — bogus\n"
+        "- Brief item covered: REQ-9\n",
+        encoding="utf-8",
+    )
+    bad_result = _run(change_folder, undeclared_plan)
+    assert bad_result.returncode == 1, (
+        "a bare REQ-<n> matching no id-form header in the folder must fail "
+        f"the run\nstdout:\n{bad_result.stdout}\nstderr:\n{bad_result.stderr}"
+    )
+    assert "REQ-9" in bad_result.stderr, \
+        "the undeclared value must be quoted so the author can find it"
+    assert "Task 1 — bogus" in bad_result.stderr, \
+        "the offending task must be named"
+
+
+def test_citation_error_alone_exits_1_without_dropped_header(tmp_path):
+    """Pins main()'s two exit-1 guards: a run with full scenario coverage
+    (no dropped keys) but ONE citation error must still exit 1 — the
+    citation error alone is enough (`if ok and not citation_errors:` must
+    not short-circuit to a success message) — and must NOT print the
+    "Dropped scenario(s)" header (the `if dropped:` guard must stay gated
+    on an actually non-empty `dropped` list, not fire just because the run
+    is non-zero).
+
+    Folder REQ-3 (id-mode) has S1+S2. Task 1 cites the bare `REQ-3` id,
+    fully covering both scenarios (`dropped` ends up empty). Task 2 cites
+    the undeclared `REQ-9`, which is a citation error. The run must fail
+    on the citation error alone, with no dropped-scenario header at all.
+    """
+    change_folder = tmp_path / "2026-07-10-my-change"
+    _write_spec(change_folder, _ID_MODE_TWO_SCENARIO_SPEC)
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — foo\n"
+        "- Brief item covered: REQ-3\n\n"
+        "## Task 2 — bogus\n"
+        "- Brief item covered: REQ-9\n",
+        encoding="utf-8",
+    )
+    result = _run(change_folder, plan)
+    assert result.returncode == 1, (
+        f"a citation error alone (no dropped scenarios) must still fail "
+        f"the run\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "Task 2 — bogus" in result.stderr
+    assert "REQ-9" in result.stderr
+    assert "Dropped scenario(s)" not in result.stderr, (
+        "no scenario was actually dropped — the citation error is the "
+        "only failure — so the dropped-scenario header must not print\n"
+        f"stderr:\n{result.stderr}"
+    )
 
 
 def test_unparsed_change_folder_referent_is_named_not_dropped(tmp_path):
@@ -698,6 +920,37 @@ def test_wellformed_join_key_is_a_warning_not_an_error_in_brief_mode(tmp_path):
     assert all(line.lstrip().startswith("Warning:") for line in reported), (
         "the join-key task must be reported in the warning register, not the "
         f"error one; got:\n" + "\n".join(reported)
+    )
+
+
+def test_bare_req_id_is_a_warning_not_an_error_in_brief_mode(tmp_path):
+    """A task citing a bare `REQ-<n>` token does not fail brief mode — same
+    treatment as a well-formed change-folder join key
+    (`test_wellformed_join_key_is_a_warning_not_an_error_in_brief_mode`):
+    it is a legal `Brief item covered` value that simply answers a
+    different question here, so it is warned about, not errored."""
+    brief = tmp_path / "brief.md"
+    brief.write_text(_BRIEF_TWO_IDS, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "# Plan: x\n\n"
+        "## Task 1 — identifier referent\n"
+        "- Brief item covered: BI-1\n\n"
+        "## Task 2 — bare req-id referent\n"
+        "- Brief item covered: REQ-3\n",
+        encoding="utf-8",
+    )
+
+    result = _run_brief(brief, plan)
+    assert result.returncode == 0, (
+        "a bare REQ-<n> is a legal referent kind, so brief mode must not "
+        f"fail on it\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    reported = _stderr_lines_naming("Task 2 — bare req-id referent", result.stderr)
+    assert reported, "the bare-REQ-id task must still be named"
+    assert all(line.lstrip().startswith("Warning:") for line in reported), (
+        "the bare-REQ-id task must be reported in the warning register, not "
+        f"the error one; got:\n" + "\n".join(reported)
     )
 
 
