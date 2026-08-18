@@ -308,12 +308,20 @@ table.verdict th, table.verdict td {
 table.verdict th {
   color: var(--accent);
 }
+footer.stamp {
+  margin-top: 2rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--muted-light);
+  color: var(--muted);
+  font-size: 0.75em;
+}
 """.strip()
 
 DOC_PAGE_TEMPLATE = """<!doctype html>
 <html lang="{lang}">
 <head>
 <meta charset="utf-8">
+<meta name="generator" content="loom-code-adjudication-render/{version}">
 <title>{title}</title>
 <style>
 {style}
@@ -323,6 +331,7 @@ DOC_PAGE_TEMPLATE = """<!doctype html>
 <h1>{title}</h1>
 {units_html}
 {mermaid_script}
+<footer class="stamp">loom-code-adjudication-render/{version}</footer>
 </body>
 </html>
 """
@@ -340,6 +349,36 @@ UNIT_TEMPLATE_RAW = """<section class="unit" id="{unit_id}">
 </section>"""
 
 
+_PLUGIN_MANIFEST_PATH = (
+    Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
+)
+
+
+def _deployment_version() -> str:
+    """Return the version of the copy of this script that is actually
+    running, read from the `.claude-plugin/plugin.json` shipped beside
+    it -- never a hardcoded constant, never the invocation. A stale copy
+    of this file carries a stale copy of the manifest next to it, so it
+    stamps its own (older) version; that mismatch is the whole point of
+    the stamp (Task 1 of the staleness-visible arc).
+
+    An absent, unreadable, malformed-JSON, non-dict-shaped (e.g. a JSON
+    list), version-less, or version-null manifest returns the literal
+    string 'unknown' instead of raising: a copy that cannot even name
+    itself is exactly as suspect as an old one, so it must still be
+    visibly marked rather than silently unmarked."""
+    try:
+        manifest = json.loads(_PLUGIN_MANIFEST_PATH.read_text())
+    except (OSError, ValueError):
+        return "unknown"
+    if not isinstance(manifest, dict):
+        return "unknown"
+    version = manifest.get("version")
+    if not isinstance(version, str) or not version:
+        return "unknown"
+    return version
+
+
 def _render_page(title, units_html, lang, mermaid_script=""):
     """Resolve `lang` to its profile ONCE and fill the shared
     DOC_PAGE_TEMPLATE -- the single template both doc and verdict-HTML
@@ -351,7 +390,10 @@ def _render_page(title, units_html, lang, mermaid_script=""):
     `id` / `heading` / `source_text` at their own call site. A unit's
     `rendition` is the one exception: it arrives already rendered to HTML
     and is interpolated unescaped on purpose, guarded by the parser's
-    `html: False` instead (see `_render_markdown`).
+    `html: False` instead (see `_render_markdown`). `version` comes from
+    `_deployment_version()`, sourced from the repo-tracked
+    `.claude-plugin/plugin.json` -- the same trust tier as `lang` /
+    `font_stack` -- and is likewise interpolated unescaped.
 
     `mermaid_script` is BOTH the embedded mermaid library and its
     `initialize` call, as one string — they travel together so a page can
@@ -368,6 +410,7 @@ def _render_page(title, units_html, lang, mermaid_script=""):
         style=style_rendered,
         units_html=units_html,
         mermaid_script=mermaid_script,
+        version=_deployment_version(),
     )
 
 
@@ -543,6 +586,92 @@ def render_verdict_html(units, title="Adjudication Verdict", lang="zh-Hant"):
 MODES = ("doc", "verdict")
 
 
+# The literal marker the scan anchors on. `_iter_rendition_regions`
+# depends on this exact string; renaming it in `UNIT_TEMPLATE_RAW`
+# without updating this constant turns the postcondition into a no-op
+# that matches nothing and silently passes every page -- see
+# docs/loom/memory/a-mechanical-check-can-go-green-by-skipping.md.
+_RENDITION_START = '<div class="rendition">'
+_DIV_TAG_RE = re.compile(r"<div\b[^>]*>|</div>")
+_UNIT_ID_RE = re.compile(r'<section class="unit" id="([^"]*)">')
+# Stripped BEFORE the marker scan so a rendition legitimately quoting
+# `` `**bold**` `` or a fenced example of this very bug is not itself
+# flagged -- observed twice on this arc's own brief view.
+_CODE_PRE_RE = re.compile(r"<pre\b.*?</pre>|<code\b.*?</code>", re.DOTALL)
+_BOLD_RE = re.compile(r"\*\*[^*]+\*\*")
+
+
+def _iter_rendition_regions(page_html):
+    """Yield `(start_index, inner_html)` for every `<div class="rendition">`
+    region in `page_html`, tracking nested `<div>` depth rather than a
+    non-greedy `.*?</div>` regex -- a rendition can legitimately contain
+    its own nested `<div class="mermaid">` from a fence, and a naive
+    non-greedy match would truncate at THAT inner `</div>` and miss
+    content past it."""
+    start = 0
+    while True:
+        idx = page_html.find(_RENDITION_START, start)
+        if idx == -1:
+            return
+        inner_start = idx + len(_RENDITION_START)
+        depth = 1
+        end = len(page_html)
+        for m in _DIV_TAG_RE.finditer(page_html, inner_start):
+            if m.group().startswith("</div"):
+                depth -= 1
+            else:
+                depth += 1
+            if depth == 0:
+                end = m.start()
+                break
+        yield idx, page_html[inner_start:end]
+        start = end if end > idx else idx + len(_RENDITION_START)
+
+
+def _unit_id_before(page_html, idx):
+    """The nearest `<section class="unit" id="...">` opening before
+    `idx`, for the offending-unit id in the postcondition's error
+    message. Falls back to "unknown" if none is found."""
+    unit_id = None
+    for m in _UNIT_ID_RE.finditer(page_html, 0, idx):
+        unit_id = m.group(1)
+    return unit_id or "unknown"
+
+
+def _assert_rendition_converted(page_html: str):
+    """Scan every `<div class="rendition">...</div>` region in
+    `page_html` for a markdown marker that survived conversion.
+
+    Never scans the `原文` `<details><pre>` block -- that block is
+    structurally outside every rendition region (see
+    `UNIT_TEMPLATE_RAW`), so it is never visited; it carries
+    `html.escape`'d English source markdown BY DESIGN, and a check that
+    scanned the whole page would condemn every correct page.
+
+    Within each region, `<code>...</code>` and `<pre>...</pre>` spans
+    are stripped first, then a surviving `**...**` pair or a literal
+    ``` fence is a violation. Returns the first `(unit_id, marker)`
+    found, or `None` when every region is clean -- mirrors
+    `adjudication_lint.py`'s violations-as-data convention rather than
+    a control-flow exception, matching the module's existing shape
+    (this file had no exception type before this check and none of
+    its siblings raise for a detected violation).
+    """
+    for idx, region in _iter_rendition_regions(page_html):
+        stripped = _CODE_PRE_RE.sub("", region)
+        marker = None
+        if "```" in stripped:
+            marker = "```"
+        else:
+            bold_match = _BOLD_RE.search(stripped)
+            if bold_match:
+                marker = bold_match.group()
+        if marker is not None:
+            unit_id = _unit_id_before(page_html, idx)
+            return unit_id, marker
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=sorted(MODES), help="render mode")
@@ -571,6 +700,16 @@ def main(argv=None):
         rendered = render_verdict(units, lang=args.lang)
     else:
         rendered = render_doc(units, lang=args.lang)
+
+    violation = _assert_rendition_converted(rendered)
+    if violation is not None:
+        unit_id, marker = violation
+        print(
+            f"error: unit {unit_id!r} rendition still contains an "
+            f"unconverted markdown marker: {marker!r}",
+            file=sys.stderr,
+        )
+        return 1
 
     if args.output:
         Path(args.output).write_text(rendered, encoding="utf-8")
