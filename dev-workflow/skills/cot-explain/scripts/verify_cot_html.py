@@ -60,7 +60,14 @@ from pathlib import Path
 SEP = "<br/>" + "━" * 6 + "<br/>"
 BULLET = "• "
 ARROWS = ("-->", "-.->", "==>")
-MERMAID_VER = "11.16.0"   # exact, not the 11.x range — see NUMBER_SPACE_NOTE
+# The mermaid-cli release used by `--render`. Pinning it does NOT pin the
+# renderer: mermaid-cli declares `mermaid: ^11.14.0`, so the library it
+# actually draws with floats to whatever 11.x is newest at install time.
+# That matters, because the two do not always agree — 11.16.0/11.16.1
+# briefly honoured a subgraph `direction` that every release before and
+# after discards. The layout rules no longer depend on either, so this is
+# a reproducibility aid, not a guarantee.
+MERMAID_VER = "11.16.0"
 
 # Advisory thresholds. None of these can fail a build.
 WARN_PER_GROUP = 3
@@ -73,6 +80,15 @@ WARN_GROUP_TITLE_W = 8.0
 LATIN_BUDGET_FACTOR = 1.4   # a CJK glyph is ~2 Latin ones; see limit_for()
 
 AXES = {"TB": ("LR", "row", "r"), "LR": ("TB", "column", "c")}
+
+# One definition, used by both the group check and the boundary check. They
+# must agree on what a subgraph IS; two copies of this literal would let a
+# future edit desync them silently.
+SUBGRAPH_BLOCK = re.compile(
+    r"^[ \t]*subgraph\s+(\S+)\s*\[(.*?)\]\s*\n(.*?)^[ \t]*end[ \t]*$",
+    re.S | re.M,
+)
+SUBGRAPH_ID = re.compile(r"^[rc]\d+$")
 
 PALETTE = {
     "#f8f9fa", "#fff4e6", "#ffe3e3", "#ffe8cc", "#e5dbff", "#c5f6fa",
@@ -92,7 +108,8 @@ EMPTY_CONNECTIVES = {"導致", "然後", "接著", "所以", "leads to", "then"}
 # prevent.
 NUMBER_SPACE_NOTE = (
     "node {nid}: {where} contains a `number. space` run. This parsed "
-    "cleanly on the pinned mermaid ({ver}), but older renderers have "
+    "cleanly on mermaid-cli {ver} (whose bundled library floats), but "
+    "other renderers have "
     "treated it as a markdown list. `--render` settles it for your "
     "parser; if that is unavailable and the target renderer is old, `1.` "
     "with no space, `①` or `(1)` sidestep it"
@@ -174,8 +191,11 @@ def parse_edges(body):
     skeleton = re.sub(r'\["[^"]*"\]', "", body)
     skeleton = re.sub(r"^\s*subgraph.*$", "", skeleton, flags=re.M)
     arrow_re = "|".join(re.escape(a) for a in ARROWS)
+    # An endpoint is a node id (one capital) OR a subgraph id (r1, c2).
+    # Cross-row edges join SUBGRAPHS, never nodes — see check_edges.
+    end = r"(?:[A-Z]|[a-z]+\d+)"
     found = re.findall(
-        rf"([A-Z])\s*({arrow_re})\s*(?:\|([^|]*)\|)?\s*(?=([A-Z])\b)", skeleton
+        rf"({end})\s*({arrow_re})\s*(?:\|([^|]*)\|)?\s*(?=({end})\b)", skeleton
     )
     edges = [(s, a, lab, d) for s, a, lab, d in found]
 
@@ -186,6 +206,14 @@ def parse_edges(body):
     # about a diagram with no malformed arrow.
     bare = re.sub(r"\|[^|]*\|", "", skeleton)
     return edges, len(re.findall(arrow_re, bare))
+
+
+def subgraph_members(body):
+    """{subgraph id: set of node ids declared inside it}."""
+    out = {}
+    for gid, _title, block in SUBGRAPH_BLOCK.findall(body):
+        out[gid] = set(re.findall(r'\b([A-Z])\["', block))
+    return out
 
 
 def check(path, do_render=False):
@@ -275,8 +303,12 @@ def check_diagram(body, s):
     # `&` reaches this text as `&amp;`: the converter leaves ampersands
     # entity-encoded so that nothing it emits is decoded twice on the way
     # to mermaid's label parser. Match both forms.
+    # Endpoints are node ids OR subgraph ids. Matching capitals only let
+    # `r1 --> r2 & r3` slip past BOTH this refusal and the boundary check,
+    # and the third row's edge then carried no label at all.
+    _end = r"(?:[A-Z]|[a-z]+\d+)"
     if re.search(
-        r"(?:-->|-\.->|==>)\s*(?:\|[^|]*\|)?\s*[A-Z]\s*(?:&|&amp;)\s*[A-Z]",
+        rf"(?:-->|-\.->|==>)\s*(?:\|[^|]*\|)?\s*{_end}\s*(?:&|&amp;)\s*{_end}",
         body,
     ):
         s.fail(
@@ -288,7 +320,8 @@ def check_diagram(body, s):
     edges, arrow_count = parse_edges(body)
     check_groups(body, s, inner, word, prefix, edges)
     check_nodes(body, s)
-    check_edges(body, s, edges, arrow_count)
+    members = subgraph_members(body)
+    check_edges(body, s, edges, arrow_count, members)
     check_styles(body, s)
 
 
@@ -298,10 +331,7 @@ def check_groups(body, s, inner, word, prefix, edges):
     # the line start only, an indented diagram was reported as having no
     # subgraph rows at all — a false diagnosis pointing at the one thing
     # the diagram did have.
-    groups = re.findall(
-        r"^[ \t]*subgraph\s+(\S+)\s*\[(.*?)\]\s*\n(.*?)^[ \t]*end[ \t]*$",
-        body, re.S | re.M,
-    )
+    groups = SUBGRAPH_BLOCK.findall(body)
     if not groups:
         s.fail(
             f'no subgraph {word}s — every node must sit in a '
@@ -322,11 +352,24 @@ def check_groups(body, s, inner, word, prefix, edges):
                 f"subgraph id `{gid}` is a bare capital letter and collides "
                 f"with the node id space — use `{prefix}1`, `{prefix}2`, …"
             )
+        elif not SUBGRAPH_ID.match(gid):
+            # Named here so the diagnosis points at the id. Left to the edge
+            # parser, an off-spec id makes the row edge invisible and
+            # surfaces as "an arrow is malformed" — about a correct arrow.
+            s.fail(
+                f"subgraph id `{gid}` is off-spec — ids are `{prefix}1`, "
+                f"`{prefix}2`, … (a lowercase letter and a number). The row "
+                f"edge that uses it cannot be parsed, and the failure would "
+                f"otherwise be reported as a malformed arrow"
+            )
         if not re.search(rf"^\s*direction\s+{inner}\s*$", block, re.M):
             s.fail(
                 f"subgraph {gid}: missing its own `direction {inner}` line — "
-                "without it mermaid emits one flat column (0.14 squareness "
-                "against 0.81) and the subgraph buys nothing"
+                "without it the grouping buys nothing — the members lay out "
+                "along the parent's axis. (This message once quoted 0.14 "
+                "against 0.81; both figures were withdrawn with the appendix "
+                "they came from, because they were measured on a diagram "
+                "shape the spec no longer permits.)"
             )
         members = re.findall(r'\b([A-Z])\["', block)
         grouped += members
@@ -483,17 +526,47 @@ def check_widths(widest_title, widest, s):
         )
 
 
-def check_edges(body, s, edges, arrow_count):
+def check_edges(body, s, edges, arrow_count, members):
     if not edges:
         s.fail("no edges found")
         return
 
+    home = {n: g for g, ns in members.items() for n in ns}
     culminating = 0
     for src, arrow, label, dst in edges:
         if label is None or not label.strip():
             s.fail(
                 f"edge {src} {arrow} {dst} carries no label — every edge must "
                 "name the relation; a bare arrow is a defect"
+            )
+            continue
+        src_g, dst_g = home.get(src), home.get(dst)
+        src_is_node, dst_is_node = src in home, dst in home
+        unknown = [e for e in (src, dst) if e not in home and e not in members]
+        if unknown:
+            s.fail(
+                f"edge {src} {arrow} {dst} names {', '.join(unknown)}, which is "
+                "neither a declared node nor a declared subgraph. mermaid "
+                "invents an empty box for it and the layout degrades without "
+                "any error — the row-edge form is the one place a typo is "
+                "otherwise invisible"
+            )
+            continue
+        if src == dst:
+            s.fail(
+                f"edge {src} {arrow} {dst} points at itself. It satisfies "
+                "\"both endpoints are subgraphs\" and names no transition"
+            )
+            continue
+        if src_is_node != dst_is_node or (src_is_node and src_g != dst_g):
+            s.fail(
+                f"edge {src} {arrow} {dst} leaves its subgraph. mermaid drops a "
+                f"subgraph's `direction` as soon as one of its nodes has an "
+                f"edge to anything outside — including to another subgraph's "
+                f"id — and the rows then stack into a single column. Join "
+                f"NODES only inside one row, and join rows SUBGRAPH to "
+                f"SUBGRAPH (`r1 -->|…| r2`). Measured identical on mermaid "
+                f"11.13.0 and 11.17.0; see the spec's appendix"
             )
             continue
         lab = label.strip()
@@ -513,7 +586,9 @@ def check_edges(body, s, edges, arrow_count):
         if arrow == "==>":
             culminating += 1
 
-    if arrow_count != len(edges):
+    if arrow_count != len(edges) and all(
+        SUBGRAPH_ID.match(g) for g in members
+    ):
         s.fail(
             f"{arrow_count} arrows in the diagram but only {len(edges)} parsed "
             "as edges — an arrow is malformed"
@@ -525,7 +600,29 @@ def check_edges(body, s, edges, arrow_count):
         )
 
     connected_ids = {n for e in edges for n in (e[0], e[3])}
-    stranded = sorted(set(re.findall(r'\b([A-Z])\["', body)) - connected_ids)
+    # Every subgraph must be joined to the diagram. Row-to-row wiring moved
+    # off node edges — which the stranded scan policed indirectly — onto
+    # subgraph edges, which nothing policed at all: a row nothing points at
+    # renders as a detached box, and its lone node was being exempted below
+    # on the strength of a connection that did not exist.
+    if len(members) > 1:
+        joined = {e for src, _a, _l, dst in edges for e in (src, dst)
+                  if e in members}
+        for gid in sorted(set(members) - joined):
+            s.fail(
+                f"subgraph {gid} is joined to nothing — no edge names it. "
+                "Rows are wired to each other subgraph-to-subgraph "
+                f"(`r1 -->|…| r2`), so a row with no such edge floats free "
+                "of the chain"
+            )
+
+    # A row holding exactly one node has no inner edge to be part of, and
+    # renders correctly (verified on 11.13.0 and 11.17.0). Its row carries
+    # the connection instead, so it is not stranded.
+    lone = {n for ns in members.values() if len(ns) == 1 for n in ns}
+    stranded = sorted(
+        set(re.findall(r'\b([A-Z])\["', body)) - connected_ids - lone
+    )
     if stranded:
         s.fail(f"node(s) with no edge at all: {', '.join(stranded)}")
 
