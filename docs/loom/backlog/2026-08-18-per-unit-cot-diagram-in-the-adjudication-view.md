@@ -55,6 +55,7 @@ helped nor hurt". The benefit accrues to the human, who reads the view.
 > compared two text containers, not a diagram. See the corrected
 > `docs/loom/memory/model-readers-are-form-agnostic-at-loom-doc-scale.md`
 > and §"Evidence arrived 2026-08-19" at the end of this entry.
+
 Caveat recorded honestly: that A/B tested tables, not diagrams, and one
 structure in a 4.6 KB document — not ten diagrams. So "no effect on
 agent interpretation" is unproven for the per-unit case; keeping the
