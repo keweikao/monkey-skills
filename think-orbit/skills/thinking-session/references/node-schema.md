@@ -33,8 +33,10 @@ defaults decided at kickoff.
 | `path` | Path | Resolved filesystem path of the file. |
 
 A research note (`research/*.md`) has its own minimal frontmatter (`id`,
-`claim`, optionally `source`/`quote`) and loads as a `Node` with
-`type == "FACT"` and `summary` set to the `claim` text.
+`seq`, `claim`, optionally `source`/`quote`) and loads as a `Node` with
+`type == "FACT"` and `summary` set to the `claim` text; `seq` is still
+required, since `check`'s `required-field` rule applies to every node
+regardless of `origin`.
 
 `check`'s `fact-source` rule (missing `source`/`quote`) does not apply to a
 research-note FACT node — the note file itself is the source and its `claim`
@@ -55,6 +57,28 @@ Chen`) — except at end-of-text, where the end-of-text rule still ends the
 sentence — while a lead-in line followed by a list (no blank line between
 them) is counted from its own sentences only.
 
+## Node body — the warrant duty
+
+The body is prose rather than a field, but it carries one structural
+obligation. Its **first paragraph** answers three things: which upstream node
+this step stands on, restated in prose — its `id` named inside a sentence that
+says what it claimed, never left to sit alone in `inputs`; what this step adds
+on top of that upstream; and what would collapse it. The paragraph is written
+that way even though the same reasoning was already spoken aloud in the
+conversation — the two faces are equal, and the file is the one that outlives
+the sitting. A node with no upstream — a GOAL, or a FACT standing on its own
+`source` — says so and says why it has none, and never invents an upstream to
+point at; the `inputs: []` exemption below is mechanical, and exempts the rule,
+not the duty.
+
+`check`'s `input-narration` rule is the mechanical floor of that duty, not the
+duty itself: a node with non-empty `inputs` must name at least one
+load-bearing input's `id` in its body prose, or — when none of its inputs is
+load-bearing — at least one input's `id`. A node with empty or absent `inputs`
+is never flagged. The rule verifies that the id was named, never whether the
+sentence around it explains anything; the quality of the explanation is the
+author's duty above.
+
 ## Assumption fields (`assumptions/*.md`)
 
 | Field | Type | Meaning |
@@ -71,10 +95,17 @@ them) is counted from its own sentences only.
 non-empty `id`, `status` (one of `open`, `broken`, `confirmed`), `statement`,
 and `breaks_if`; a missing field or an out-of-set `status` is
 flagged per file. `branch` is not required — a project-wide assumption
-simply omits it. Its `assumption-max` rule caps assumptions per branch at 3
+simply omits it. An assumption's **body is optional and ungated**: write one
+when the premise needs context the four fields cannot carry, and leave it out
+when they already say everything. Its `assumption-max` rule caps assumptions per branch at 3
 — more than three assumption files sharing one `branch` prints a single
 summary line `assumptions: branch <b> has <n> assumptions (max 3)` (not a
 per-file relpath, since the violation belongs to the whole branch).
+
+Its `branch-has-node` rule requires that a branch id carried by one or more
+assumptions is also carried by at least one node, printing
+`assumptions: branch-has-node: branch <b> has assumptions but no node` when it
+is not; a project-wide assumption, having no `branch`, can never trigger it.
 
 The cap counts branch-bound assumptions only: a project-wide assumption is
 outside every branch's max 3, so a pivotal premise never has to be squeezed
@@ -121,6 +152,7 @@ any file (both `break` and `impact`).
 
 ### Node — `nodes/goal.md`
 
+<!-- example: nodes/goal.md -->
 ```markdown
 ---
 id: goal
@@ -129,11 +161,29 @@ seq: 1
 summary: Ship v0
 status: current
 ---
-Longer body text explaining the goal.
+The team committed to shipping v0 this quarter, and this node fixes that as the question the rest of the graph answers. It stands on no upstream node, because a GOAL opens the chain rather than continuing one. It collapses only if the commitment itself is withdrawn.
+```
+
+### Node — `nodes/budget_plan.md`
+
+<!-- example: nodes/budget_plan.md -->
+```markdown
+---
+id: budget_plan
+type: CLAIM
+seq: 2
+summary: Proceed with the Q4 plan under the confirmed budget
+status: current
+branch: b1
+inputs:
+  - {ref: goal, load_bearing: true}
+---
+This stands on `goal`, which fixed shipping v0 this quarter as the question the graph answers, and answers it by committing to a spending plan sized against the confirmed Q4 envelope. What it adds is the decision to proceed now, leaning on the `q4_budget_holds` assumption filed under this same branch. It collapses if that budget assumption breaks, since the plan is costed against exactly that number.
 ```
 
 ### Assumption — `assumptions/q4_budget_holds.md`
 
+<!-- example: assumptions/q4_budget_holds.md -->
 ```markdown
 ---
 id: q4_budget_holds
@@ -143,16 +193,18 @@ breaks_if: Budget cut announced
 source: finance team
 branch: b1
 ---
-Optional body with more detail.
+Finance confirmed the Q4 envelope in the August planning round, so branch `b1` is costed against that number. If the budget is cut, every claim on that branch has to be re-costed rather than merely re-weighted.
 ```
 
 ### Research note — `research/r1.md`
 
+<!-- example: research/r1.md -->
 ```markdown
 ---
 id: r1
+seq: 3
 claim: Competitor X raised prices last quarter
 source: press release
 ---
-Optional body with supporting detail.
+The competitor's press release announces a list-price increase effective last quarter. Downstream nodes cite the `claim` line above rather than this body, so the body may be edited freely.
 ```

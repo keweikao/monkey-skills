@@ -209,6 +209,7 @@ def _build_clean_project(root: Path) -> None:
         "inputs:\n"
         "  - ref: goal\n"
         "    load_bearing: true\n",
+        body="This claim builds on goal. It changes pricing.\n",
     )
     _write(
         root / "assumptions" / "q4_budget_holds.md",
@@ -247,6 +248,7 @@ def test_check_prints_one_line_per_structural_violation_and_is_silent_when_clean
         "status: current\n"
         "inputs:\n"
         "  - ref: goal\n",  # missing load_bearing -> violation 1
+        body="This claim builds on goal. It changes pricing.\n",
     )
     _write(
         dirty_root / "nodes" / "claim2.md",
@@ -258,6 +260,7 @@ def test_check_prints_one_line_per_structural_violation_and_is_silent_when_clean
         "inputs:\n"
         "  - ref: missing_id\n"  # dangling ref -> violation 2
         "    load_bearing: true\n",
+        body="This claim builds on missing_id. It is dangling.\n",
     )
     _write(
         dirty_root / "nodes" / "fact1.md",
@@ -313,6 +316,15 @@ def test_check_flags_assumption_missing_breaks_if_and_more_than_three_per_branch
     # brief-item: BI-2
     root = tmp_path
     _write(
+        root / "nodes" / "claim_b1.md",
+        "id: claim_b1\n"
+        "type: CLAIM\n"
+        "seq: 1\n"
+        "summary: A claim on branch b1\n"
+        "status: current\n"
+        "branch: b1\n",  # gives b1 a node so branch-has-node stays silent here
+    )
+    _write(
         root / "assumptions" / "a1.md",
         "id: a1\n"
         "status: open\n"
@@ -352,6 +364,67 @@ def test_check_flags_assumption_missing_breaks_if_and_more_than_three_per_branch
     assert len(lines) == 2
     assert any("a1.md" in ln and "breaks_if" in ln for ln in lines)
     assert any("branch b1 has 4 assumptions (max 3)" in ln for ln in lines)
+
+
+def test_check_flags_a_branch_carried_only_by_assumptions(tmp_path, capsys):
+    # brief-item: BI-4 — a branch id present on assumptions but no node is a
+    # violation; a branch with at least one node is silent; a project-wide
+    # assumption (no `branch` key at all) is out of scope and never flagged.
+    root = tmp_path
+    _write(
+        root / "nodes" / "goal.md",
+        "id: goal\n"
+        "type: GOAL\n"
+        "seq: 1\n"
+        "summary: Ship v0\n"
+        "status: current\n",
+    )
+    # b_ok: carries a node -> silent
+    _write(
+        root / "nodes" / "claim_ok.md",
+        "id: claim_ok\n"
+        "type: CLAIM\n"
+        "seq: 2\n"
+        "summary: A claim on branch b_ok\n"
+        "status: current\n"
+        "branch: b_ok\n",
+    )
+    _write(
+        root / "assumptions" / "a_ok.md",
+        "id: a_ok\n"
+        "status: open\n"
+        "statement: Assumption backing b_ok\n"
+        "breaks_if: x\n"
+        "branch: b_ok\n",
+    )
+    # b_orphan: carries only an assumption, no node -> violation
+    _write(
+        root / "assumptions" / "a_orphan.md",
+        "id: a_orphan\n"
+        "status: open\n"
+        "statement: Assumption with no supporting claim\n"
+        "breaks_if: x\n"
+        "branch: b_orphan\n",
+    )
+    # project-wide assumption: no `branch` key at all -> never flagged
+    _write(
+        root / "assumptions" / "a_wide.md",
+        "id: a_wide\n"
+        "status: open\n"
+        "statement: Project-wide premise\n"
+        "breaks_if: x\n",
+    )
+
+    rc = dag.main(["check", str(root)])
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln]
+
+    branch_lines = [ln for ln in lines if "branch-has-node" in ln]
+    assert rc == 1
+    assert len(branch_lines) == 1
+    assert "b_orphan" in branch_lines[0]
+    assert not any("b_ok" in ln for ln in branch_lines)
+    assert not any("a_wide" in ln for ln in branch_lines)
 
 
 def test_check_flags_inputs_entry_without_ref(tmp_path, capsys):
@@ -468,6 +541,305 @@ def test_strip_fenced_blocks_handles_tilde_and_unclosed_fences():
     # brief-item: BI-4
     assert dag._strip_fenced_blocks("before\n~~~\ncode 1\ncode 2\n~~~\nafter\n") == "before\nafter\n"
     assert dag._strip_fenced_blocks("before\n```\ncode\nno close\n") == "before"
+
+
+def test_check_flags_a_node_whose_body_names_none_of_its_inputs(tmp_path, capsys):
+    # brief-item: BI-3
+    # Spec revised mid-task after measurement against the real project (see
+    # the plan's ## Notes): the summary-keyword arm passed 10/10 nodes,
+    # including ones that never refer to any of their inputs, because
+    # nodes on one reasoning chain are always about the same topic. Naming
+    # the id is the only discriminator that reproduced the human reading.
+    root = tmp_path
+    _write(
+        root / "nodes" / "goal.md",
+        "id: goal\n"
+        "type: GOAL\n"
+        "seq: 1\n"
+        "summary: Ship v0\n"
+        "status: current\n",
+    )
+    _write(
+        root / "nodes" / "fact1.md",
+        "id: fact1\n"
+        "type: FACT\n"
+        "seq: 2\n"
+        "summary: \u4f7f\u7528\u8005\u6d41\u5931\u7387\u4e0a\u5347\u5230 5%\n"
+        "status: current\n"
+        "source: internal survey\n"
+        "quote: \"5% monthly churn\"\n",
+    )
+    _write(
+        root / "nodes" / "claim_a.md",
+        "id: claim_a\n"
+        "type: CLAIM\n"
+        "seq: 3\n"
+        "summary: Unrelated claim\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n",
+        body="Nothing here explains anything. This body mentions nothing.\n",
+    )
+    _write(
+        root / "nodes" / "claim_b.md",
+        "id: claim_b\n"
+        "type: CLAIM\n"
+        "seq: 4\n"
+        "summary: Claim naming the input by id\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n",
+        body="fact1 \u986f\u793a\u6d41\u5931\u7387\u4e0a\u5347\u3002\u9019\u9ede\u503c\u5f97\u6ce8\u610f\u3002\n",
+    )
+    _write(
+        root / "nodes" / "claim_c.md",
+        "id: claim_c\n"
+        "type: CLAIM\n"
+        "seq: 5\n"
+        "summary: Claim paraphrasing the input's topic without naming it\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n",
+        body="\u8fd1\u671f\u6d41\u5931\u60c5\u6cc1\u56b4\u91cd\u3002\u9700\u8981\u512a\u5148\u8655\u7406\u3002\n",
+    )
+    _write(
+        root / "nodes" / "claim_d.md",
+        "id: claim_d\n"
+        "type: CLAIM\n"
+        "seq: 6\n"
+        "summary: Claim with no inputs at all\n"
+        "status: current\n"
+        "inputs: []\n",
+    )
+    _write(
+        root / "nodes" / "claim_e.md",
+        "id: claim_e\n"
+        "type: CLAIM\n"
+        "seq: 7\n"
+        "summary: Claim naming its load-bearing input but not its weak one\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n"
+        "  - ref: goal\n"
+        "    load_bearing: false\n",
+        body="This claim relies on fact1. It says nothing else.\n",
+    )
+
+    _write(
+        root / "nodes" / "fact2.md",
+        "id: fact2\n"
+        "type: FACT\n"
+        "seq: 8\n"
+        "summary: Second fact\n"
+        "status: current\n"
+        "source: internal survey\n"
+        "quote: \"second figure\"\n",
+    )
+    _write(
+        root / "nodes" / "claim_f.md",
+        "id: claim_f\n"
+        "type: CLAIM\n"
+        "seq: 9\n"
+        "summary: Claim naming only one of several load-bearing inputs\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n"
+        "  - ref: fact2\n"
+        "    load_bearing: true\n"
+        "  - ref: goal\n"
+        "    load_bearing: true\n",
+        body="This claim relies on fact1. It ignores the rest.\n",
+    )
+    _write(
+        root / "nodes" / "claim_g.md",
+        "id: claim_g\n"
+        "type: CLAIM\n"
+        "seq: 10\n"
+        "summary: Claim whose inputs are all non-load-bearing and names none\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: false\n"
+        "  - ref: goal\n"
+        "    load_bearing: false\n",
+        body="Nothing here explains anything, again. This body mentions nothing either.\n",
+    )
+
+    _write(
+        root / "nodes" / "claim_h.md",
+        "id: claim_h\n"
+        "type: CLAIM\n"
+        "seq: 11\n"
+        "summary: Claim whose inputs are all non-load-bearing and names one\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: false\n"
+        "  - ref: goal\n"
+        "    load_bearing: false\n",
+        body="This claim mentions fact1 even though it is not load-bearing. Context matters.\n",
+    )
+    _write(
+        root / "nodes" / "claim_i.md",
+        "id: claim_i\n"
+        "type: CLAIM\n"
+        "seq: 12\n"
+        "summary: Claim naming its non-load-bearing input but not the load-bearing one\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n"
+        "  - ref: goal\n"
+        "    load_bearing: false\n",
+        body="This claim rests entirely on goal. Nothing else matters here.\n",
+    )
+    _write(
+        root / "nodes" / "claim_j1.md",
+        "id: claim_j1\n"
+        "type: CLAIM\n"
+        "seq: 13\n"
+        "summary: Claim discussing a longer id that shares a prefix with its input\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n",
+        body="This claim rests entirely on fact10's finding that adoption doubled. That finding stands alone.\n",
+    )
+    _write(
+        root / "nodes" / "claim_j2.md",
+        "id: claim_j2\n"
+        "type: CLAIM\n"
+        "seq: 14\n"
+        "summary: Claim naming its input immediately before CJK text with no space\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n",
+        body="fact1\u7684\u8b49\u64da\u652f\u6301\u9019\u500b\u7d50\u8ad6\u3002\u7b2c\u4e8c\u53e5\u88dc\u5145\u8aaa\u660e\u3002\n",
+    )
+
+    _write(
+        root / "nodes" / "claim_k1.md",
+        "id: claim_k1\n"
+        "type: CLAIM\n"
+        "seq: 15\n"
+        "summary: Claim discussing a kebab-case sibling id instead of its input\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: goal\n"
+        "    load_bearing: true\n",
+        body="This claim tracks goal-v2's rollout closely. Nothing else is discussed.\n",
+    )
+    _write(
+        root / "nodes" / "claim_k2.md",
+        "id: claim_k2\n"
+        "type: CLAIM\n"
+        "seq: 16\n"
+        "summary: Claim naming its input at the end of an English sentence\n"
+        "status: current\n"
+        "inputs:\n"
+        "  - ref: fact1\n"
+        "    load_bearing: true\n",
+        body="This claim rests entirely on fact1. Nothing more to add.\n",
+    )
+
+    rc = dag.main(["check", str(root)])
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln]
+
+    narration_lines = [ln for ln in lines if "input-narration" in ln]
+    assert rc == 1
+    assert len(narration_lines) == 6
+    assert any("claim_a.md" in ln for ln in narration_lines)  # (a) names none -> violation
+    assert not any("claim_b.md" in ln for ln in narration_lines)  # (b) names id in a sentence -> none
+    assert any("claim_c.md" in ln for ln in narration_lines)  # (c) paraphrases topic without id -> violation (inverted from old spec)
+    assert not any("claim_d.md" in ln for ln in narration_lines)  # (d) inputs: [] -> none
+    assert not any("claim_e.md" in ln for ln in narration_lines)  # (e) names load-bearing, not the non-load-bearing one -> none
+    assert not any("claim_f.md" in ln for ln in narration_lines)  # (f) names only ONE of several load-bearing inputs -> none
+    assert any("claim_g.md" in ln for ln in narration_lines)  # (g) all inputs non-load-bearing, names none -> violation
+    assert not any("claim_h.md" in ln for ln in narration_lines)  # (h) all inputs non-load-bearing, names one -> none
+    assert any("claim_i.md" in ln for ln in narration_lines)  # (i) names non-load-bearing, load-bearing unnamed -> violation
+    assert any("claim_j1.md" in ln for ln in narration_lines)  # (j) fact1 vs fact10 boundary -> violation
+    assert not any("claim_j2.md" in ln for ln in narration_lines)  # (j) fact1 immediately before CJK, no space -> none
+    assert any("claim_k1.md" in ln for ln in narration_lines)  # (k) goal-v2 kebab sibling, not goal itself -> violation
+    assert not any("claim_k2.md" in ln for ln in narration_lines)  # (k) fact1 at end of an English sentence -> none
+
+
+def test_input_narration_message_names_load_bearing_when_a_load_bearing_input_exists(tmp_path, capsys):
+    """Counter-example the whole-branch reviewer proved by execution: a body
+    that names a NON-load-bearing input (`bfact`) is still told it names
+    "none of its inputs" and shown only the unrelated load-bearing candidate
+    -- an author who re-reads their own body sees the id they wrote and
+    concludes the gate is broken. The message must say `load-bearing` and
+    list only the load-bearing candidates that went unnamed."""
+    root = tmp_path
+    _write(
+        root / "nodes" / "afact.md",
+        "id: afact\ntype: FACT\nseq: 1\nsummary: A fact\nstatus: current\n"
+        "source: x\nquote: \"y\"\n",
+    )
+    _write(
+        root / "nodes" / "bfact.md",
+        "id: bfact\ntype: FACT\nseq: 2\nsummary: B fact\nstatus: current\n"
+        "source: x\nquote: \"y\"\n",
+    )
+    _write(
+        root / "nodes" / "claim1.md",
+        "id: claim1\ntype: CLAIM\nseq: 3\nsummary: Test claim\nstatus: current\n"
+        "inputs:\n"
+        "  - {ref: afact, load_bearing: true}\n"
+        "  - {ref: bfact, load_bearing: false}\n",
+        body="This claim narrates bfact in its body, but never mentions the other one. It stands on prior work.\n",
+    )
+
+    rc = dag.main(["check", str(root)])
+    out = capsys.readouterr().out
+    narration_line = next(ln for ln in out.splitlines() if "input-narration" in ln)
+
+    assert rc == 1
+    assert narration_line == (
+        "nodes/claim1.md: input-narration: body names none of its "
+        "load-bearing inputs ['afact']"
+    ), narration_line
+
+
+def test_input_narration_message_omits_load_bearing_when_no_input_is_load_bearing(tmp_path, capsys):
+    """The all-non-load-bearing fallback arm keeps the plain wording -- there
+    is no load-bearing subset to name, so calling it that would be false too."""
+    root = tmp_path
+    _write(
+        root / "nodes" / "goal.md",
+        "id: goal\ntype: GOAL\nseq: 1\nsummary: Ship v0\nstatus: current\n",
+    )
+    _write(
+        root / "nodes" / "fact1.md",
+        "id: fact1\ntype: FACT\nseq: 2\nsummary: A fact\nstatus: current\n"
+        "source: x\nquote: \"y\"\n",
+    )
+    _write(
+        root / "nodes" / "claim1.md",
+        "id: claim1\ntype: CLAIM\nseq: 3\nsummary: Test claim\nstatus: current\n"
+        "inputs:\n"
+        "  - {ref: goal, load_bearing: false}\n"
+        "  - {ref: fact1, load_bearing: false}\n",
+        body="Nothing here explains anything. This body mentions nothing either.\n",
+    )
+
+    rc = dag.main(["check", str(root)])
+    out = capsys.readouterr().out
+    narration_line = next(ln for ln in out.splitlines() if "input-narration" in ln)
+
+    assert rc == 1
+    assert narration_line == (
+        "nodes/claim1.md: input-narration: body names none of its "
+        "inputs ['fact1', 'goal']"
+    ), narration_line
+    assert "load-bearing" not in narration_line
 
 
 def test_check_lead_in_sentence_followed_by_list_is_not_a_paragraph_violation(tmp_path, capsys):
@@ -1362,6 +1734,7 @@ def test_frontmatter_span_ignores_indented_dashes_inside_block_scalars(tmp_path,
         "inputs:\n"
         "  - ref: g\n"
         "    load_bearing: true\n",
+        body="This claim builds on g. It survives the block scalar.\n",
     )
 
     project = dag.load_project(root)
@@ -1437,6 +1810,15 @@ def test_project_wide_assumption_is_gate_clean_and_outside_the_per_branch_cap(tm
     """FINDING-005 — a pivotal premise governing several branches is filed
     project-wide (no `branch`), so the ≤3 cap of one branch cannot force it in."""
     root = tmp_path
+    _write(
+        root / "nodes" / "claim_b1.md",
+        "id: claim_b1\n"
+        "type: CLAIM\n"
+        "seq: 1\n"
+        "summary: A claim on branch b1\n"
+        "status: current\n"
+        "branch: b1\n",  # gives b1 a node so branch-has-node stays silent here
+    )
     _write(
         root / "assumptions" / "checkpoint_go.md",
         "id: checkpoint_go\n"
