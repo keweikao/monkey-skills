@@ -169,7 +169,11 @@ inside a **two-patch window** — 11.16.0 and 11.16.1 — where mermaid
 briefly honoured it anyway; 11.17 restored the documented behaviour. The
 generated HTML happened to pin its CDN inside that window, which is why
 nothing looked broken locally while Obsidian and the VS Code preview
-(mermaid 11.13.x) rendered the same page as a column.
+(mermaid 11.13.x) rendered the same page as a column. That pin has since
+moved to 11.17.0: once the layout stopped needing the anomaly, pinning
+inside that window became the only place a regression in the row-joining
+rule could stay invisible — it is the one line that tolerates the broken
+form, and it is two versions wide, not one.
 
 **The metric was the deeper problem.** `min(W,H)/max(W,H)` cannot
 distinguish "the rows are horizontal" from "the boxes are wide". Asked
