@@ -33,7 +33,7 @@ brainstorming → brief                             (Discovery 階段)
 
 *語言註記：Description／Acceptance 用英文寫；Steps／Gloss 用會話語言寫。*
 
-- **Description**: 一個 assertion 份量的命令式動作
+- **Description**: 命令式第一行控制在 300 字元上限內。同一個上限也原封不動套用在每個巢狀項目自己折行後的文字上——沒有逐項豁免。計畫表頭的 `Goal:` 那一行不受字元上限限制，只保留不可有巢狀本文這條規則。超出的部分再放進更深一層的巢狀項目或表格 — 詳見[`references/plan-format.md`](references/plan-format.md) §`Field-value grammar`
 - **Module**: 1 個路徑 / module 名（不是 2 個）
 - **Context paths**: implementer 讀的既有 code 路徑（paths-not-content）
 - **Acceptance**: RED 測試名 + GREEN 可觀察條件

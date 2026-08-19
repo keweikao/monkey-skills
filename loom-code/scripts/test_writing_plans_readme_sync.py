@@ -252,3 +252,103 @@ def test_readmes_state_the_no_requirement_value_and_its_authority():
             f"{SCHEMA_AUTHORITY} as the owning schema, so a reader cannot "
             "tell the README is a summary rather than the grammar itself"
         )
+
+
+# `Description`'s field-list bullet described the retired judgment-shaped
+# "one-assertion" rule (plan-format.md's own words for it -- see that
+# file's §`Field-value grammar` changelog paragraph). It was replaced by a
+# plain 300-character ceiling per prose unit, routing overflow into nested
+# bullets/tables. The English retired token "one-assertion" cannot be
+# grepped in the .ja/.zh-TW mirrors, but both mirrors borrowed the bare
+# English loanword "assertion" rather than translating it, so checking for
+# that word (case-insensitively) inside the scoped field-list section
+# catches all three retired restatements without a katakana/CJK variant
+# enumeration.
+RETIRED_ASSERTION_TOKEN = "one-assertion"
+POSITIONAL_RULE_TOKENS = ["300", "plan-format.md"]
+
+# plan-format.md widened §`Field-value grammar` after the wording above
+# was first drafted: the 300-character ceiling binds each nested bullet's
+# own folded text too -- "no per-field branch and no per-bullet exemption"
+# -- not just the field's first line. Each README's field-list bullet must
+# state this widening, natively per language, not as a loanword copy of
+# the English phrasing. These are language-specific literal substrings the
+# implementer chose when writing each mirror -- a cold reader can still
+# verify the CONCEPT (the ceiling binds nested bullets too) even though
+# the exact string differs per language.
+PER_BULLET_NO_EXEMPTION_TOKENS = {
+    "README.md": "no per-bullet exemption",
+    "README.ja.md": "箇条書きごとの例外はない",
+    "README.zh-TW.md": "沒有逐項豁免",
+}
+# GOAL_CEILING_TOKENS mirrors PER_BULLET_NO_EXEMPTION_TOKENS's shape: each
+# span asserts the RELATIONSHIP (Goal: carries NO ceiling -- dropped
+# 2026-08-19, see check_field_microstructure.py and the field-value-
+# microstructure plan's Decision Log) rather than the bare field name
+# `Goal:`. A bare-name pin is satisfied by any sentence that merely
+# mentions the field, including one asserting the opposite ("Goal: shares
+# the 300-character ceiling") -- proven by a round-2 spec-review mutation
+# that passed both assertions unchanged, and by this arc's own T9 pin
+# (`GOAL_CEILING_TOKEN = "Goal:"`) which passed against a README rewritten
+# to state the opposite claim. These spans are contiguous substrings
+# walking from the field name through the no-ceiling verb, so reasserting
+# a ceiling (the pre-2026-08-19 wording) breaks the span even though
+# "Goal:" itself survives.
+GOAL_CEILING_TOKENS = {
+    "README.md": "Goal:` line carries no length ceiling of its own",
+    "README.ja.md": "Goal:` 行には文字数上限がなく",
+    "README.zh-TW.md": "Goal:` 那一行不受字元上限限制",
+}
+
+
+def test_all_three_readmes_state_positional_rule():
+    """Each README's per-task field list must state the shipped
+    300-character positional rule for `Description` and must not carry the
+    retired one-assertion wording, in English or in translation (the ja/
+    zh-TW mirrors both used the bare English loanword "assertion" rather
+    than translating it, so a case-insensitive word check catches them
+    too)."""
+    for name, path in READMES.items():
+        section = _field_list_section(path)
+        assert RETIRED_ASSERTION_TOKEN not in section, (
+            f"{name}: per-task field list still carries the retired "
+            f"{RETIRED_ASSERTION_TOKEN!r} wording"
+        )
+        assert "assertion" not in section.lower(), (
+            f"{name}: per-task field list still carries a restatement of "
+            "the retired one-assertion rule (the word 'assertion' appears "
+            "in the field-list section, in English or as a borrowed "
+            "loanword in translation)"
+        )
+        for token in POSITIONAL_RULE_TOKENS:
+            assert token in section, (
+                f"{name}: per-task field list does not state the shipped "
+                f"positional rule -- missing {token!r} (expected a "
+                "300-character ceiling with a pointer to plan-format.md)"
+            )
+
+
+def test_readmes_state_per_bullet_ceiling_and_goal_ceiling():
+    """Each README's field-list section must state that the 300-character
+    ceiling binds every nested bullet's own folded text (no per-bullet
+    exemption) AND that the plan header's `Goal:` line carries NO length
+    ceiling of its own -- dropped 2026-08-19 because plan-format.md
+    freezes `Goal:` at plan time, and a length cap on a frozen field can
+    only be satisfied by an edit the freeze forbids. A mirror stating
+    only the first-line rule silently implies overflow bullets are
+    unbounded; a mirror re-asserting a `Goal:` ceiling states a rule the
+    checker (`check_field_microstructure.py`) does not enforce."""
+    for name, path in READMES.items():
+        section = _field_list_section(path)
+        per_bullet_token = PER_BULLET_NO_EXEMPTION_TOKENS[name]
+        assert per_bullet_token in section, (
+            f"{name}: field-list section does not state that the "
+            "300-character ceiling binds each nested bullet's own folded "
+            f"text -- missing {per_bullet_token!r}"
+        )
+        goal_token = GOAL_CEILING_TOKENS[name]
+        assert goal_token in section, (
+            f"{name}: field-list section does not state that the plan "
+            f"header's `Goal:` line carries no length ceiling -- missing "
+            f"{goal_token!r}"
+        )

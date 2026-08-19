@@ -93,6 +93,42 @@ Role boundaries enforced by behavior, not reading restrictions:
   bracketed-token attempt following it, is not scanned as an entry). A
   reused `OQ-<n>` identifier (the never-renumbered/never-reused rule) is
   warned on stderr, first-wins — a warning only, it never changes rc.
+- **Check a plan's `Description`/`RED`/`GREEN` field microstructure**
+  (writing-plans self-check):
+  `python3 loom-code/scripts/check_field_microstructure.py <plan-path>`
+  — walks every `## Task <N> —` block; in a `Description`, `RED` or
+  `GREEN`, no prose unit may exceed 300 characters — a unit being the
+  field's own first line, or one nested bullet's text folded across
+  however many physical lines it wraps to. One cap, the same for all
+  three fields and both unit kinds, with no sentence counting and no
+  per-field branch. An indented continuation line that is none of
+  (nested bullet / markdown table row / a wrapped continuation of the
+  nested bullet above it) also violates; a table row ends the preceding
+  bullet's wrap window. Plan mode also runs a `Goal:` check: a
+  continuation line under the header `Goal:` field shaped as a nested
+  bullet or a markdown table row violates (`Goal:` must fold to one
+  line, unlike `Description`/`RED`/`GREEN` it carries no length cap).
+  rc=1 with every violation (field-microstructure or `Goal:`) named on
+  stderr, rc=2 when the plan has no `## Task` headings at all —
+  structurally not a plan, distinct from "nothing violated" — rc=0
+  when the plan is clean.
+  Sentence counting was tried twice and abandoned: counting occurrences
+  of `.`/`?`/`!` false-positives on `0.89.0`, `e.g.`, `i.e.` and
+  ellipsis, and the boundary heuristic that replaced it false-negatives
+  on a lowercase-initial sentence. A character cap has no punctuation
+  edge cases to enumerate.
+  `--brief <path>` runs a separate check instead: every blank-line-
+  delimited prose paragraph (none of whose lines is a heading, list
+  item, table row, or blockquote, and none of it inside a fenced code
+  block) over 600 characters violates unless a `<!-- narrative:
+  <reason> -->` declaration line (non-blank reason) sits directly
+  beneath it; `## Current State Evidence` and `## Alternatives
+  Considered` are exempt. No checker classifies a paragraph as
+  narrative — only the declaration string's presence is checked.
+  rc=1 with each violation naming its `## ` section on stderr, rc=2
+  when the brief has no `## ` sections at all — structurally not a
+  brief, distinct from "nothing violated" — rc=0 when the brief is
+  clean.
 - **Archive a shipped change-folder, or a single backlog entry file**
   (finishing-a-development-branch archive-on-close step, orchestrator-only,
   once per branch; the file unit is also used to close a

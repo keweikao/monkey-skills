@@ -11,7 +11,24 @@ move; A4 (maintainer-facing fragments in §BLOCKED fallback, §Plan size
 ceiling, §Consuming) move to references/design-evidence.md (author-facing
 header) while the rules they qualify, and the 5-step process / anti-pattern
 paragraph / detection-cascade rule sentences, stay inline verbatim. Word
-ceiling <=4420 — raised deliberately by the 2026-08-18
+ceiling <=4420 — the 2026-08-19 field-value-microstructure arc's Task 11
+(the §Field-microstructure gate paragraph in §Self-review, mirroring the
+Open-questions gate paragraph it sits directly under) landed the gate
+paragraph on revision round 1 at 4510 words, 90 over the cap, and left
+the cap test deliberately failing rather than raised (see
+docs/loom/plans/2026-08-19-field-value-microstructure.md Task 11
+revision round 1). Round 2 resolved it by CUTTING, not raising: four
+paragraphs under §Consuming a loom-design change-folder (scenario→task
+mapping, point-don't-copy/link-back, the verbatim-copy carve-out, and
+target-repo recon + MODIFIED/REMOVED deltas — 408 words) moved verbatim
+to the new references/consuming-a-change-folder.md, replaced by one
+~85-word pointer paragraph carrying every pinned token (the join key,
+`OOUX`, `MODIFIED`/`REMOVED`, `verbatim`) inline; the detection cascade,
+the mandatory-once-bound rule, and the structural/critic-verdict
+validator gates were left untouched per test_writing_plans_change_binding.py
+and test_writing_plans_verdict_gate.py's section-anchored pins. New
+count 4232, 188 under the cap. Before the round-1 raise to 4420 by the
+2026-08-18
 onramp-explicit-choice-gate arc's Task 9 (the §On-ramp choice gate
 paragraph in §Self-review, mirroring the Open-questions gate paragraph
 it sits under; new count 4409), and before that by the 2026-08-14
@@ -632,13 +649,26 @@ def test_open_questions_gate_owning_heading_missing_fails_loudly(monkeypatch):
 def test_word_count_at_most_4420():
     word_count = len(_skill_text().split())
     assert word_count <= 4420, (
-        f"SKILL.md is {word_count} words, over the 4420 cap (raised "
-        "deliberately from 4350 by the 2026-08-18 onramp-explicit-choice-gate "
-        "arc's Task 9 — the §On-ramp choice gate paragraph, mirroring the "
+        f"SKILL.md is {word_count} words, over the 4420 cap. The "
+        "2026-08-19 field-value-microstructure arc's Task 11 (the "
+        "§Field-microstructure gate paragraph, mirroring the "
         "Open-questions gate paragraph it sits directly under in "
-        "§Self-review; untrimmable without dropping the checker invocation, "
-        "the STOP directive, or the git-guard.py cross-reference; prior "
-        "raise from 4250 by the 2026-08-14 language-layering "
+        "§Self-review) tried to fit under this cap on revision and could "
+        "not: compressed to its practical floor (91 words — two "
+        "invocation-mode timings, the exit-1/exit-2 distinction, a "
+        "negation-resistant blocking clause, and the brief-authorship "
+        "answer, each pinned and none droppable) it still leaves the file "
+        "90 words over. Left failing deliberately — see "
+        "docs/loom/plans/2026-08-19-field-value-microstructure.md Task 11 "
+        "revision round 1 for the full accounting — rather than raised a "
+        "sixth time with no compression round behind it; prior raise from "
+        "4350 by the 2026-08-18 "
+        "onramp-explicit-choice-gate arc's Task 9 — the §On-ramp choice gate "
+        "paragraph, mirroring the Open-questions gate paragraph it sits "
+        "directly under in §Self-review; untrimmable without dropping the "
+        "checker invocation, the STOP directive, or the git-guard.py "
+        "cross-reference; prior raise from 4250 by the 2026-08-14 "
+        "language-layering "
         "arc's T1: the §Language policy section + the §Progress surface "
         "reword reference — the policy is untrimmable without dropping "
         "the layered statement or the adjudication-view citation; prior "

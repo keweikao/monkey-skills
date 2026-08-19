@@ -114,6 +114,8 @@ The prompt also enforces parallel-dispatch checks — see it for the complete li
 
 **On-ramp choice gate (unconditional):** (fires at intake — earlier than this section's other gates) before dispatching the reviewer — and before drafting Task 1 — run `python3 loom-code/scripts/check_onramp_choice.py <brief-path>` on the source brief. Exit 2 → STOP: do not draft; relay the printed question to the user, wait, update the brief's `## Design-side on-ramp` line, re-run. Exit 1 → STOP (brief missing). `git-guard.py` enforces this at commit time; grammar SSOT: [`../brainstorming/references/handoff-brief-format.md`](../brainstorming/references/handoff-brief-format.md).
 
+**Field-microstructure gate (unconditional):** brief mode fires at intake, before drafting Task 1 (mirrors the On-ramp choice gate) — run `python3 loom-code/scripts/check_field_microstructure.py --brief <brief-path>`; a non-zero exit blocks drafting, even on a brief you did not author — STOP, fix it, re-run. Plan mode fires before dispatching the reviewer — run `python3 loom-code/scripts/check_field_microstructure.py <plan-path>`; a non-zero exit blocks the plan-document-reviewer dispatch. Exit 1: fix the flagged field or paragraph, re-run. Exit 2: structurally empty (no `## Task` headings, or no `## ` sections) — supply the missing structure, not a field fix.
+
 If reviewer returns `NEEDS_REVISION`, writing-plans **fixes the plan** and re-runs the reviewer. Before that re-dispatch, re-run the **Pre-patch before dispatch** self-screen on the revision delta itself — every line the fix added or changed — because three consecutive arcs' round-2 findings were defects the round-2 revision itself introduced. Up to 2 rounds; if still NEEDS_REVISION after round 2, escalate to user (likely the brief itself needs revisiting).
 
 **Amending a PASS plan:** After PASS, any change re-reviews unless it is one of these three kinds — a **closed list**; an amendment that does not clearly match one of the three is outside the list:
@@ -192,7 +194,7 @@ Plan-document-reviewer verdict: PENDING   ← required; reviewer will flip to PA
 N/A — no unresolved question: <one-line reason>
 
 ## Task 1 — <short name>
-- Description: <one-assertion unit of work, imperative voice>
+- Description: <imperative voice, first line only — overflow routes to a nested bullet or table per §Field-value grammar>
 - Module: <path or module name; one only>
 - Files touched: <comma-separated paths the implementer will Write / Edit>
 - Context paths:
@@ -258,15 +260,7 @@ Proceed only on **exit 0** (fresh `PASS_WITH_NOTES`). Route on the non-zero exit
 - **Exit 3 (fresh verdict is NEEDS_REVISION, critic blocked)** — route BACK to the spec-expansion writer: the critic already found problems writing-plans cannot resolve itself.
 - **Exit 4 (three distinct causes, same remediation)** — a `--files` list that diverges from what was recorded at mint, a covered file edited since mint (stale), or a covered file that's unreadable since mint — re-run `completeness-critic` so it reviews the current bytes before writing-plans trusts the verdict again.
 
-**Scenario → task mapping.** Map each `#### Scenario:` (its GIVEN / WHEN / THEN) → **one task's `Acceptance: RED/GREEN`**. The THEN is the GREEN observable; the GIVEN/WHEN set up the RED. One `### Requirement:` may **fan to N tasks** — split per §The splitting framework (a multi-Scenario Requirement is N candidate tasks, grouped by assertion boundary).
-
-**Point-don't-copy / link back.** **NEVER** copy the spec body into the plan — loom-design is SSOT, and a copied delta silently goes stale the moment loom-design re-edits the change-folder, so the plan then drives implementers off a spec that no longer exists. Reference the source `### Requirement:` / `#### Scenario:` names via the stable join key `<change-id> / Requirement: <name> / Scenario: <name>` (the `Brief item covered:` field accepts this referent — see [`references/plan-format.md`](references/plan-format.md)). When the spec file is in id mode, cite `<change-id> / REQ-<n> / Scenario: <name>` instead (or the bare id for a whole requirement) — the name form stays for legacy files. The plan **links back** to the spec; it does not duplicate it.
-
-**Verbatim-copy carve-out (fact vs interpretation).** One exception to point-don't-copy: the THEN **observable**, **magic values**, and **signatures** are *facts* — copy them **verbatim** into the RED/GREEN assertion (a paraphrased magic value or signature is a defect). The surrounding **narrative** and **design rationale** are *interpretation* — link to them, do not copy. Facts in, prose linked.
-
-**WHAT not WHERE — populate code-target fields by target-repo recon.** The change-folder supplies the **WHAT** (behavior / acceptance) but carries **no file / module / path info** — yet `references/plan-format.md` makes `Module` and `Files touched` (the parallelism disjointness oracle) required per task. Do **not** guess placeholder paths. Populate each task's `Module` / `Files touched` / `Context paths` by **reconnaissance of the TARGET repo** — grep / Read / Explore over the codebase the change lands in, the same Current-State-Evidence recon brainstorming does — seeded by the proposal's `## OOUX object model` (OOUX = the proposal's object/relationship model) where present (object → likely module / file). The spec names the behavior; the target repo tells you where it lives.
-
-- **MODIFIED / REMOVED deltas.** When the spec carries a `## MODIFIED Requirements` or `## REMOVED Requirements` block (not just `## ADDED Requirements`), map them to change / removal tasks **plus the corresponding test update** — same `#### Scenario:` → RED/GREEN discipline (the RED is the failing test that encodes the changed / removed behavior; the GREEN is the updated test passing).
+**Task-shape and code-target detail** (scenario → task mapping, point-don't-copy, verbatim-copy carve-out, target-repo recon, MODIFIED/REMOVED deltas). Map each `#### Scenario:` to one task's `Acceptance: RED/GREEN` — never copy the spec body into the plan, link via the join key `<change-id> / Requirement: <name> / Scenario: <name>` (id-mode: `<change-id> / REQ-<n> / Scenario: <name>`); THEN observables / magic values / signatures are facts, copied verbatim, narrative and rationale are interpretation, linked not copied; populate `Module` / `Files touched` / `Context paths` by reconnaissance of the TARGET repo, seeded by the proposal's `OOUX` object model where present; `MODIFIED` / `REMOVED` requirement deltas map to change/removal tasks plus a test update, same discipline. Full detail in [`references/consuming-a-change-folder.md`](references/consuming-a-change-folder.md).
 
 **Consumer read-only.** **NEVER edit the producer's change-folder** — loom-design is SSOT, so a consumer edit makes sibling consumers read a different spec than the one the freeze validated, and races the freeze's `validate_spec_output.py` re-run. writing-plans reads `docs/loom/<change-id>/` and writes only its own plan at `docs/loom/plans/<date>-<topic>.md` (the canonical plan path from the §Output contract; for a change-folder input the `<change-id>` fills the `<topic>` slot).
 
@@ -284,6 +278,7 @@ What this skill does NOT do (write code, dispatch SDD subagents, invoke implemen
 
 - [`references/plan-format.md`](references/plan-format.md) — full plan schema.
 - [`references/plan-document-reviewer-prompt.md`](references/plan-document-reviewer-prompt.md) — evaluator subagent prompt.
+- [`references/consuming-a-change-folder.md`](references/consuming-a-change-folder.md) — scenario→task mapping, point-don't-copy, verbatim-copy carve-out, and target-repo recon detail for §Consuming a loom-design change-folder.
 - [`../brainstorming/SKILL.md`](../brainstorming/SKILL.md) — upstream brief producer.
 - [`../brainstorming/references/handoff-brief-format.md`](../brainstorming/references/handoff-brief-format.md) — input contract.
 - [`../subagent-driven-development/SKILL.md`](../subagent-driven-development/SKILL.md) — downstream plan consumer.

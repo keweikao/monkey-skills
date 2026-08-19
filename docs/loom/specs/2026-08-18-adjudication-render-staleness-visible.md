@@ -1,18 +1,10 @@
 # Brief: make a stale adjudication render impossible to mistake for a good one
 
-Date: 2026-08-18
-Stage: brainstorming output → writing-plans input
-Design-side on-ramp: no criteria row fired (repair of a shipped loom mechanism;
-no UI surface, no new multi-state behavior) — no detour offered.
-Axis 0 queue check: `docs/loom/DIRECTION.md` `## Now` is empty; no OPEN backlog
-entry covers this defect (nearest neighbours —
-`2026-08-12-protocol-files-carry-no-size-ceiling` touches the same protocol
-file but is a size concern, not a correctness one). This arc is unqueued and
-user-initiated.
-Recall: `docs/loom/memory/a-mechanical-check-can-go-green-by-skipping.md` and
-`a-mutation-test-must-run-the-production-assertion.md` both bind here — the
-guard this brief adds is exactly the shape that historically went green by
-not running.
+- Date: 2026-08-18
+- Stage: brainstorming output → writing-plans input
+- Design-side on-ramp: no criteria row fired (repair of a shipped loom mechanism; no UI surface, no new multi-state behavior) — no detour offered.
+- Axis 0 queue check: `docs/loom/DIRECTION.md` `## Now` is empty; no OPEN backlog entry covers this defect (nearest neighbours — `2026-08-12-protocol-files-carry-no-size-ceiling` touches the same protocol file but is a size concern, not a correctness one). This arc is unqueued and user-initiated.
+- Recall: `docs/loom/memory/a-mechanical-check-can-go-green-by-skipping.md` and `a-mutation-test-must-run-the-production-assertion.md` both bind here — the guard this brief adds is exactly the shape that historically went green by not running.
 
 ## Problem
 
@@ -36,16 +28,13 @@ opening each file:
 | 08-18 05:54 | strage-dag-skill | that worktree's own checkout | 353 raw `**`, 6 raw mermaid fences |
 | 08-18 06:09+ | monkey-skills | plugin cache `0.84.0/` (hardcoded path) | 45 raw `**` |
 
-Three distinct staleness sources appear: the plugin cache retains **every**
-released version as its own directory tree (0.17.0 → 0.86.0 all present on
-disk today), un-rebased git worktrees carry their own older checkout
-(`strage-dag-skill/loom-code/scripts/adjudication_render.py` has no
-`markdown_it` import as of this writing, and its
-`loom-code/.claude-plugin/plugin.json` reads `0.83.0`), and a working tree can
-sit mid-fix. One path convention does reach all three — "the copy shipped
-beside the protocol being read" — because each of the three sources is a copy
-the executor chose over that one; what no path convention can reach is the
-fourth case, where the shipped copy is itself old.
+Three distinct staleness sources appear:
+
+- The plugin cache retains **every** released version as its own directory tree (0.17.0 → 0.86.0 all present on disk today).
+- Un-rebased git worktrees carry their own older checkout (`strage-dag-skill/loom-code/scripts/adjudication_render.py` has no `markdown_it` import as of this writing, and its `loom-code/.claude-plugin/plugin.json` reads `0.83.0`).
+- A working tree can sit mid-fix.
+
+One path convention does reach all three — "the copy shipped beside the protocol being read" — because each of the three sources is a copy the executor chose over that one; what no path convention can reach is the fourth case, where the shipped copy is itself old.
 
 The job to be done: **an adjudicator opening the page, and an orchestrator
 about to hand it over, must be able to tell at a glance which version produced
@@ -184,28 +173,18 @@ produced all five incidents.
 
 ## Decision
 
-Add a deployment-version stamp to every HTML page `adjudication_render.py`
-emits — `<meta name="generator" content="loom-code-adjudication-render/<version>">`
-plus a visible page footer carrying the same version — read from the
-`.claude-plugin/plugin.json` that ships beside the running script, falling back
-to a literal `unknown` when that file is unreadable (a copy that cannot name
-itself is as suspect as an old one, and must still be visibly marked). Add a
-postcondition over the rendered rendition region only: if unconverted markdown
-markers survive there, exit non-zero and write no output file. Add one sentence
-to the invocation contract in `protocols/adjudication-view.md` making the
-pre-delivery stamp check the executor's duty.
+- Add a deployment-version stamp to every HTML page `adjudication_render.py` emits — `<meta name="generator" content="loom-code-adjudication-render/<version>">` plus a visible page footer carrying the same version — read from the `.claude-plugin/plugin.json` that ships beside the running script, falling back to a literal `unknown` when that file is unreadable (a copy that cannot name itself is as suspect as an old one, and must still be visibly marked).
+- Add a postcondition over the rendered rendition region only: if unconverted markdown markers survive there, exit non-zero and write no output file.
+- Add one sentence to the invocation contract in `protocols/adjudication-view.md` making the pre-delivery stamp check the executor's duty.
 
 Pin the invocation in the same contract, as a **self-locating** rule — "the
 script shipped beside the protocol file you are reading" — rather than via
-`${CLAUDE_PLUGIN_ROOT}`. Two findings force that wording. Anthropic's docs
-state the substitution happens in exactly two places, "the skill's markdown
-content, and Bash rules in the `allowed-tools` frontmatter"
-([skills docs](https://code.claude.com/docs/en/skills.md)); a protocol file
-opened with the Read tool is neither, and the on-disk file keeps the literal
-token (verified: `brainstorming/SKILL.md:79` carries `${CLAUDE_PLUGIN_ROOT}`
-on disk while this session's loaded body carried the resolved absolute path).
-A literal token reaching Bash expands to empty — a new trap. The self-locating
-rule also carries to Codex, which has no such placeholder at all.
+`${CLAUDE_PLUGIN_ROOT}`. Two findings force that wording:
+
+- Anthropic's docs state the substitution happens in exactly two places, "the skill's markdown content, and Bash rules in the `allowed-tools` frontmatter" ([skills docs](https://code.claude.com/docs/en/skills.md)); a protocol file opened with the Read tool is neither, and the on-disk file keeps the literal token (verified: `brainstorming/SKILL.md:79` carries `${CLAUDE_PLUGIN_ROOT}` on disk while this session's loaded body carried the resolved absolute path).
+- A literal token reaching Bash expands to empty — a new trap.
+
+The self-locating rule also carries to Codex, which has no such placeholder at all.
 
 **Correction, 2026-08-18, after this brief's first draft**: an earlier version
 of this paragraph claimed Codex "installs by git clone (no per-version cache
@@ -221,6 +200,7 @@ adjudication view today reproduces the original bug. At least two of the three
 staleness classes therefore exist under Codex. What remains un-probed is
 whether an executor under Codex resolves the self-locating rule correctly, NOT
 whether Codex can go stale; the backlog entry carries that scope.
+<!-- narrative: the live cache finding is what licenses the "at least two of three classes" conclusion, and that conclusion is what fixes the boundary of what stays unknown — drop either and the next sentence asserts more than its evidence carries. The retraction ahead of them stands on its own documentary evidence and leads into them; split apart, the four read as coordinate facts and the reader re-derives which one bounds which -->
 
 We will NOT touch the plugin cache and will NOT add a second script: both trade
 the problem for device hygiene the repo cannot enforce. We will NOT move these

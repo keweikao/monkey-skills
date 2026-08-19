@@ -30,9 +30,10 @@ Free-form plans force SDD to re-parse; this schema makes the parse trivial.
 
 **Source brief**: <path to brief, e.g. docs/loom/specs/2026-05-16-csv-export.md>
 Goal: <one sentence transcribed from the brief's Smallest End State at
-    plan time — frozen with the plan (wrap continuation lines WITH
-    indentation — unindented wraps silently truncate the rendered goal);
-    never edited afterward>
+    plan time, no nested body — see §Field-value grammar; frozen with
+    the plan (wrap continuation lines WITH indentation — unindented
+    wraps silently truncate the rendered goal); never edited
+    afterward>
 Stage: <planning | sdd:wave-N | review:round-N | blocked:user-decision |
     finishing — updated by the orchestrator at each transition,
     committed with the nearest ledger or close-out commit>
@@ -95,15 +96,15 @@ This section deliberately carries no owner field, no deadline field, no routing 
 ```markdown
 ## Task <N> — <short imperative name>
 
-- **Description**: <one-assertion unit of work, written in English, imperative voice>
+- **Description**: <first line is imperative voice, written in English, and stays within a 300-character ceiling; route every further clause into a nested bullet or a markdown table beneath it — see §Field-value grammar>
 - **Module**: <path or module name; ONE only>
 - **Files touched**: <comma-separated paths the implementer will Write / Edit>
 - **Context paths**:
   - <absolute path to existing code the implementer reads>
   - <... additional context paths>
 - **Acceptance**:
-  - **RED**: <failing test name OR diagnostic the implementer writes first, written in English>
-  - **GREEN**: <observable condition when the task is done, written in English>
+  - **RED**: <first line states the assertion, written in English, and stays within the same 300-character ceiling — e.g. the `Fails today because ...` clause below fits inside it; route anything beyond that into a nested bullet or a markdown table beneath it — see §Field-value grammar>
+  - **GREEN**: <same first-line rule as RED — states the assertion, written in English, within the same 300-character ceiling; anything beyond that goes into a nested bullet or a markdown table — see §Field-value grammar>
 - **External surfaces**: <v0.9.0+ — required when task touches non-stdlib external surface. See §External surfaces below. Omit field entirely if task is pure internal logic.>
 - **Reuse-adequacy**: <v0.43.0+ — required when the task's Description instructs the implementer to reuse an existing helper in a new lane. Two author-written slots, `Observed` (ends in a source marker) and `Intended`; no author-side adequacy verdict — that judgement is the reviewer's, not the plan's. See §`Reuse-adequacy` below. Omit field entirely if the task authors new logic instead of reusing an existing helper across lanes.>
 - **Dependencies**: <one of: "none" | "Task N completes first" | "Tasks N, M complete first" (multi-prerequisite — N and M must both finish before this task starts) | "Tasks N, M parallel" (both are prerequisites, may run in parallel). Cross-part ordering: use "none" at task level + a plan-level `Notes` entry; the field is within-plan only and cannot reference a sibling part's tasks.>
@@ -134,6 +135,46 @@ This section deliberately carries no owner field, no deadline field, no routing 
     by plan_card.py; emitted by writing-plans for new plans, optional
     on old ones>
 ```
+
+#### Field-value grammar (v0.89.0+)
+
+A field's value is bounded by WHERE its content goes, not by how long the
+document is — nothing is deleted, overflow is relocated. This replaces
+the earlier judgment-shaped rule that asked for a single unbounded
+sentence of work, which let a writer producing a 1,452-character
+`Description` believe in good faith that it satisfied that duty. Two
+later attempts at a machine-checkable *sentence* rule were tried and
+retired in turn: occurrence counting false-positived on `0.89.0`,
+`e.g.`, `i.e.` and an ellipsis; the sentence-boundary heuristic that
+replaced it false-negatived on a lowercase-initial third sentence —
+letting an over-cap field pass silently — while still false-positiving
+on `e.g. Python`. The rule below is a plain character-length cap
+instead, which has no punctuation edge case to enumerate, so a
+mechanical checker decides it the same way every time.
+
+- **`Description`, `Acceptance.RED`, `Acceptance.GREEN`.** Keep every
+  prose unit within a **300-character ceiling** — a unit being either
+  the field's first line (the text on the bullet's own line, right
+  after the colon), or one nested bullet's own text folded across
+  however many physical lines it wraps to. This is the SAME number and
+  the SAME rule for all three fields, and for every nested bullet
+  beneath them; there is no per-field branch and no per-bullet
+  exemption. Route every further clause — a caveat, a grounding clause
+  such as the `Fails today because ...` clause this file already
+  teaches (see the Worked example below), a list of sub-steps, a table
+  of cases — into a nested bullet or a markdown table beneath that
+  first line, never onto the first line itself; a markdown table row
+  carries no character ceiling of its own, only the first line and
+  each nested bullet do.
+- **`Goal:`.** Carries no length ceiling — admits no nested body:
+  `plan_card.py`'s `_header_value` folds any indented continuation
+  into the card's single `goal:` line, so a nested body there is
+  silently flattened rather than rendered. One sentence is brevity
+  guidance, not a mechanical rule — no check enforces sentence
+  counting on this field.
+
+See the Worked example section below for a before/after rewrite of an
+over-long `Description` under this rule.
 
 #### `Files touched` and `Independent` (v0.8.0+)
 
@@ -330,6 +371,8 @@ views of one record format, not two competing records).
 
 ## Worked example
 
+The canonical CSV-export plan below must stay the FIRST fenced markdown code block in this section — the plan-format test suite extracts it by taking the first such fence between this heading and the next `###`-level heading, so a subsection inserted ahead of it (e.g. a shorter example) breaks that extraction. Add new subsections after it, not before.
+
 For a brief at `docs/loom/specs/2026-05-16-csv-export.md` whose Smallest End State is *"add `?format=csv` query param to the existing `/reports/<id>` endpoint":*
 
 ```markdown
@@ -409,6 +452,42 @@ N/A — no unresolved question: brief left nothing undecided at plan time.
 
 Tasks 1 + 2 are independent (disjoint `Files touched`) and can run parallel in `dispatching-parallel-agents`. Task 3 joins them sequentially because its `Files touched` overlaps Task 1's.
 ```
+
+### Field-value grammar — before/after
+
+Before, under the retired judgment-shaped wording — one unbroken line
+that reads as "one assertion" to its own author, but its first line
+runs to 312 characters, past the 300-character ceiling:
+
+```markdown
+- **Description**: Add rate limiting to the /export endpoint using a token-bucket algorithm keyed on user id, with a 429 response and a Retry-After header when the bucket is empty, matching the limiter already used on /reports so behavior stays consistent across endpoints, and update the OpenAPI spec to document the new 429 case.
+```
+
+After, under the positional rule — first line stays within the
+300-character ceiling, the rest routes into nested bullets, each of
+which stays within the same ceiling too:
+
+```markdown
+- **Description**: Add rate limiting to the `/export` endpoint.
+  - Use the token-bucket limiter already used on `/reports`, keyed on
+    user id, so behavior stays consistent across endpoints.
+  - Return `429` with a `Retry-After` header when the bucket is empty.
+  - Update the OpenAPI spec to document the new `429` case.
+```
+
+Moving the overflow into a nested bullet is not on its own enough — the
+ceiling governs each bullet too, so a single long caveat rewrites the
+same violation one level down:
+
+```markdown
+- **Description**: Add rate limiting to the `/export` endpoint.
+  - Use the token-bucket limiter already used on `/reports`, keyed on user id rather than on IP because the export path is authenticated and shared NAT egress would otherwise starve whole offices, and note that the limiter's existing burst allowance was tuned for `/reports`' traffic shape so the export path may need its own bucket size once real usage lands.
+```
+
+That bullet's folded text runs past 300 characters and is rejected, even
+though the field's first line is short. Split it the same way the first
+line was split — one bullet per idea, a table when three or more items
+share axes.
 
 ### Wide-but-shallow example — 8 tasks, critical-path depth 2
 

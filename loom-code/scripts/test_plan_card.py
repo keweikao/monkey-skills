@@ -696,6 +696,256 @@ def test_detail_omits_absent_fields(tmp_path):
     )
 
 
+def test_detail_preserves_nested_description_bullets(tmp_path):
+    """--detail on a task whose Description is one sentence plus two
+    nested bullets emits three lines, not one space-joined line —
+    `_bullet_value`'s ``" ".join(...)`` fold is bypassed for
+    Description inside build_detail only."""
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "  - Nested bullet one.\n"
+            "  - Nested bullet two.\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "  Nested bullet one.\n"
+        "  Nested bullet two.\n"
+    )
+
+
+def test_detail_preserves_star_and_plus_marker_nested_bullets(tmp_path):
+    """--detail on a Description whose nested bullets use `*` and `+`
+    markers (both accepted by check_field_microstructure.py's
+    `_NESTED_BULLET_LINE`) emits them as separate bullet lines, not
+    folded into the description sentence — `_fold_sub_bullets` only
+    recognised `-`, so a `*`/`+` nested bullet fell through to the
+    `elif items:` continuation branch (no bullet open yet) and landed
+    in the `pre` branch, later joined into prose by the Description
+    loop in build_detail."""
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "  * A star-marker nested bullet.\n"
+            "  + A plus-marker nested bullet.\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "  A star-marker nested bullet.\n"
+        "  A plus-marker nested bullet.\n"
+    )
+
+
+def test_detail_star_marker_continuation_not_treated_as_bullet(tmp_path):
+    """A continuation line beginning with markdown emphasis (`*word*`,
+    no space after the leading `*`) must NOT be mistaken for a
+    `*`-marker nested bullet — it has to keep folding into the
+    LAST-opened bullet's prose, same as any other continuation line."""
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "  - Nested bullet one.\n"
+            "  *emphasised* continuation text.\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "  Nested bullet one. *emphasised* continuation text.\n"
+    )
+
+
+def test_detail_preserves_acceptance_table_rows(tmp_path):
+    """--detail on a task whose Acceptance body is a three-row markdown
+    table (no `- ` sub-bullet at all) emits all three rows — table rows
+    arriving before the first sub-bullet used to match neither the
+    sub-bullet branch nor the continuation branch and were silently
+    dropped."""
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "- Acceptance:\n"
+            "  | Field | Rule |\n"
+            "  | --- | --- |\n"
+            "  | Description | one sentence |\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "acceptance:\n"
+        "  | Field | Rule |\n"
+        "  | --- | --- |\n"
+        "  | Description | one sentence |\n"
+    )
+
+
+def test_detail_preserves_acceptance_table_row_after_bullet(tmp_path):
+    """--detail on a task whose Acceptance body opens a `- ` sub-bullet
+    and is then followed by a table row: the table row must not be
+    space-joined into the open bullet's prose (the `elif items:`
+    continuation branch) — it is emitted verbatim on its own line,
+    the same corruption as the pre-bullet case reached through the
+    other branch."""
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "- Acceptance: first\n"
+            "  - RED: some test\n"
+            "  | Field | Rule |\n"
+            "  | --- | --- |\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "acceptance: first\n"
+        "  RED: some test\n"
+        "  | Field | Rule |\n"
+        "  | --- | --- |\n"
+    )
+
+
+def test_detail_preserves_order_of_table_between_two_bullets(tmp_path):
+    """--detail on an Acceptance body whose table row sits BETWEEN two
+    sub-bullets: the three segments come out in source order.
+
+    This is the shape `_fold_sub_bullets` exists for. A design that
+    appended table rows immediately and flushed accumulated bullets at
+    the end would emit the table before both bullets and still pass
+    every other table test in this file, because those fixtures put the
+    table at one end of the body. Both reviewers verified this ordering
+    by hand; nothing pinned it until this test.
+    """
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "- Acceptance: first\n"
+            "  - RED: some test\n"
+            "  | Field | Rule |\n"
+            "  - GREEN: it passes\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "acceptance: first\n"
+        "  RED: some test\n"
+        "  | Field | Rule |\n"
+        "  GREEN: it passes\n"
+    )
+
+
+def test_detail_preserves_description_table_row_before_bullet(tmp_path):
+    """--detail on a task whose Description body has a table row before
+    its first nested bullet: the table row must not be space-joined
+    into the Description sentence (the loop's own `else` branch) —
+    the mirror-image gap of the Acceptance case."""
+    plan_path = _write_plan(
+        tmp_path,
+        (
+            "# Plan: widget fixture\n\n"
+            "Source brief: docs/loom/specs/fixture.md\n"
+            "Goal: Ship the widget pipeline end-to-end.\n"
+            "Stage: sdd:wave-1\n\n"
+            "## Task 1 — parser\n\n"
+            "- Description: Extend the parser.\n"
+            "  | Field | Rule |\n"
+            "  | --- | --- |\n"
+            "  - Nested bullet.\n"
+            "- Status: pending\n\n"
+            "## Notes\n\nFixture notes — never a task.\n"
+        ),
+    )
+
+    result = _run_card(plan_path, "--detail", "T1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "T1 parser\n"
+        "description: Extend the parser.\n"
+        "  | Field | Rule |\n"
+        "  | --- | --- |\n"
+        "  Nested bullet.\n"
+    )
+
+
 def test_detail_unknown_task_number_exits_1_naming_it(tmp_path):
     """--detail with a task number the plan has no heading for → exit 1
     loud naming the requested task."""
