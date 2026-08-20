@@ -102,7 +102,8 @@ regenerates the given DIRECTION.md's `## Now` section — one
 `- <name> — <description>` line per COMMITTED-NEXT entry in filename
 (= file-date) order, or exactly `_(queue empty — bet at the next
 close-out)_` when the queue is empty — replacing the section body
-wholesale (it is machine-owned per the file's own charter header) and
+wholesale (it is machine-owned per DIRECTION.md's charter — SSOT
+`loom-code/hooks/direction-charter.md`) and
 leaving every other line untouched. It refuses loudly (exit 1, no write)
 when the file lacks a `## Now` heading or an entry's frontmatter is
 malformed (status outside the closed vocabulary). `--direction-check` is
@@ -116,7 +117,8 @@ checks the direction file at `<store>/../DIRECTION.md` — the
 convention's fixed location — ONLY when it exists; an absent file is
 silently valid (the direction layer is opt-in per repo). Its three
 independent checks: `## Now` content matches the COMMITTED-NEXT entry
-files; `## Next`/`## Later` headings present; and no date-like token
+files; `## Now`/`## Next` headings present (`## Later` is optional —
+tolerated if present, never required); and no date-like token
 (`20\\d\\d[-/年.]` or `Q[1-4]`) anywhere OUTSIDE the generated `## Now`
 body — the charter's no-dates rule as a checked invariant. The `## Now`
 body is exempt from the date scan because entry NAMES are date-prefixed
@@ -196,7 +198,7 @@ STATUS_SECTION_ORDER = [
 
 @dataclass(frozen=True)
 class Violation:
-    kind: str  # "name" | "status" | "archive-tier" | "archived-date" | "description" | "field-agreement"
+    kind: str  # "name" | "status" | "archive-tier" | "archived-date" | "description" | "field-agreement" | "serves"
     file: str
     detail: str
 
@@ -235,7 +237,7 @@ _FIELD_BULLET_PATTERNS = {
         rf"^-\s*\**{field}\**\s*(?:\([^)]*\))?\s*:\s*(.*?)(?=\n[ \t]*\n|\n-\s|\Z)",
         re.MULTILINE | re.DOTALL,
     )
-    for field in ("Origin", "Start")
+    for field in ("Origin", "Start", "Serves")
 }
 
 
@@ -384,11 +386,68 @@ def _check_description(display: str, frontmatter: dict[str, str]) -> list[Violat
     return []
 
 
+def _purpose_path_for(store: Path) -> Path:
+    """Where the `serves` gate looks for the north-star document: the
+    store's parent directory, mirroring `_direction_path_for`'s convention
+    (docs/loom/PURPOSE.md beside docs/loom/backlog/). Its mere presence
+    or absence is the gate — content is never read here. PRINCIPLES.md
+    (the field's original 1fe7b2c1 target) holds design/engineering
+    principles only and is deliberately NOT probed here."""
+    return store.parent / "PURPOSE.md"
+
+
+_SERVES_UNRELATED_RE = re.compile(r"^unrelated\s*—\s*\S.*$")
+
+
+def _is_well_formed_serves(value: str) -> bool:
+    """Closed two-form grammar (plan Task 1): either `unrelated — <reason>`
+    (reason clause mandatory) or any other non-empty text (the link
+    prose). A bare `unrelated` with no reason clause is malformed."""
+    value = value.strip()
+    if not value:
+        return False
+    if value == "unrelated" or value.startswith("unrelated ") or value.startswith("unrelated—"):
+        return bool(_SERVES_UNRELATED_RE.match(value))
+    return True
+
+
+def _check_serves(
+    display: str, frontmatter: dict[str, str], status: str | None, store: Path
+) -> list[Violation]:
+    """`serves:` is required only when status is COMMITTED-NEXT AND the
+    repo has docs/loom/PURPOSE.md (plan Task 1, retargeted by Task 3 — the
+    gate is load-bearing: monkey-skills' own store has no PURPOSE.md by
+    standing choice and must stay unaffected)."""
+    if status != "COMMITTED-NEXT":
+        return []
+    if not _purpose_path_for(store).is_file():
+        return []
+    serves = frontmatter.get("serves")
+    if serves is None:
+        return [
+            Violation(
+                "serves",
+                display,
+                "COMMITTED-NEXT entry missing required 'serves' field",
+            )
+        ]
+    if not _is_well_formed_serves(serves):
+        return [
+            Violation(
+                "serves",
+                display,
+                f"'serves: {serves}' is not well-formed — use 'serves: <how this "
+                "serves the north star>' or 'serves: unrelated — <reason>'",
+            )
+        ]
+    return []
+
+
 def _check_field_agreement(display: str, frontmatter: dict[str, str], body: str) -> list[Violation]:
     """(v) frontmatter <-> body-bullet agreement, only when both are present
     (revision-round-1 DECISION — see module docstring)."""
     violations: list[Violation] = []
-    for field_key, field_label in (("origin", "Origin"), ("start", "Start")):
+    for field_key, field_label in (("origin", "Origin"), ("start", "Start"), ("serves", "Serves")):
         fm_value = frontmatter.get(field_key)
         if fm_value is None:
             continue
@@ -421,6 +480,7 @@ def find_violations(store: Path) -> list[Violation]:
         violations.extend(_check_archive_tier(display, status, is_archived))
         violations.extend(_check_archived_date(display, frontmatter, is_archived))
         violations.extend(_check_description(display, frontmatter))
+        violations.extend(_check_serves(display, frontmatter, status, store))
         violations.extend(_check_field_agreement(display, frontmatter, _body_text(text)))
 
     return violations
@@ -693,8 +753,9 @@ def _direction_section_bounds(
 def splice_direction_now(direction_text: str, now_lines: list[str]) -> str:
     """Replace the `## Now` section body WHOLESALE with `now_lines`
     (blank-line padded). Unlike the memory checker's splice, no in-section
-    prose survives — the section is machine-owned per the direction file's
-    charter header. Every line outside the section is left untouched.
+    prose survives — the section is machine-owned per DIRECTION.md's
+    charter (`loom-code/hooks/family-reception.md` §DIRECTION.md
+    charter). Every line outside the section is left untouched.
 
     Raises ValueError when `direction_text` has no `## Now` heading —
     there is nothing to regenerate into, and writing one in would invent
@@ -723,7 +784,7 @@ def find_direction_violations(direction_path: Path, store: Path) -> list[Violati
     lines = text.splitlines()
     violations: list[Violation] = []
 
-    for heading in ("## Now", "## Next", "## Later"):
+    for heading in ("## Now", "## Next"):
         if not any(line.strip() == heading for line in lines):
             violations.append(
                 Violation("direction-heading", display, f"missing required '{heading}' heading")
@@ -791,7 +852,8 @@ def _run_direction_write(args: argparse.Namespace) -> int:
     if not direction_path.is_file():
         print(
             f"backlog_index --direction-write: FAIL — {direction_path} does "
-            "not exist; create it with its charter header and sections first"
+            "not exist; create it with its `## Now` / `## Next` sections "
+            "first (charter: loom-code/hooks/direction-charter.md)"
         )
         return 1
     try:

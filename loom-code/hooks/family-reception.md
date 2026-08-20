@@ -110,6 +110,10 @@ for the brief line's grammar. (Evidence + contamination caveats:
 monkey-skills `docs/harness-audit/2026-07-06-iteration-roadmap.md`
 item 7.)
 
+## DIRECTION.md charter
+
+Rules for editing `docs/loom/DIRECTION.md`: [`direction-charter.md`](direction-charter.md) (read on demand, never copied here).
+
 ## Recall before you start
 
 If the target repo has `docs/loom/memory/`, run a recall pass via the

@@ -1462,7 +1462,7 @@ def test_validate_flags_now_section_drifted_from_entries(tmp_path):
     assert "direction-now" in result.stdout, result.stdout
 
 
-def test_validate_flags_missing_next_and_later_headings(tmp_path):
+def test_validate_flags_missing_next_heading(tmp_path):
     store, direction = _direction_store(tmp_path, [])
     direction.write_text(
         f"# Direction — fixture\n\n## Now\n\n{EMPTY_QUEUE_LINE}\n", encoding="utf-8"
@@ -1472,7 +1472,38 @@ def test_validate_flags_missing_next_and_later_headings(tmp_path):
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "'## Next'" in result.stdout, result.stdout
-    assert "'## Later'" in result.stdout, result.stdout
+
+
+def test_validate_does_not_require_later_heading(tmp_path):
+    """`## Later` was hand-written prose duplicating the backlog store's
+    own OPEN entries; it is no longer required. A DIRECTION.md with only
+    `## Now`/`## Next` (no `## Later` at all) validates clean."""
+    store, direction = _direction_store(tmp_path, [])
+    direction.write_text(
+        f"# Direction — fixture\n\n## Now\n\n{EMPTY_QUEUE_LINE}\n\n"
+        "## Next\n\n- a fixture next theme\n",
+        encoding="utf-8",
+    )
+
+    result = _run_validate(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_validate_still_flags_missing_now_heading(tmp_path):
+    """Mutation guard: making `## Later` optional must not weaken the
+    `## Now`/`## Next` checks — a file missing `## Now` is still
+    rejected."""
+    store, direction = _direction_store(tmp_path, [])
+    direction.write_text(
+        "# Direction — fixture\n\n## Next\n\n- a fixture next theme\n",
+        encoding="utf-8",
+    )
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "'## Now'" in result.stdout, result.stdout
 
 
 def test_validate_is_silently_valid_when_direction_file_absent(tmp_path):
@@ -1496,7 +1527,7 @@ def test_real_direction_file_exists_and_real_store_validates_clean_with_it():
     real_direction = REPO_ROOT / "docs" / "loom" / "DIRECTION.md"
     assert real_direction.is_file(), f"missing {real_direction}"
     text = real_direction.read_text(encoding="utf-8")
-    for heading in ("## Now", "## Next", "## Later"):
+    for heading in ("## Now", "## Next"):
         assert f"\n{heading}\n" in text, f"real DIRECTION.md missing {heading}"
 
     result = _run_validate(REPO_ROOT / "docs" / "loom" / "backlog")
@@ -1693,3 +1724,171 @@ def test_direction_write_preserves_indented_next_heading(tmp_path):
     after = direction.read_text(encoding="utf-8")
     assert " ## Next" in after, after
     assert "- a fixture next theme" in after, after
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (docs/loom/plans/2026-08-20-north-star-serves-link.md), retargeted
+# by Task 3 of the same plan -- `serves:` frontmatter field on
+# COMMITTED-NEXT entries, gated on the repo having docs/loom/PURPOSE.md
+# (not PRINCIPLES.md -- the long-horizon purpose moved there; PRINCIPLES.md
+# goes back to holding only design/engineering principles).
+# ---------------------------------------------------------------------------
+
+
+def test_committed_next_entry_missing_serves_is_rejected_when_purpose_exists(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1
+    assert "2026-08-01-alpha.md" in result.stdout
+    assert "serves" in result.stdout
+
+
+def test_committed_next_entry_serves_unrelated_with_no_reason_is_rejected(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
+    text = _entry("2026-08-01-alpha", "COMMITTED-NEXT").replace(
+        "status: COMMITTED-NEXT\n", "status: COMMITTED-NEXT\nserves: unrelated\n"
+    )
+    _write(store, "2026-08-01-alpha.md", text)
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1
+    assert "2026-08-01-alpha.md" in result.stdout
+    assert "serves" in result.stdout
+
+
+def test_committed_next_entry_serves_unrelated_with_reason_validates_clean(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
+    text = _entry("2026-08-01-alpha", "COMMITTED-NEXT").replace(
+        "status: COMMITTED-NEXT\n",
+        "status: COMMITTED-NEXT\nserves: unrelated — churn cleanup\n",
+    )
+    _write(store, "2026-08-01-alpha.md", text)
+
+    result = _run_validate(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_open_entry_with_no_serves_validates_clean(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+
+    result = _run_validate(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_committed_next_entry_with_no_serves_validates_clean_without_purpose_md(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    # No PURPOSE.md written under tmp_path -- exemption case.
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
+
+    result = _run_validate(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_committed_next_entry_with_no_serves_validates_clean_with_only_principles_md(tmp_path):
+    """Pins the retarget itself: PRINCIPLES.md's mere presence must no
+    longer make the `serves` requirement fire now that the gate probes
+    PURPOSE.md. Without this assertion a revert to the old filename would
+    still pass every other test in this block."""
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PRINCIPLES.md").write_text("## Principles\n\nSomething.\n", encoding="utf-8")
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
+
+    result = _run_validate(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# Whole-branch review F3 (2026-08-20): `serves` presence/grammar failures
+# were emitted under the "field-agreement" kind, which in this module
+# means frontmatter <-> body-bullet disagreement (_check_field_agreement).
+# A `serves`-absent violation is not a disagreement between two present
+# values — it reads misleadingly under that kind.
+
+
+def test_missing_serves_violation_uses_its_own_kind_not_field_agreement(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "[serves]" in result.stdout, result.stdout
+    assert "[field-agreement]" not in result.stdout, (
+        "a missing 'serves' field is not a frontmatter<->body disagreement:\n"
+        f"{result.stdout}"
+    )
+
+
+def test_malformed_serves_violation_uses_its_own_kind_not_field_agreement(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
+    text = _entry("2026-08-01-alpha", "COMMITTED-NEXT").replace(
+        "status: COMMITTED-NEXT\n", "status: COMMITTED-NEXT\nserves: unrelated\n"
+    )
+    _write(store, "2026-08-01-alpha.md", text)
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "[serves]" in result.stdout, result.stdout
+    assert "[field-agreement]" not in result.stdout, (
+        "a malformed 'serves' value is not a frontmatter<->body "
+        f"disagreement:\n{result.stdout}"
+    )
+
+
+# Whole-branch review F6 (2026-08-20): the charter (rules for editing
+# DIRECTION.md) moved out of DIRECTION.md itself and into
+# loom-code/hooks/family-reception.md § DIRECTION.md charter. Three
+# in-code statements were never updated after that move and now claim
+# DIRECTION.md carries "its own charter header" — it does not.
+
+
+def test_direction_write_missing_file_message_does_not_claim_charter_header(
+    tmp_path,
+):
+    store, direction = _direction_store(tmp_path, [])
+    direction.unlink()
+
+    result = _run_direction_write(direction, store)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "charter header" not in result.stdout, (
+        "DIRECTION.md no longer carries its own charter header — the "
+        f"charter moved to family-reception.md:\n{result.stdout}"
+    )
+
+
+def test_backlog_index_source_does_not_claim_direction_owns_its_charter_header():
+    text = BACKLOG_SCRIPT.read_text(encoding="utf-8")
+    assert "the file's own charter header" not in text, (
+        "backlog_index.py still claims DIRECTION.md's ## Now section is "
+        "machine-owned per its own charter header — the charter moved to "
+        "family-reception.md"
+    )
+    assert "the direction file's charter header" not in text, (
+        "backlog_index.py still claims splice_direction_now's section is "
+        "machine-owned per the direction file's own charter header — the "
+        "charter moved to family-reception.md"
+    )
