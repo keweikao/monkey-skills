@@ -8,18 +8,20 @@ frontmatter contract implies, over every entry file under `--store`
 subdirectory):
 
   (i)   filename stem == frontmatter `name`.
-  (ii)  `status` is a member of the closed status vocabulary (transcribed
-        VERBATIM from the plan's §Pinned frontmatter contract below —
-        never re-derived, never imported from the charter or test file).
-  (iii) an entry under `archive/` carries `status: archived` and no other
-        value; a live entry (directly under `--store`, excluding
-        `archive/`) never carries `status: archived`.
-  (iv)  every archive-tier entry carries an `archived: <YYYY-MM-DD>` field
-        in that exact date shape, and no live entry carries `archived` at
-        all (charter, docs/loom/backlog/README.md:20,24-27). This closes
-        the gap where a store passed --validate clean and then failed
-        loudly at --write (build_index()'s own `archived` check below) —
-        the two modes must agree on what "clean" means.
+  (ii)  `status` is a member of the closed status vocabulary — exactly
+        `open`, `bet`, `closed` (docs/loom/plans/2026-08-21-dissolve-
+        direction-layer.md Task 1 collapsed the prior seven-word
+        vocabulary, including the separate `archived` status, to these
+        three).
+  (iii) an entry under `archive/` carries `status: closed` — the archive
+        tier is a plain destination folder now (former invariants iii/iv,
+        the `status: archived` agreement plus the separate `archived:`
+        date-field check, collapse to this one rule; archive-tier entries
+        are excluded from the generated index listing, so no rendered
+        date is needed).
+  (iv)  `blocked: <reason>` is legal only on an `open` entry — it records
+        why an otherwise-actionable entry cannot be picked right now
+        (`--ready` is its only reader; see `build_ready`).
   (v)   when an entry's body carries a `- Origin:`/`- Start:` bullet (any
         parenthetical-qualifier variant, e.g. `- Start (re-trigger):`) AND
         its frontmatter carries the matching `origin`/`start` field, the two
@@ -51,28 +53,15 @@ Frontmatter is a `---`-delimited `key: value` block, hand-parsed with
 stdlib only (no PyYAML), mirroring check_loom_memory_integrity.py's
 convention — the format is a small, store-local subset of YAML.
 
-`--write` mode (this task) regenerates `docs/loom/BACKLOG.md` from the
-entry files: live entries are grouped by status into one section each,
-in the fixed order the plan's Kickoff decision pins (COMMITTED-NEXT ->
-OPEN -> PARKED -> UPSTREAM -> SHIPPED -> CLOSED — SUPERSEDED), empty
-sections omitted, followed by a compact `## Archived` section (name +
-date only, no description). `build_index()` is a pure function of the
-entry files' frontmatter text — no filesystem writes, no git shell-outs
-— which is what makes two `--write` runs over unchanged input produce
-byte-identical output.
-
-Archived-date design decision: the pinned index shape's `## Archived`
-line needs a date (`- <name> (archived <YYYY-MM-DD>)`), and the
-originally-pinned frontmatter contract has no field for it. This task
-adds `archived: <YYYY-MM-DD>` as a new optional frontmatter field,
-required on entries under `archive/` and stamped at archive time
-(documented in docs/loom/backlog/README.md alongside the pinned
-contract). Deriving the date from git history instead was rejected:
-it would make the generator depend on the store's git history rather
-than being a pure function of the entry files, and it cannot be
-exercised by a temp-store test that is not itself a git repository. An
-archived entry missing the field fails `--write` loudly (exit 1) rather
-than emitting a blank or fabricated date.
+`--write` mode regenerates `docs/loom/BACKLOG.md` from the entry files:
+live entries are grouped by status into one section each, in the fixed
+order `bet` -> `open` -> `closed`, empty sections omitted. Archive-tier
+entries are excluded from the listing entirely (brief BI-10 — the
+archive tier is a plain destination whose entries are `closed` by
+construction). `build_index()` is a pure function of the entry files'
+frontmatter text — no filesystem writes, no git shell-outs — which is
+what makes two `--write` runs over unchanged input produce byte-identical
+output.
 
 `--check` mode (this task) is the doctoc `--dryrun` pattern: regenerate the
 index from the entry files in memory (same `build_index()` as --write) and
@@ -86,44 +75,21 @@ merely discouraged.
 
 `--ready` mode is the store's READ surface (plan
 docs/loom/plans/2026-08-06-backlog-ready-verb-and-close-loop.md, Task 1):
-it prints the actionable queue — `## COMMITTED-NEXT` entries first, then
-`## OPEN` entries, each section in filename order (filenames start
-YYYY-MM-DD, so filename order is file-date order) — one
-`- <name> — <description>` line per entry, plus an indented
-`  start: <value>` second line for an entry whose frontmatter carries
-`start:`. Statuses PARKED / UPSTREAM / SHIPPED / CLOSED — SUPERSEDED /
-archived are excluded from the listing and only tallied in the closing
-`ready: N committed / M open / K excluded by status` line.
-
-`--direction-write <path>` / `--direction-check <path>` (direction-layer
-arc, plan docs/loom/plans/2026-08-07-loom-direction-layer.md Task 1) are
-the DIRECTION.md counterparts of --write/--check: `--direction-write`
-regenerates the given DIRECTION.md's `## Now` section — one
-`- <name> — <description>` line per COMMITTED-NEXT entry in filename
-(= file-date) order, or exactly `_(queue empty — bet at the next
-close-out)_` when the queue is empty — replacing the section body
-wholesale (it is machine-owned per DIRECTION.md's charter — SSOT
-`loom-code/hooks/direction-charter.md`) and
-leaving every other line untouched. It refuses loudly (exit 1, no write)
-when the file lacks a `## Now` heading or an entry's frontmatter is
-malformed (status outside the closed vocabulary). `--direction-check` is
-self-confirmation — the generator confirming itself (arc-3 lesson): it
-re-runs the generator in memory and diffs against the committed file,
-exit 1 on drift or a missing file, never writing.
+it prints the actionable queue — `## bet` entries first, then `## open`
+entries, each section in filename order (filenames start YYYY-MM-DD, so
+filename order is file-date order) — one `- <name> — <description>` line
+per entry, plus an indented `  start: <value>` second line for an entry
+whose frontmatter carries `start:`. `closed` entries, archive-tier
+entries, and entries carrying a `blocked:` field are excluded
+from the listing and only tallied in the closing
+`ready: N bet / M open / P closed / Q blocked` line — two separate
+axes, since a `closed`/archive-tier entry and a `blocked` entry
+are excluded for different reasons (the former will never be ready as
+written; the latter is one `blocked:` line away from it).
 
 The validate mode (which a FLAGLESS invocation now defaults to,
-mirroring check_loom_memory_integrity.py's trio shape) additionally
-checks the direction file at `<store>/../DIRECTION.md` — the
-convention's fixed location — ONLY when it exists; an absent file is
-silently valid (the direction layer is opt-in per repo). Its three
-independent checks: `## Now` content matches the COMMITTED-NEXT entry
-files; `## Now`/`## Next` headings present (`## Later` is optional —
-tolerated if present, never required); and no date-like token
-(`20\\d\\d[-/年.]` or `Q[1-4]`) anywhere OUTSIDE the generated `## Now`
-body — the charter's no-dates rule as a checked invariant. The `## Now`
-body is exempt from the date scan because entry NAMES are date-prefixed
-by store convention; the now-matches-entries check is what keeps that
-exemption safe (nothing but generator output can live there).
+mirroring check_loom_memory_integrity.py's trio shape) checks every
+entry's frontmatter against the store's invariants above.
 
 Usage:
     python3 scripts/backlog_index.py [--store docs/loom/backlog]
@@ -131,13 +97,10 @@ Usage:
     python3 scripts/backlog_index.py --write [--store docs/loom/backlog] [--output docs/loom/BACKLOG.md]
     python3 scripts/backlog_index.py --check [--store docs/loom/backlog] [--output docs/loom/BACKLOG.md]
     python3 scripts/backlog_index.py --ready [--store docs/loom/backlog]
-    python3 scripts/backlog_index.py --direction-write docs/loom/DIRECTION.md [--store docs/loom/backlog]
-    python3 scripts/backlog_index.py --direction-check docs/loom/DIRECTION.md [--store docs/loom/backlog]
 
 Exit codes: 0 = clean/written/matches, 1 = at least one invariant violation
-(--validate, flagless), a build error (--write, --check, --ready,
---direction-write, --direction-check), or drift / a missing committed file
-(--check, --direction-check).
+(--validate, flagless), a build error (--write, --check, --ready), or
+drift / a missing committed file (--check).
 """
 
 from __future__ import annotations
@@ -147,58 +110,32 @@ import difflib
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
-_DATE_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def _is_valid_date_shape(value: str) -> bool:
-    """True when `value` is a real calendar date in YYYY-MM-DD shape.
-
-    Regex alone would accept a calendar-invalid string like 2026-13-40;
-    strptime rejects those too, so both must agree.
-    """
-    if not _DATE_SHAPE.match(value):
-        return False
-    try:
-        datetime.strptime(value, "%Y-%m-%d")
-    except ValueError:
-        return False
-    return True
-
-# Transcribed VERBATIM from the plan's §Pinned frontmatter contract
-# (docs/loom/plans/2026-08-01-backlog-one-entry-per-file.md, ## Notes):
-#   status: <COMMITTED-NEXT | OPEN | PARKED | UPSTREAM | SHIPPED |
-#            CLOSED — SUPERSEDED | archived>
+# Collapsed vocabulary (plan docs/loom/plans/2026-08-21-dissolve-
+# direction-layer.md Task 1, brief BI-2): exactly three words. The prior
+# seven-word vocabulary (COMMITTED-NEXT / OPEN / PARKED / UPSTREAM /
+# SHIPPED / CLOSED — SUPERSEDED / archived) is retired — the "live but not
+# actionable" distinction moved to the optional `blocked:` field.
 CLOSED_STATUS_VOCABULARY = [
-    "COMMITTED-NEXT",
-    "OPEN",
-    "PARKED",
-    "UPSTREAM",
-    "SHIPPED",
-    "CLOSED — SUPERSEDED",
-    "archived",
+    "open",
+    "bet",
+    "closed",
 ]
-
-ARCHIVED_STATUS = "archived"
 
 # Kickoff decision (plan ## Notes, "index section order is fixed by
 # urgency"): hard contract, not alphabetical. Any other order makes
 # Task 4's --check report false drift.
 STATUS_SECTION_ORDER = [
-    "COMMITTED-NEXT",
-    "OPEN",
-    "PARKED",
-    "UPSTREAM",
-    "SHIPPED",
-    "CLOSED — SUPERSEDED",
+    "bet",
+    "open",
+    "closed",
 ]
 
 
 @dataclass(frozen=True)
 class Violation:
-    kind: str  # "name" | "status" | "archive-tier" | "archived-date" | "description" | "field-agreement" | "serves"
+    kind: str  # "name" | "status" | "archive-tier" | "blocked" | "description" | "field-agreement" | "serves"
     file: str
     detail: str
 
@@ -293,6 +230,69 @@ def _entry_files(store: Path) -> list[tuple[Path, bool]]:
     return [(p, False) for p in live] + [(p, True) for p in archived]
 
 
+def iter_validated_entries(
+    store: Path,
+) -> list[tuple[Path, bool, dict[str, str]]]:
+    """Every entry under `store` as `(path, is_archived, frontmatter)` in
+    `_entry_files()` order, raising ValueError (the caller decides exit
+    codes) on any LIVE entry whose `status:` falls outside
+    `CLOSED_STATUS_VOCABULARY`.
+
+    This is the ONE home of the out-of-vocabulary guard. All four readers
+    — `build_ready()` and `_collect_index_entries()` here,
+    `check_queue_relation.live_bet_names()`, and
+    `check_north_star_link.find_bet_entries()` — each carried a
+    hand-copied walk with its own copy of the raise, and the copies
+    documented the duplication ("same bytes, same guard") instead of
+    removing it. They then drifted exactly as Fowler's Duplicated Code /
+    Shotgun Surgery predicts: one whole-branch review round had to patch
+    two of them in lockstep, the next round found a third site diverging,
+    and the round after that found the fourth.
+
+    **Archive-tier entries are yielded unvalidated, deliberately.** The
+    archive tier OVERRIDES an entry's literal status (`build_ready()`
+    tallies every archived entry as `closed` "independent of what its
+    frontmatter literally says"), so that value is not load-bearing for
+    any reader — and `--validate` owns it directly via
+    `_check_archive_tier()`. Validating it here would make a repo whose
+    archive holds historical retired vocabulary unable to render its own
+    index, which is the opposite of the migration posture this vocabulary
+    collapse ships. A live entry is the reverse: its status IS what every
+    reader routes on, so a malformed one must never be silently dropped by
+    a filter that happens to exclude it anyway — validation runs before
+    any status filter.
+    """
+    entries: list[tuple[Path, bool, dict[str, str]]] = []
+    for path, is_archived in _entry_files(store):
+        frontmatter = parse_frontmatter(path.read_text(encoding="utf-8"))
+        status = frontmatter.get("status")
+        if not is_archived and status not in CLOSED_STATUS_VOCABULARY:
+            raise ValueError(
+                f"{path.name}: entry has status {status!r}, outside the "
+                "closed status vocabulary"
+            )
+        entries.append((path, is_archived, frontmatter))
+    return entries
+
+
+def live_entries(store: Path, status: str) -> list[tuple[str, dict[str, str]]]:
+    """Every live (non-archived) entry whose `status:` equals `status`,
+    as `(display_name, frontmatter)` in `_entry_files()` order. The
+    display name is the frontmatter `name`, falling back to the filename
+    stem.
+
+    Archived entries are never returned: the archive tier overrides an
+    entry's literal status, so a re-bet of an archived entry is not a
+    thing this can surface. Raises ValueError via
+    `iter_validated_entries()` on an out-of-vocabulary status.
+    """
+    return [
+        (frontmatter.get("name", path.stem), frontmatter)
+        for path, is_archived, frontmatter in iter_validated_entries(store)
+        if not is_archived and frontmatter.get("status") == status
+    ]
+
+
 def _check_name(display: str, frontmatter: dict[str, str], stem: str) -> list[Violation]:
     """(i) filename stem == frontmatter name."""
     name = frontmatter.get("name")
@@ -313,61 +313,30 @@ def _check_status(display: str, status: str | None) -> list[Violation]:
 
 
 def _check_archive_tier(display: str, status: str | None, is_archived: bool) -> list[Violation]:
-    """(iii) archive-tier <-> status: archived agreement."""
+    """(iii) an entry under archive/ carries status: closed. One-directional
+    — a LIVE entry carrying status: closed is legal (SHIPPED/CLOSED —
+    SUPERSEDED migrated there without being archived)."""
     if status is None:
         return []
-    if is_archived and status != ARCHIVED_STATUS:
+    if is_archived and status != "closed":
         return [
             Violation(
                 "archive-tier",
                 display,
-                f"entry is under archive/ but status is '{status}', not 'archived'",
-            )
-        ]
-    if not is_archived and status == ARCHIVED_STATUS:
-        return [
-            Violation(
-                "archive-tier",
-                display,
-                "entry carries status: archived but is not under archive/",
+                f"entry is under archive/ but status is '{status}', not 'closed'",
             )
         ]
     return []
 
 
-def _check_archived_date(
-    display: str, frontmatter: dict[str, str], is_archived: bool
-) -> list[Violation]:
-    """(iv) archived: <date> is required (and date-shaped) on every
-    archive-tier entry, and must be absent on every live entry. Charter:
-    docs/loom/backlog/README.md:20,24-27 — "It carries no meaning on a live
-    entry and must not be set on one."
-    """
-    archived_value = frontmatter.get("archived")
-    if is_archived:
-        if archived_value is None:
-            return [
-                Violation(
-                    "archived-date",
-                    display,
-                    "archive-tier entry missing required 'archived: <YYYY-MM-DD>' field",
-                )
-            ]
-        if not _is_valid_date_shape(archived_value):
-            return [
-                Violation(
-                    "archived-date",
-                    display,
-                    f"'archived' field {archived_value!r} is not a valid YYYY-MM-DD date",
-                )
-            ]
-        return []
-    if archived_value is not None:
+def _check_blocked(display: str, frontmatter: dict[str, str], status: str | None) -> list[Violation]:
+    """(iv) `blocked: <reason>` is legal only on an `open` entry."""
+    if "blocked" in frontmatter and status != "open":
         return [
             Violation(
-                "archived-date",
+                "blocked",
                 display,
-                f"live entry carries 'archived: {archived_value}' but must not set it",
+                f"'blocked' field is only legal on 'open' entries, not '{status}'",
             )
         ]
     return []
@@ -388,8 +357,8 @@ def _check_description(display: str, frontmatter: dict[str, str]) -> list[Violat
 
 def _purpose_path_for(store: Path) -> Path:
     """Where the `serves` gate looks for the north-star document: the
-    store's parent directory, mirroring `_direction_path_for`'s convention
-    (docs/loom/PURPOSE.md beside docs/loom/backlog/). Its mere presence
+    store's parent directory (docs/loom/PURPOSE.md beside
+    docs/loom/backlog/). Its mere presence
     or absence is the gate — content is never read here. PRINCIPLES.md
     (the field's original 1fe7b2c1 target) holds design/engineering
     principles only and is deliberately NOT probed here."""
@@ -414,11 +383,12 @@ def _is_well_formed_serves(value: str) -> bool:
 def _check_serves(
     display: str, frontmatter: dict[str, str], status: str | None, store: Path
 ) -> list[Violation]:
-    """`serves:` is required only when status is COMMITTED-NEXT AND the
-    repo has docs/loom/PURPOSE.md (plan Task 1, retargeted by Task 3 — the
-    gate is load-bearing: monkey-skills' own store has no PURPOSE.md by
-    standing choice and must stay unaffected)."""
-    if status != "COMMITTED-NEXT":
+    """`serves:` is required only when status is `bet` AND the repo has
+    docs/loom/PURPOSE.md (plan Task 1, retargeted by Task 3, re-keyed from
+    COMMITTED-NEXT by docs/loom/plans/2026-08-21-dissolve-direction-layer.md
+    Task 1 — the gate is load-bearing: monkey-skills' own store has no
+    PURPOSE.md by standing choice and must stay unaffected)."""
+    if status != "bet":
         return []
     if not _purpose_path_for(store).is_file():
         return []
@@ -428,7 +398,7 @@ def _check_serves(
             Violation(
                 "serves",
                 display,
-                "COMMITTED-NEXT entry missing required 'serves' field",
+                "'bet' entry missing required 'serves' field",
             )
         ]
     if not _is_well_formed_serves(serves):
@@ -478,7 +448,7 @@ def find_violations(store: Path) -> list[Violation]:
         violations.extend(_check_name(display, frontmatter, path.stem))
         violations.extend(_check_status(display, status))
         violations.extend(_check_archive_tier(display, status, is_archived))
-        violations.extend(_check_archived_date(display, frontmatter, is_archived))
+        violations.extend(_check_blocked(display, frontmatter, status))
         violations.extend(_check_description(display, frontmatter))
         violations.extend(_check_serves(display, frontmatter, status, store))
         violations.extend(_check_field_agreement(display, frontmatter, _body_text(text)))
@@ -488,71 +458,62 @@ def find_violations(store: Path) -> list[Violation]:
 
 def _bucket_entry(
     path: Path,
-    is_archived: bool,
+    frontmatter: dict[str, str],
     by_status: dict[str, list[tuple[str, str]]],
-    archived_entries: list[tuple[str, str]],
 ) -> None:
-    """Classify one entry file into `by_status` (live) or `archived_entries`
-    (archive-tier) in place. Raises ValueError (see
-    `_collect_index_entries()`'s docstring for the conditions) rather than
-    mutating either collection on a bad entry."""
-    frontmatter = parse_frontmatter(path.read_text(encoding="utf-8"))
-    name = frontmatter.get("name", path.stem)
+    """Classify one LIVE entry into `by_status` in place.
 
-    if is_archived:
-        archived_date = frontmatter.get("archived")
-        if not archived_date:
-            raise ValueError(
-                f"{path.name}: archived entry has no 'archived: <date>' "
-                "frontmatter field; cannot render its Archived line"
-            )
-        # Shape, not just presence. `--write` is documented as usable on
-        # its own, so a malformed value reaching here would be rendered
-        # verbatim into the committed index — and `--check` would then
-        # regenerate the same bogus string and call the file clean, making
-        # the laundered value the new baseline. Reject at the writer.
-        if not _is_valid_date_shape(archived_date):
-            raise ValueError(
-                f"{path.name}: archived entry's 'archived: {archived_date}' "
-                "is not a real YYYY-MM-DD date; refusing to render it"
-            )
-        archived_entries.append((name, archived_date))
-        return
-
+    Takes the frontmatter its caller already parsed rather than re-reading
+    the file: the vocabulary guard now lives once, upstream in
+    `iter_validated_entries()`, so this function no longer re-derives it.
+    Its remaining ValueError is a COUPLING GUARD, not a live condition:
+    `CLOSED_STATUS_VOCABULARY` and `STATUS_SECTION_ORDER` hold the same
+    three words (they differ only in order, which is the documented
+    contract above), so every live entry reaching here has already been
+    accepted upstream and the raise cannot fire today. It stays because
+    the two lists are separate module constants and nothing else would
+    notice if a word were added to one and not the other.
+    """
     status = frontmatter.get("status")
     if status not in by_status:
         raise ValueError(
-            f"{path.name}: live entry has status {status!r}, outside the "
-            "closed vocabulary of live statuses"
+            f"{path.name}: live entry has status {status!r}, which has no "
+            "section in STATUS_SECTION_ORDER"
         )
-    description = frontmatter.get("description", "")
-    by_status[status].append((name, description))
+    name = frontmatter.get("name", path.stem)
+    by_status[status].append((name, frontmatter.get("description", "")))
 
 
-def _collect_index_entries(
-    store: Path,
-) -> tuple[dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
-    """Walk `store`'s entry files and bucket them for `build_index()`'s
-    render step: live entries grouped by status, archive-tier entries as
-    (name, archived-date) pairs. Both live groups and the archived list
-    come back sorted by name.
+def _collect_index_entries(store: Path) -> dict[str, list[tuple[str, str]]]:
+    """Walk `store`'s LIVE entry files and bucket them for `build_index()`'s
+    render step. Archive-tier entries are excluded entirely (brief BI-10 —
+    the archive tier is a plain destination whose entries are `closed` by
+    construction and are never listed). Each group comes back sorted by
+    name.
 
     Raises ValueError (never exits the process itself — the caller decides
-    exit codes) when an entry cannot be rendered: a live entry whose status
-    falls outside the closed vocabulary, or an archived entry missing (or
-    carrying a malformed) `archived: <date>` field its Archived line needs.
+    exit codes) when a live entry's status falls outside the closed
+    vocabulary.
     """
     by_status: dict[str, list[tuple[str, str]]] = {status: [] for status in STATUS_SECTION_ORDER}
-    archived_entries: list[tuple[str, str]] = []
 
-    for path, is_archived in _entry_files(store):
-        _bucket_entry(path, is_archived, by_status, archived_entries)
+    # Route through the shared walk so this reader agrees with the other
+    # three about which LIVE statuses are legal. Archive-tier entries are
+    # skipped here and are NOT vocabulary-validated by any reader — the
+    # tier overrides the status, and `_check_archive_tier()` owns it in
+    # `--validate`. (This comment first shipped stating the opposite: it
+    # described the alternative the same commit rejected. Round 5 found it
+    # — a design call taken, with the prose beside it written for the road
+    # not taken.)
+    for path, is_archived, frontmatter in iter_validated_entries(store):
+        if is_archived:
+            continue
+        _bucket_entry(path, frontmatter, by_status)
 
     for entries in by_status.values():
         entries.sort(key=lambda item: item[0])
-    archived_entries.sort(key=lambda item: item[0])
 
-    return by_status, archived_entries
+    return by_status
 
 
 def build_index(store: Path) -> str:
@@ -563,18 +524,17 @@ def build_index(store: Path) -> str:
     keeps two --write runs over unchanged input byte-identical.
 
     Raises ValueError (never exits the process itself — the caller
-    decides exit codes) when an entry cannot be rendered: a live entry
-    whose status falls outside the closed vocabulary, or an archived
-    entry missing the `archived: <date>` field its Archived line needs.
-    See `_collect_index_entries()` for the collection/validation step.
+    decides exit codes) when a live entry's status falls outside the
+    closed vocabulary. See `_collect_index_entries()` for the
+    collection/validation step.
 
     Note the division of labor with `find_violations()`: this function
     does NOT re-check `name` (it falls back to `path.stem`) or re-check
-    that an archive-tier entry's `status` is actually `archived` — those
+    that an archive-tier entry's `status` is actually `closed` — those
     are `--validate`'s job. Run `--validate` before `--write` if those
     invariants have not already been checked.
     """
-    by_status, archived_entries = _collect_index_entries(store)
+    by_status = _collect_index_entries(store)
 
     lines = [
         "# loom family backlog",
@@ -590,17 +550,11 @@ def build_index(store: Path) -> str:
         for name, description in entries:
             lines.append(f"- [{name}](backlog/{name}.md) — {description}")
 
-    if archived_entries:
-        lines.append("")
-        lines.append("## Archived")
-        for name, archived_date in archived_entries:
-            lines.append(f"- {name} (archived {archived_date})")
-
     return "\n".join(lines) + "\n"
 
 
 # The two statuses --ready treats as actionable, in render order.
-READY_STATUSES = ("COMMITTED-NEXT", "OPEN")
+READY_STATUSES = ("bet", "open")
 
 
 def build_ready(store: Path) -> str:
@@ -611,28 +565,41 @@ def build_ready(store: Path) -> str:
     files' frontmatter text. Entries render in `_entry_files()` order,
     which is sorted-by-filename per tier — i.e. file-date order.
 
-    Raises ValueError (caller decides exit codes) on a status outside the
-    closed vocabulary, mirroring `_bucket_entry()` — an unrecognized
-    status must not be silently laundered into the excluded tally.
+    Raises ValueError (caller decides exit codes) on a LIVE entry whose
+    status is outside the closed vocabulary — via
+    `iter_validated_entries()`, the one home of that guard. An
+    unrecognized LIVE status must not be silently laundered into the
+    excluded tally. An unrecognized ARCHIVED status is a different case
+    and IS tallied as closed: the tier overrides the status, and
+    `--validate` reports it via `_check_archive_tier()`.
 
     An entry physically under `archive/` is excluded regardless of its
-    frontmatter `status:` — the archive tier overrides the status field,
-    same as `_bucket_entry()`.
+    frontmatter `status:` — the archive tier overrides the status field. A `bet`-or-`open` entry carrying a
+    `blocked:` field is excluded too (brief BI-2 — that is what the field is for). These
+    are two distinct exclusion axes, tallied separately in the closing
+    line: a `closed`/archive-tier entry is not actionable as written; a
+    `blocked` entry is otherwise-ready and one `blocked:` line away from
+    it. The exclusion is written against `bet`-or-`open` rather than
+    `open` alone because it is the CODE's condition; invariant (iv)
+    separately makes `blocked:` illegal on a `bet` entry, so the `bet`
+    half is a guard against a store that already violates (iv), not a
+    supported combination. An archive-tier entry is always tallied as `closed`
+    (the archive tier overriding its status is exactly what makes it
+    closed for `--ready`'s purposes, independent of what its frontmatter
+    literally says).
     """
     entry_lines: dict[str, list[str]] = {status: [] for status in READY_STATUSES}
     counts: dict[str, int] = {status: 0 for status in READY_STATUSES}
-    excluded = 0
+    excluded_closed = 0
+    excluded_blocked = 0
 
-    for path, is_archived in _entry_files(store):
-        frontmatter = parse_frontmatter(path.read_text(encoding="utf-8"))
+    for path, is_archived, frontmatter in iter_validated_entries(store):
         status = frontmatter.get("status")
-        if status not in CLOSED_STATUS_VOCABULARY:
-            raise ValueError(
-                f"{path.name}: entry has status {status!r}, outside the "
-                "closed status vocabulary"
-            )
         if is_archived or status not in READY_STATUSES:
-            excluded += 1
+            excluded_closed += 1
+            continue
+        if "blocked" in frontmatter:
+            excluded_blocked += 1
             continue
         counts[status] += 1
         name = frontmatter.get("name", path.stem)
@@ -654,266 +621,21 @@ def build_ready(store: Path) -> str:
     if lines:
         lines.append("")
     lines.append(
-        f"ready: {counts['COMMITTED-NEXT']} committed / {counts['OPEN']} open "
-        f"/ {excluded} excluded by status"
+        f"ready: {counts['bet']} bet / {counts['open']} open "
+        f"/ {excluded_closed} closed / {excluded_blocked} blocked"
     )
     return "\n".join(lines) + "\n"
 
 
-# The exact line an empty COMMITTED-NEXT queue renders into `## Now`
-# (pinned by the plan; the betting prompt at close-out is what refills it).
-DIRECTION_EMPTY_QUEUE_LINE = "_(queue empty — bet at the next close-out)_"
-
-DIRECTION_NOW_HEADING = "## Now"
-
-# The charter's no-dates rule as a checked invariant (plan Task 1):
-# calendar-year tokens (2026-, 2026/, 2026年, 2026.) and quarter tokens
-# (Q1-Q4). Scanned over everything OUTSIDE the generated `## Now` body.
-DIRECTION_DATE_TOKEN_RE = re.compile(r"20\d\d[-/年.]|Q[1-4]")
-
-# User-ratified exemption: a `## Next`/`## Later` line may point at a
-# backlog-entry FILENAME (the charter permits this pointer pattern), which
-# necessarily carries a date-like token by store convention. Matched
-# substrings are stripped from the line before the date scan below runs,
-# so a bare date token elsewhere on the same line is still caught.
-DIRECTION_ENTRY_FILENAME_RE = re.compile(r"20\d\d-\d\d-\d\d-[A-Za-z0-9_-]+\.md")
-
-# Second user-ratified exemption: a well-formed `## On-ramp standing
-# choices` entry carries a trailing `(YYYY-MM-DD)` by design — grammar
-# SSOT is check_onramp_choice.py's `_STANDING_ENTRY` / family-reception.md
-# §On-ramp standing choices. Kept semantically IDENTICAL to
-# `_STANDING_ENTRY` (same quantifiers/character classes; the only
-# difference is the added `date` capture group, needed here to strip
-# just that span before the date scan) — deliberately not imported
-# (this module must not depend on the checker CLI), so
-# test_standing_entry_regex_matches_check_onramp_choice pins the two
-# against drift. Only the trailing date group is stripped before the
-# date scan, so a malformed line, or a date anywhere else on a
-# well-formed line, is still caught.
-DIRECTION_STANDING_ENTRY_RE = re.compile(
-    r"^-\s*row\s+(?P<row>\d+)\s*\([^)]*\):\s*standing\s+"
-    r"(?P<choice>direct|detour)\s*—\s*.+(?P<date>\(\d{4}-\d{2}-\d{2}\))\s*$"
-)
-DIRECTION_STANDING_HEADING = "## On-ramp standing choices"
-
-
-def _direction_path_for(store: Path) -> Path:
-    """Where the validate mode looks for the direction file: the store's
-    parent directory (the convention fixes both locations together —
-    docs/loom/DIRECTION.md beside docs/loom/backlog/)."""
-    return store.parent / "DIRECTION.md"
-
-
-def build_direction_now(store: Path) -> list[str]:
-    """The generated `## Now` section body: one `- <name> — <description>`
-    line per live COMMITTED-NEXT entry, in `_entry_files()` order (sorted
-    by filename = file-date order), or exactly the empty-queue line.
-
-    Same purity contract as `build_index()`/`build_ready()`. Raises
-    ValueError (caller decides exit codes) on a status outside the closed
-    vocabulary — malformed frontmatter must fail loudly, never be silently
-    dropped from the queue it might belong to.
-    """
-    lines: list[str] = []
-    for path, is_archived in _entry_files(store):
-        frontmatter = parse_frontmatter(path.read_text(encoding="utf-8"))
-        status = frontmatter.get("status")
-        if status not in CLOSED_STATUS_VOCABULARY:
-            raise ValueError(
-                f"{path.name}: entry has status {status!r}, outside the "
-                "closed status vocabulary"
-            )
-        if is_archived or status != "COMMITTED-NEXT":
-            continue
-        name = frontmatter.get("name", path.stem)
-        description = frontmatter.get("description", "")
-        lines.append(f"- {name} — {description}")
-    return lines or [DIRECTION_EMPTY_QUEUE_LINE]
-
-
-def _direction_section_bounds(
-    lines: list[str], heading: str
-) -> tuple[int, int] | None:
-    """(heading index, section end) of the `heading` section in `lines`,
-    or None when the heading is absent. The section body runs from the
-    line after the heading to the next `## ` heading or EOF. Shared by
-    every direction-file section scan so the two readers of DIRECTION.md
-    cannot disagree on where a section starts and ends."""
-    for i, line in enumerate(lines):
-        if line.strip() == heading:
-            section_end = len(lines)
-            for j in range(i + 1, len(lines)):
-                if lines[j].lstrip().startswith("## "):
-                    section_end = j
-                    break
-            return i, section_end
-    return None
-
-
-def splice_direction_now(direction_text: str, now_lines: list[str]) -> str:
-    """Replace the `## Now` section body WHOLESALE with `now_lines`
-    (blank-line padded). Unlike the memory checker's splice, no in-section
-    prose survives — the section is machine-owned per DIRECTION.md's
-    charter (`loom-code/hooks/family-reception.md` §DIRECTION.md
-    charter). Every line outside the section is left untouched.
-
-    Raises ValueError when `direction_text` has no `## Now` heading —
-    there is nothing to regenerate into, and writing one in would invent
-    file structure the human owns.
-    """
-    lines = direction_text.splitlines()
-    bounds = _direction_section_bounds(lines, DIRECTION_NOW_HEADING)
-    if bounds is None:
-        raise ValueError(
-            f"the direction file has no {DIRECTION_NOW_HEADING!r} heading "
-            "to regenerate into"
-        )
-    heading_idx, section_end = bounds
-    new_lines = lines[: heading_idx + 1] + [""] + now_lines + [""] + lines[section_end:]
-    return "\n".join(new_lines) + "\n"
-
-
-def find_direction_violations(direction_path: Path, store: Path) -> list[Violation]:
-    """The validate mode's independent DIRECTION.md checks (see the module
-    docstring). Absent file = no violations — the direction layer is
-    opt-in per repo, mirroring the stations' silent-skip posture."""
-    if not direction_path.is_file():
-        return []
-    display = direction_path.name
-    text = direction_path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    violations: list[Violation] = []
-
-    for heading in ("## Now", "## Next"):
-        if not any(line.strip() == heading for line in lines):
-            violations.append(
-                Violation("direction-heading", display, f"missing required '{heading}' heading")
-            )
-
-    bounds = _direction_section_bounds(lines, DIRECTION_NOW_HEADING)
-    if bounds is not None:
-        try:
-            regenerated = splice_direction_now(text, build_direction_now(store))
-        except ValueError as exc:
-            violations.append(Violation("direction-now", display, str(exc)))
-        else:
-            if regenerated != text:
-                violations.append(
-                    Violation(
-                        "direction-now",
-                        display,
-                        "'## Now' does not match the COMMITTED-NEXT entry "
-                        "files; regenerate with --direction-write",
-                    )
-                )
-
-    now_body = range(bounds[0] + 1, bounds[1]) if bounds is not None else range(0)
-    standing_bounds = _direction_section_bounds(lines, DIRECTION_STANDING_HEADING)
-    standing_body = (
-        range(standing_bounds[0] + 1, standing_bounds[1])
-        if standing_bounds is not None
-        else range(0)
-    )
-
-    for lineno, line in enumerate(lines):
-        if lineno in now_body:
-            continue  # generated body: entry names are date-prefixed by convention
-        scan_source = line
-        if lineno in standing_body:
-            # Match the STRIPPED line, as check_onramp_choice.load_standing
-            # does — otherwise a CommonMark-legal indented entry the checker
-            # honours as a standing choice would be flagged here.
-            entry = line.strip()
-            standing_match = DIRECTION_STANDING_ENTRY_RE.match(entry)
-            if standing_match is not None:
-                # Strip only the trailing (YYYY-MM-DD) group — a date
-                # elsewhere on a well-formed line is still caught. Offsets
-                # are into `entry`, so the surviving text comes from it too.
-                start, end = standing_match.span("date")
-                scan_source = entry[:start] + entry[end:]
-        scan_line = DIRECTION_ENTRY_FILENAME_RE.sub("", scan_source)
-        match = DIRECTION_DATE_TOKEN_RE.search(scan_line)
-        if match:
-            violations.append(
-                Violation(
-                    "direction-date",
-                    display,
-                    f"line {lineno + 1} carries date-like token "
-                    f"{match.group(0)!r} — the charter bans dates in this file",
-                )
-            )
-    return violations
-
-
-def _run_direction_write(args: argparse.Namespace) -> int:
-    """--direction-write: regenerate the given DIRECTION.md's `## Now`
-    section from COMMITTED-NEXT entry files and write it back."""
-    direction_path = Path(args.direction_write)
-    if not direction_path.is_file():
-        print(
-            f"backlog_index --direction-write: FAIL — {direction_path} does "
-            "not exist; create it with its `## Now` / `## Next` sections "
-            "first (charter: loom-code/hooks/direction-charter.md)"
-        )
-        return 1
-    try:
-        new_text = splice_direction_now(
-            direction_path.read_text(encoding="utf-8"),
-            build_direction_now(Path(args.store)),
-        )
-    except ValueError as exc:
-        print(f"backlog_index --direction-write: FAIL — {exc}")
-        return 1
-    direction_path.write_text(new_text, encoding="utf-8")
-    print(f"backlog_index --direction-write: wrote {direction_path}")
-    return 0
-
-
-def _run_direction_check(args: argparse.Namespace) -> int:
-    """--direction-check: re-run the `## Now` generator in memory and diff
-    it against the given DIRECTION.md without writing; exit 1 on drift."""
-    direction_path = Path(args.direction_check)
-    if not direction_path.is_file():
-        print(
-            f"backlog_index --direction-check: FAIL — {direction_path} does "
-            "not exist; run --direction-write first"
-        )
-        return 1
-    committed_direction = direction_path.read_text(encoding="utf-8")
-    try:
-        generated_direction = splice_direction_now(
-            committed_direction, build_direction_now(Path(args.store))
-        )
-    except ValueError as exc:
-        print(f"backlog_index --direction-check: FAIL — {exc}")
-        return 1
-    if committed_direction != generated_direction:
-        print(
-            "backlog_index --direction-check: FAIL — the committed '## Now' "
-            f"has drifted from the entry files (compare against {direction_path}).\n"
-        )
-        diff = difflib.unified_diff(
-            committed_direction.splitlines(keepends=True),
-            generated_direction.splitlines(keepends=True),
-            fromfile=f"{direction_path} (committed)",
-            tofile="<regenerated from entry files>",
-        )
-        sys.stdout.writelines(diff)
-        return 1
-    print(
-        f"backlog_index --direction-check: OK — {direction_path} matches "
-        "the entry files."
-    )
-    return 0
-
-
 def _run_validate(args: argparse.Namespace) -> int:
     """--validate (also the flagless default): check every entry's
-    frontmatter against the store's invariants, plus the direction file's
-    independent checks when one exists at the store's fixed location."""
+    frontmatter against the store's invariants."""
     store = Path(args.store)
-    violations = find_violations(store)
-    violations.extend(find_direction_violations(_direction_path_for(store), store))
+    try:
+        violations = find_violations(store)
+    except OSError as exc:
+        print(f"backlog_index --validate: FAIL — store is unreadable ({exc}).")
+        return 1
     if not violations:
         print("backlog_index --validate: OK — every invariant holds.")
         return 0
@@ -928,11 +650,25 @@ def _run_write(args: argparse.Namespace) -> int:
     --output."""
     try:
         text = build_index(Path(args.store))
+    except OSError as exc:
+        print(f"backlog_index --write: FAIL — store is unreadable ({exc}).")
+        return 1
     except ValueError as exc:
         print(f"backlog_index --write: FAIL — {exc}")
         return 1
-    Path(args.output).write_text(text, encoding="utf-8")
-    print(f"backlog_index --write: wrote {args.output}")
+    try:
+        Path(args.output).write_text(text, encoding="utf-8")
+    except OSError as exc:
+        print(f"backlog_index --write: FAIL — {args.output} is unwritable ({exc}).")
+        return 1
+    # `.resolve()` touches the filesystem and can raise (symlink loops, an
+    # unreadable parent). Reporting where the write landed must never be the
+    # thing that turns a successful write into a traceback.
+    try:
+        landed = Path(args.output).resolve()
+    except OSError:
+        landed = Path(args.output).absolute()
+    print(f"backlog_index --write: wrote {landed}")
     return 0
 
 
@@ -941,19 +677,31 @@ def _run_check(args: argparse.Namespace) -> int:
     --output without writing; exit 1 on drift or a missing --output file."""
     try:
         generated = build_index(Path(args.store))
+    except OSError as exc:
+        print(f"backlog_index --check: FAIL — store is unreadable ({exc}).")
+        return 1
     except ValueError as exc:
         print(f"backlog_index --check: FAIL — {exc}")
         return 1
 
     output_path = Path(args.output)
-    if not output_path.is_file():
+    try:
+        output_present = output_path.is_file()
+    except OSError as exc:
+        print(f"backlog_index --check: FAIL — {output_path} is unreadable ({exc}).")
+        return 1
+    if not output_present:
         print(
             f"backlog_index --check: FAIL — {output_path} does not exist; "
             "run --write first"
         )
         return 1
 
-    committed = output_path.read_text(encoding="utf-8")
+    try:
+        committed = output_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"backlog_index --check: FAIL — {output_path} is unreadable ({exc}).")
+        return 1
     if committed != generated:
         print(
             "backlog_index --check: FAIL — the committed index has "
@@ -973,10 +721,13 @@ def _run_check(args: argparse.Namespace) -> int:
 
 
 def _run_ready(args: argparse.Namespace) -> int:
-    """--ready: print the actionable queue (COMMITTED-NEXT then OPEN) with
+    """--ready: print the actionable queue (bet then open) with
     a closing count line."""
     try:
         ready_text = build_ready(Path(args.store))
+    except OSError as exc:
+        print(f"backlog_index --ready: FAIL — store is unreadable ({exc}).")
+        return 1
     except ValueError as exc:
         print(f"backlog_index --ready: FAIL — {exc}")
         return 1
@@ -1009,28 +760,51 @@ def main() -> int:
     parser.add_argument(
         "--ready",
         action="store_true",
-        help="print the actionable queue (COMMITTED-NEXT then OPEN) with a closing count line",
+        help="print the actionable queue (bet then open) with a closing count line",
     )
     parser.add_argument(
         "--output",
-        default="docs/loom/BACKLOG.md",
-        help="path to write (--write) or compare against (--check) the generated index",
-    )
-    parser.add_argument(
-        "--direction-write",
-        metavar="PATH",
-        help="regenerate the given DIRECTION.md's '## Now' section from "
-        "COMMITTED-NEXT entry files and write it back",
-    )
-    parser.add_argument(
-        "--direction-check",
-        metavar="PATH",
-        help="re-run the '## Now' generator in memory and diff it against the "
-        "given DIRECTION.md without writing (self-confirmation — the generator "
-        "confirming itself; the independent guard is the flagless validate "
-        "mode); exit 1 on drift",
+        default=None,
+        help="path to write (--write) or compare against (--check) the "
+             "generated index (default: BACKLOG.md beside --store's parent)",
     )
     args = parser.parse_args()
+
+    # The index belongs beside ITS OWN store, not beside whatever directory
+    # the process happens to stand in. A cwd-relative default let
+    # `--write --store <other-repo>` overwrite the standing repo's
+    # BACKLOG.md with another store's contents, silently — found by running
+    # the thing, after six review rounds read past it (plan DL-30). For the
+    # canonical layout (`--store docs/loom/backlog` from a repo root) the
+    # derived path is byte-identical to the old default.
+    if args.output is None:
+        args.output = str(Path(args.store).parent / "BACKLOG.md")
+
+    # `--store` is the ONLY way to locate the store here (there is no
+    # `--repo-root`), so a typo in it used to buy a green validate: glob a
+    # directory that is not there, get an empty list, and every invariant
+    # holds vacuously. `--ready` reported an empty queue and `--write`
+    # generated an empty index. A green bought with a typo is worse than a
+    # red one. Absence of a store IS a legitimate state for a repo that
+    # never adopted the queue layer — but that is the caller's judgment to
+    # make (`check_queue_relation.py` reports a loud N/A at exit 0 for
+    # exactly that); a script pointed at a store explicitly and unable to
+    # find it has failed. Found by running the thing (plan DL-30), after
+    # six review rounds read past it.
+    store_path = Path(args.store)
+    try:
+        store_is_dir = store_path.is_dir()
+        store_exists = store_path.exists()
+    except OSError as exc:
+        print(f"backlog_index: FAIL — store at {store_path} is unreadable ({exc}).")
+        return 1
+    if not store_is_dir:
+        what = "is not a directory" if store_exists else "does not exist"
+        print(
+            f"backlog_index: FAIL — backlog store {what}: {store_path}. "
+            "Check the --store path (it is not resolved against a repo root)."
+        )
+        return 1
 
     if not any(
         (
@@ -1038,13 +812,11 @@ def main() -> int:
             args.write,
             args.check,
             args.ready,
-            args.direction_write,
-            args.direction_check,
         )
     ):
         # Flagless invocation defaults to validate, mirroring
-        # check_loom_memory_integrity.py's trio shape (direction-layer arc;
-        # formerly a "no mode specified" parser error).
+        # check_loom_memory_integrity.py's trio shape (formerly a "no mode
+        # specified" parser error).
         args.validate = True
 
     if args.validate:
@@ -1064,16 +836,6 @@ def main() -> int:
 
     if args.ready:
         result = _run_ready(args)
-        if result != 0:
-            return result
-
-    if args.direction_write:
-        result = _run_direction_write(args)
-        if result != 0:
-            return result
-
-    if args.direction_check:
-        result = _run_direction_check(args)
         if result != 0:
             return result
 

@@ -9,7 +9,7 @@ of these four canonical forms is well-formed:
 
     not fired — <reason>
     fired: rows <n,...> — user chose <detour|direct>
-    fired: rows <n,...> — standing <detour|direct> (DIRECTION.md)
+    fired: rows <n,...> — standing <detour|direct> (KICKOFF-DEFAULTS.md)
     pending
 
 Any other wording — including lookalikes such as `offered — direct per
@@ -18,7 +18,7 @@ wording never resolves the gate (see
 `docs/loom/memory/section-gate-must-flag-entry-lookalikes-not-just-
 matches.md`). The `standing` form additionally requires every cited row
 to be named in the caller's `standing` mapping — the CLI loads this
-mapping from `<repo-root>/docs/loom/DIRECTION.md`'s `## On-ramp
+mapping from `<repo-root>/docs/loom/KICKOFF-DEFAULTS.md`'s `## On-ramp
 standing choices` section via `load_standing()`.
 
 The on-ramp line may appear either as a `## Design-side on-ramp`
@@ -31,7 +31,7 @@ regardless of which form located it.
 Exit codes:
 
     0 — `resolved` or `not_fired`.
-    1 — the brief file does not exist.
+    1 — the brief file does not exist, or the brief or `docs/loom/KICKOFF-DEFAULTS.md` exists but is unreadable.
     2 — `unresolved` (fired but not recorded as an explicit choice, a
         pending answer, or a missing/malformed line). Stderr names the
         brief path and the exact question to put to the user.
@@ -118,17 +118,15 @@ _FIRED_USER = re.compile(
 )
 _FIRED_STANDING = re.compile(
     rf"^fired:\s*rows\s*{_ROWS}\s*—\s*standing (?:detour|direct) "
-    r"\(DIRECTION\.md\)\s*$"
+    r"\(KICKOFF-DEFAULTS\.md\)\s*$"
 )
 _FIRED_ROWS_PREFIX = re.compile(rf"^fired:\s*rows\s*{_ROWS}\b")
 
-# --- DIRECTION.md standing-choices section ------------------------------
+# --- KICKOFF-DEFAULTS.md standing-choices section ------------------------
 
-# Exact-line heading match — same posture as backlog_index.py's
-# `DIRECTION_NOW_HEADING` scan (backlog_index.py:607,657-672): the
-# section is machine-parsed, so its heading is a fixed string, not a
-# pattern.
-DIRECTION_STANDING_HEADING = "## On-ramp standing choices"
+# Exact-line heading match: the section is machine-parsed, so its
+# heading is a fixed string, not a pattern.
+STANDING_CHOICES_HEADING = "## On-ramp standing choices"
 
 # Entry grammar SSOT: loom-code/hooks/family-reception.md
 # `### On-ramp standing choices`.
@@ -139,19 +137,19 @@ _STANDING_ENTRY = re.compile(
 
 
 def load_standing(repo_root: Path) -> dict[int, str]:
-    """Parse `<repo_root>/docs/loom/DIRECTION.md`'s `## On-ramp standing
-    choices` section into `{row: "direct"|"detour"}`. A missing file or
-    a missing section is not an error — it just means no row has a
-    standing choice recorded yet, which the `standing` form's row check
+    """Parse `<repo_root>/docs/loom/KICKOFF-DEFAULTS.md`'s `## On-ramp
+    standing choices` section into `{row: "direct"|"detour"}`. A missing
+    file or a missing section is not an error — it just means no row has
+    a standing choice recorded yet, which the `standing` form's row check
     already treats as unresolved."""
-    direction_path = repo_root / "docs" / "loom" / "DIRECTION.md"
-    if not direction_path.is_file():
+    kickoff_defaults_path = repo_root / "docs" / "loom" / "KICKOFF-DEFAULTS.md"
+    if not kickoff_defaults_path.is_file():
         return {}
-    lines = direction_path.read_text(encoding="utf-8").splitlines()
+    lines = kickoff_defaults_path.read_text(encoding="utf-8").splitlines()
 
     heading_idx = None
     for i, line in enumerate(lines):
-        if line.strip() == DIRECTION_STANDING_HEADING:
+        if line.strip() == STANDING_CHOICES_HEADING:
             heading_idx = i
             break
     if heading_idx is None:
@@ -182,10 +180,10 @@ class Result:
 def resolve(brief_text: str, standing: dict[int, str]) -> Result:
     """Resolve a brief's on-ramp line against the canonical grammar.
 
-    `standing` maps row number -> chosen value, per DIRECTION.md's
+    `standing` maps row number -> chosen value, per KICKOFF-DEFAULTS.md's
     `## On-ramp standing choices` section — the CLI loads this via
     `load_standing()`; the `fired: rows <n> — standing <detour|direct>
-    (DIRECTION.md)` form is resolved only when every cited row is
+    (KICKOFF-DEFAULTS.md)` form is resolved only when every cited row is
     present in this mapping. For an unresolved `standing` form,
     `missing_rows` names exactly the cited rows absent from `standing`
     (empty for every other form)."""
@@ -230,7 +228,7 @@ def build_question(result: Result) -> str:
         missing_str = ",".join(str(row) for row in result.missing_rows)
         return (
             f"Design-side on-ramp: rows {missing_str} cite a standing "
-            f"choice, but DIRECTION.md's '{DIRECTION_STANDING_HEADING}' "
+            f"choice, but KICKOFF-DEFAULTS.md's '{STANDING_CHOICES_HEADING}' "
             f"has no entry for row {missing_str}. Add one there, or "
             "record the answer as `fired: rows "
             f"{rows_str} — user chose <detour|direct>`"
@@ -253,7 +251,7 @@ def build_question(result: Result) -> str:
 
 
 def _resolve_repo_root(explicit: str | None, brief_dir: Path) -> Path:
-    # Called by main() to locate DIRECTION.md for `load_standing()`.
+    # Called by main() to locate KICKOFF-DEFAULTS.md for `load_standing()`.
     if explicit is not None:
         return Path(explicit)
     try:
@@ -281,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--repo-root",
         default=None,
-        help="repo root used to locate docs/loom/DIRECTION.md for "
+        help="repo root used to locate docs/loom/KICKOFF-DEFAULTS.md for "
              "standing-choice resolution (default: `git rev-parse "
              "--show-toplevel` of the brief's directory, falling back "
              "to cwd)",
@@ -289,13 +287,38 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     brief_path = Path(args.brief_path)
-    if not brief_path.is_file():
+    try:
+        brief_present = brief_path.is_file()
+    except OSError as exc:
+        print(
+            f"Error: brief at {brief_path} is unreadable ({exc}).", file=sys.stderr
+        )
+        return 1
+    if not brief_present:
         print(f"Error: brief file not found at {brief_path}.", file=sys.stderr)
         return 1
-    brief_text = brief_path.read_text(encoding="utf-8")
+    # Both reads are guarded for the same reason its two siblings are
+    # (`check_queue_relation.py`, `check_north_star_link.py`): a gate owes
+    # its operator one actionable line, never a raw traceback. This script
+    # was the third sibling of that family and stayed bare through two
+    # rounds that fixed the other two; the contract is now pinned
+    # mechanically by test_gate_scripts_fail_loud_on_unreadable_input.py.
+    try:
+        brief_text = brief_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Error: brief at {brief_path} is unreadable ({exc}).", file=sys.stderr)
+        return 1
 
     repo_root = _resolve_repo_root(args.repo_root, brief_path.parent)
-    standing = load_standing(repo_root)
+    try:
+        standing = load_standing(repo_root)
+    except OSError as exc:
+        print(
+            f"Error: {repo_root / 'docs' / 'loom' / 'KICKOFF-DEFAULTS.md'} "
+            f"is unreadable ({exc}).",
+            file=sys.stderr,
+        )
+        return 1
 
     result = resolve(brief_text, standing)
 

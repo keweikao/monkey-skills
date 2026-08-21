@@ -2,8 +2,12 @@
 
 `archive_change_folder(root, change_id, date=...)` moves
 `docs/loom/<change-id>/` -> `docs/loom/archive/<date>-<change-id>/` and
-stamps a `status: archived` field into the moved `proposal.md`'s YAML
+stamps a `status: closed` field into the moved `proposal.md`'s YAML
 frontmatter (adding a minimal frontmatter block if the file had none).
+`archived` is retired vocabulary (plan docs/loom/plans/2026-08-21-
+dissolve-direction-layer.md, BI-10) — the closed status vocabulary is
+exactly `open` / `bet` / `closed`, and no `archived: <date>` field is
+written any more.
 
 Path-safety is the test focus (mirrors OpenSpec issue #412's bug class:
 a change-id that is not a single path segment must never be allowed to
@@ -29,11 +33,13 @@ import pytest
 
 _MODULE_PATH = Path(__file__).parent / "archive_change_folder.py"
 _INDEX_CHECKER_PATH = Path(__file__).parent / "check-living-spec-index.py"
+_BACKLOG_INDEX_PATH = Path(__file__).parent / "backlog_index.py"
 
 
 def _load(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclass() needs this pre-registered
     spec.loader.exec_module(module)
     return module
 
@@ -75,7 +81,7 @@ def test_happy_path_stamps_status_into_existing_frontmatter(tmp_path):
     dest = mod.archive_change_folder(tmp_path, "add-widget", date="2026-07-10")
 
     text = (dest / "proposal.md").read_text(encoding="utf-8")
-    assert "status: archived" in text
+    assert "status: closed" in text
     assert "title: Add widget" in text  # existing frontmatter preserved
     assert "## Why" in text  # body preserved
 
@@ -88,7 +94,7 @@ def test_happy_path_adds_minimal_frontmatter_when_absent(tmp_path):
 
     text = (dest / "proposal.md").read_text(encoding="utf-8")
     assert text.startswith("---\n")
-    assert "status: archived" in text
+    assert "status: closed" in text
     assert "## Why" in text  # original body preserved
 
 
@@ -102,7 +108,7 @@ def test_happy_path_stamps_over_existing_non_archived_status(tmp_path):
     dest = mod.archive_change_folder(tmp_path, "add-widget", date="2026-07-10")
 
     text = (dest / "proposal.md").read_text(encoding="utf-8")
-    assert "status: archived" in text
+    assert "status: closed" in text
     assert "status: proposed" not in text
 
 
@@ -117,14 +123,14 @@ def test_stamping_the_last_frontmatter_field_keeps_the_closing_fence(tmp_path):
     matches newlines, so on the old pattern the match ran past the value and
     swallowed the line terminator whenever `status:` was the block's last
     field — the replacement then glued the closing fence onto the value
-    (`status: archived---`), destroying the frontmatter block.
+    (`status: closed---`), destroying the frontmatter block.
 
     The three sibling stamp tests above all pass against that corrupted
-    output (`"status: archived" in text` is true either way), which is how
+    output (`"status: closed" in text` is true either way), which is how
     the bug survived. This test asserts the fence's own line, so reverting
     `_stamp_field`'s pattern to the `\\s*$` shape turns it red. Verified
     discriminating: run against the pre-Task-7 pattern, this fails with
-    `'---\\nstatus: archived---\\n\\n## Why\\n'`.
+    `'---\\nstatus: closed---\\n\\n## Why\\n'`.
     """
     mod = _load(_MODULE_PATH, "archive_change_folder")
     _make_change_folder(
@@ -135,8 +141,8 @@ def test_stamping_the_last_frontmatter_field_keeps_the_closing_fence(tmp_path):
     dest = mod.archive_change_folder(tmp_path, "add-widget", date="2026-07-10")
 
     text = (dest / "proposal.md").read_text(encoding="utf-8")
-    assert text.startswith("---\nstatus: archived\n---\n")
-    assert "archived---" not in text  # the fence was not glued to the value
+    assert text.startswith("---\nstatus: closed\n---\n")
+    assert "closed---" not in text  # the fence was not glued to the value
 
 
 def test_date_prefixed_destination_is_the_current_contract(tmp_path):
@@ -170,7 +176,7 @@ def test_crlf_proposal_normalizes_to_lf_on_write(tmp_path):
 
     raw = (dest / "proposal.md").read_bytes()
     assert b"\r\n" not in raw
-    assert b"status: archived" in raw
+    assert b"status: closed" in raw
 
 
 def test_unclosed_frontmatter_treated_as_plain_body(tmp_path):
@@ -186,7 +192,7 @@ def test_unclosed_frontmatter_treated_as_plain_body(tmp_path):
     dest = mod.archive_change_folder(tmp_path, "add-widget", date="2026-07-10")
 
     text = (dest / "proposal.md").read_text(encoding="utf-8")
-    assert text.startswith("---\nstatus: archived\n---\n\n")
+    assert text.startswith("---\nstatus: closed\n---\n\n")
     assert "title: Add widget" in text  # original (unclosed) text preserved as body
 
 
@@ -204,18 +210,25 @@ def test_refuses_missing_change_folder(tmp_path):
     assert before == after  # refusal is a no-op: no filesystem mutation
 
 
-def test_refuses_already_archived_status(tmp_path):
+def test_closed_status_on_a_live_folder_does_not_block_archiving(tmp_path):
+    """`status: closed` is legal on a LIVE (not-yet-archived) entry — the
+    close-out flip is a separate, earlier step than archiving (docs/loom/
+    backlog/README.md's Archive rule). Since `closed` is now ambiguous
+    between "live and closed" and "already archived", the frontmatter can
+    no longer be the idempotency signal (BI-10, plan DL-13) — a closed
+    live folder must archive normally rather than being refused as
+    'already archived'."""
     mod = _load(_MODULE_PATH, "archive_change_folder")
     _make_change_folder(
         tmp_path, "add-widget",
-        "---\nstatus: archived\n---\n\n## Why\nBecause.\n",
+        "---\nstatus: closed\n---\n\n## Why\nBecause.\n",
     )
 
-    with pytest.raises(mod.ArchiveError, match="already archived"):
-        mod.archive_change_folder(tmp_path, "add-widget", date="2026-07-10")
+    dest = mod.archive_change_folder(tmp_path, "add-widget", date="2026-07-10")
 
-    # refusal must be a no-op: the source folder is untouched
-    assert (tmp_path / "docs" / "loom" / "add-widget").is_dir()
+    assert dest.is_dir()
+    text = (dest / "proposal.md").read_text(encoding="utf-8")
+    assert "status: closed" in text
 
 
 def test_refuses_destination_collision(tmp_path):
@@ -230,6 +243,32 @@ def test_refuses_destination_collision(tmp_path):
 
     # refusal must not clobber the pre-existing destination
     assert (dest / "sentinel.txt").read_text(encoding="utf-8") == "pre-existing"
+
+
+def test_folder_unit_idempotency_survives_a_date_change(tmp_path):
+    """Round-3 finding (arm B): the `status: archived` idempotency guard
+    was dropped for BOTH units, justified by a property only the FILE
+    unit has — its destination is a function of the identifier alone.
+    The folder unit's destination interpolates a date, so a re-archive
+    on a different day lands beside the first copy instead of refusing.
+    The refusal must key on the change-id, not on the dated path."""
+    mod = _load(_MODULE_PATH, "archive_change_folder")
+    _make_change_folder(tmp_path, "add-widget", "## Why\nBecause.\n")
+
+    first = mod.archive_change_folder(tmp_path, "add-widget", date="2026-08-01")
+    assert first.is_dir()
+
+    # Re-create the source (the real-world shape: a folder restored, or
+    # re-created under the same change-id) and archive again a day later.
+    _make_change_folder(tmp_path, "add-widget", "## Why\nBecause.\n")
+    with pytest.raises(mod.ArchiveError, match="already exists"):
+        mod.archive_change_folder(tmp_path, "add-widget", date="2026-08-02")
+
+    archive_root = tmp_path / "docs" / "loom" / "archive"
+    copies = sorted(p.name for p in archive_root.iterdir() if p.is_dir())
+    assert copies == ["2026-08-01-add-widget"], (
+        f"a second archive copy was created for the same change-id: {copies}"
+    )
 
 
 # --- path-safety (OpenSpec #412 bug class) --------------------------------
@@ -412,13 +451,13 @@ def test_file_unit_archive_keeps_the_filename_unchanged(tmp_path):
     (which already carries its creation date in the filename) produces the
     double-date defect observed at
     docs/loom/archive/2026-07-18-2026-07-16-operational-kpi-quarterly/. It
-    must also stamp BOTH `status: archived` and `archived: <date>` — the
-    second field is required by scripts/backlog_index.py's --write mode
-    (mid-execution spec correction recorded in this task's plan entry)."""
+    must stamp `status: closed` — `archived` (and a separate `archived:
+    <date>` field) is retired vocabulary; the closed status vocabulary is
+    exactly `open` / `bet` / `closed` (BI-10, plan DL-13)."""
     mod = _load(_MODULE_PATH, "archive_change_folder")
     _make_entry_file(
         tmp_path, "2026-08-01-alpha.md",
-        "---\nname: 2026-08-01-alpha\nstatus: OPEN\n---\n\nBody.\n",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n---\n\nBody.\n",
     )
 
     dest = mod.archive_change_folder(
@@ -428,22 +467,28 @@ def test_file_unit_archive_keeps_the_filename_unchanged(tmp_path):
     assert dest == tmp_path / "docs" / "loom" / "backlog" / "archive" / "2026-08-01-alpha.md"
     assert dest.name == "2026-08-01-alpha.md"  # unrenamed: no second date prefix
     text = dest.read_text(encoding="utf-8")
-    assert "status: archived" in text
-    assert "archived: 2026-08-02" in text
+    assert "status: closed" in text
+    assert "archived:" not in text  # retired field is never written
 
 
-def test_file_unit_stamp_replaces_multi_word_status_without_duplicating_the_field(tmp_path):
-    """`CLOSED — SUPERSEDED` (em dash, U+2014) is a real member of the
-    backlog store's closed status vocabulary (scripts/backlog_index.py,
-    docs/loom/backlog/README.md) — the one member that is not a single
-    whitespace-free token. A `(\\S+)` value pattern in the stamp regex
-    misses this line entirely, so the stamp APPENDS a second `status:` line
+def test_file_unit_stamp_replaces_a_multi_word_value_without_duplicating_the_field(tmp_path):
+    """`_stamp_field` is generic over `key` (not status-only), and the
+    backlog store's own frontmatter contract requires at least one field —
+    `description:` — that is genuinely free-form, multi-word prose on every
+    entry (docs/loom/backlog/README.md's Frontmatter contract; enforced by
+    scripts/backlog_index.py's `_check_description`). `CLOSED — SUPERSEDED`
+    here is NOT a real member of the closed status vocabulary (that
+    vocabulary is exactly `open` / `bet` / `closed`,
+    `backlog_index.CLOSED_STATUS_VOCABULARY`) — it stands in as an
+    arbitrary pre-existing multi-word value on the field being stamped, the
+    shape a single-token `(\\S+)` value pattern in the stamp regex would
+    miss entirely, causing the stamp to APPEND a second `status:` line
     instead of replacing the first. parse_frontmatter is last-wins, so
-    --validate would resolve 'archived' and pass — but any first-match
+    --validate would resolve 'closed' and pass — but any first-match
     reader (`grep -m1 '^status:'`, a human opening the file, a strict YAML
-    loader) sees 'CLOSED — SUPERSEDED', a live-looking status on an
-    archived entry. Assert exactly one status: line survives — not just
-    that 'status: archived' appears somewhere, which passes even with the
+    loader) sees 'CLOSED — SUPERSEDED', a stale value on an archived
+    entry. Assert exactly one status: line survives — not just that
+    'status: closed' appears somewhere, which passes even with the
     duplicate-line defect present."""
     mod = _load(_MODULE_PATH, "archive_change_folder")
     _make_entry_file(
@@ -457,7 +502,7 @@ def test_file_unit_stamp_replaces_multi_word_status_without_duplicating_the_fiel
 
     text = dest.read_text(encoding="utf-8")
     status_lines = [line for line in text.splitlines() if line.startswith("status:")]
-    assert status_lines == ["status: archived"]
+    assert status_lines == ["status: closed"]
 
 
 def test_file_unit_refuses_calendar_invalid_date_without_touching_filesystem(tmp_path):
@@ -473,7 +518,7 @@ def test_file_unit_refuses_calendar_invalid_date_without_touching_filesystem(tmp
     mod = _load(_MODULE_PATH, "archive_change_folder")
     source = _make_entry_file(
         tmp_path, "2026-08-01-alpha.md",
-        "---\nname: 2026-08-01-alpha\nstatus: OPEN\n---\n\nBody.\n",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n---\n\nBody.\n",
     )
 
     with pytest.raises(mod.ArchiveError):
@@ -498,18 +543,55 @@ def test_file_unit_refuses_missing_entry_file(tmp_path):
         )
 
 
-def test_file_unit_refuses_already_archived_status(tmp_path):
+def test_file_unit_closed_status_on_a_live_entry_does_not_block_archiving(tmp_path):
+    """`status: closed` is the NORMAL pre-archive state for a backlog entry
+    (docs/loom/backlog/README.md's Archive rule: the close-out flip is a
+    separate, earlier step than archiving). With `archived` retired
+    (BI-10, plan DL-13), `closed` is legal on a live entry too, so it can
+    no longer be the idempotency signal — a closed live entry must archive
+    normally, not be refused as 'already archived'."""
     mod = _load(_MODULE_PATH, "archive_change_folder")
     _make_entry_file(
         tmp_path, "2026-08-01-alpha.md",
-        "---\nname: 2026-08-01-alpha\nstatus: archived\narchived: 2026-08-01\n---\n\nBody.\n",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n---\n\nBody.\n",
     )
 
-    with pytest.raises(mod.ArchiveError, match="already archived"):
+    dest = mod.archive_change_folder(
+        tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+    )
+
+    assert dest.is_file()
+    assert "status: closed" in dest.read_text(encoding="utf-8")
+
+
+def test_file_unit_refuses_rearchiving_an_identifier_already_holding_an_archive_copy(tmp_path):
+    """The genuine idempotency signal under the shipped model (BI-10, plan
+    DL-13): the file unit's destination is deterministic from the
+    identifier alone (no date in the path — `test_file_unit_archive_
+    keeps_the_filename_unchanged`), so 'does an archive copy already exist
+    for this identifier' is exactly the destination-occupancy check, not a
+    frontmatter status. This reproduces that scenario end-to-end: archive
+    once, recreate a live entry under the same identifier, and the second
+    archive attempt must still be refused."""
+    mod = _load(_MODULE_PATH, "archive_change_folder")
+    _make_entry_file(
+        tmp_path, "2026-08-01-alpha.md",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n---\n\nBody.\n",
+    )
+    mod.archive_change_folder(
+        tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+    )
+    _make_entry_file(
+        tmp_path, "2026-08-01-alpha.md",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n---\n\nBody (recreated).\n",
+    )
+
+    with pytest.raises(mod.ArchiveError, match="already exists"):
         mod.archive_change_folder(
-            tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+            tmp_path, "2026-08-01-alpha.md", date="2026-08-09", unit="file"
         )
 
+    # refusal must be a no-op: the recreated live entry is untouched
     assert (tmp_path / "docs" / "loom" / "backlog" / "2026-08-01-alpha.md").is_file()
 
 
@@ -643,7 +725,7 @@ def test_cli_unit_file_exit_zero_on_success(tmp_path):
     mod = _load(_MODULE_PATH, "archive_change_folder")
     _make_entry_file(
         tmp_path, "2026-08-01-alpha.md",
-        "---\nname: 2026-08-01-alpha\nstatus: OPEN\n---\n\nBody.\n",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n---\n\nBody.\n",
     )
 
     rc = mod.main(
@@ -654,8 +736,8 @@ def test_cli_unit_file_exit_zero_on_success(tmp_path):
     dest = tmp_path / "docs" / "loom" / "backlog" / "archive" / "2026-08-01-alpha.md"
     assert dest.is_file()
     text = dest.read_text(encoding="utf-8")
-    assert "status: archived" in text
-    assert "archived: 2026-08-02" in text
+    assert "status: closed" in text
+    assert "archived:" not in text  # retired field is never written
 
 
 def test_cli_unit_file_exit_one_on_missing_entry_with_actionable_stderr(tmp_path, capsys):
@@ -728,3 +810,145 @@ def test_living_spec_index_still_green_after_archive(tmp_path):
     rc = index_mod.main([str(tmp_path)])
 
     assert rc == 0
+
+
+# --- backlog_index --validate interaction (BI-10, plan DL-13) -------------
+#
+# The corruption the archiver's writer half shipped: `--unit file` stamped
+# `status: archived` (not in `backlog_index.CLOSED_STATUS_VOCABULARY`) plus
+# a stray `archived: <date>` field onto every moved entry, so the store
+# the archiver produces immediately failed its own validator with an
+# `[archive-tier]` AND a `[status]` violation. No prior test in this file
+# caught it because every test above checks the archiver's own output
+# shape ("status: archived" in text) rather than whether that output is
+# legal input to backlog_index.py — this is the assertion that closes that
+# gap.
+
+def test_file_unit_archiving_a_blocked_open_entry_passes_backlog_index_validate(tmp_path):
+    """DL-13 re-run with the new field: `blocked:` is legal only on an
+    `open` entry (backlog_index._check_blocked, invariant iv). The archiver
+    stamps `status: closed` but, before this fix, left `blocked:` in place
+    -- so archiving any blocked entry produced a store that failed its own
+    `--validate` immediately after the archive that is supposed to leave it
+    clean. This is the RED test: it fails pre-fix with a `[blocked]`
+    violation ('blocked' field is only legal on 'open' entries, not
+    'closed')."""
+    archive_mod = _load(_MODULE_PATH, "archive_change_folder")
+    backlog_index_mod = _load(_BACKLOG_INDEX_PATH, "backlog_index")
+    _make_entry_file(
+        tmp_path, "2026-08-01-alpha.md",
+        "---\nname: 2026-08-01-alpha\nstatus: open\n"
+        "blocked: waiting on upstream\n"
+        "description: An example entry.\n---\n\nBody.\n",
+    )
+
+    dest = archive_mod.archive_change_folder(
+        tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+    )
+
+    text = dest.read_text(encoding="utf-8")
+    assert "status: closed" in text
+    assert "blocked:" not in text  # dropped when the entry is closed
+
+    store = tmp_path / "docs" / "loom" / "backlog"
+    violations = backlog_index_mod.find_violations(store)
+    assert violations == []
+
+
+def test_file_unit_archiving_leaves_unrelated_frontmatter_fields_intact(tmp_path):
+    """The `blocked:` strip must be scoped to that one key -- a sibling
+    field must survive unchanged."""
+    mod = _load(_MODULE_PATH, "archive_change_folder")
+    _make_entry_file(
+        tmp_path, "2026-08-01-alpha.md",
+        "---\nname: 2026-08-01-alpha\nstatus: open\n"
+        "blocked: waiting on upstream\n"
+        "description: An example entry.\n---\n\nBody.\n",
+    )
+
+    dest = mod.archive_change_folder(
+        tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+    )
+
+    text = dest.read_text(encoding="utf-8")
+    assert "description: An example entry." in text
+    assert "name: 2026-08-01-alpha" in text
+
+
+def test_file_unit_archiving_a_non_blocked_entry_is_unaffected(tmp_path):
+    """No `blocked:` field present -> the strip is a no-op, not an error."""
+    mod = _load(_MODULE_PATH, "archive_change_folder")
+    _make_entry_file(
+        tmp_path, "2026-08-01-alpha.md",
+        "---\nname: 2026-08-01-alpha\nstatus: open\n"
+        "description: An example entry.\n---\n\nBody.\n",
+    )
+
+    dest = mod.archive_change_folder(
+        tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+    )
+
+    text = dest.read_text(encoding="utf-8")
+    assert "status: closed" in text
+    assert "description: An example entry." in text
+
+
+def test_file_unit_archived_entry_passes_backlog_index_validate(tmp_path):
+    """Archive a backlog entry, then run backlog_index.find_violations
+    (the same check `--validate` runs) over the resulting store: it must
+    report zero violations. This is the RED test for BI-10/DL-13 — it
+    fails on the pre-fix code with an `[archive-tier]` violation
+    ("status is 'archived', not 'closed'") and a `[status]` violation
+    ("status 'archived' is not in the closed vocabulary")."""
+    archive_mod = _load(_MODULE_PATH, "archive_change_folder")
+    backlog_index_mod = _load(_BACKLOG_INDEX_PATH, "backlog_index")
+    _make_entry_file(
+        tmp_path, "2026-08-01-alpha.md",
+        "---\nname: 2026-08-01-alpha\nstatus: closed\n"
+        "description: An example entry.\n---\n\nBody.\n",
+    )
+
+    archive_mod.archive_change_folder(
+        tmp_path, "2026-08-01-alpha.md", date="2026-08-02", unit="file"
+    )
+
+    store = tmp_path / "docs" / "loom" / "backlog"
+    violations = backlog_index_mod.find_violations(store)
+    assert violations == []
+
+
+def test_unrelated_archive_directory_does_not_false_refuse(tmp_path):
+    """Round-4 finding (arm B, 🟢): the folder unit's date-independent
+    idempotency check compared `name[11:]` to the change-id without
+    checking the first ten characters are actually a date, so an
+    unrelated `archive/my-archive-foo/` refused change-id `foo`."""
+    mod = _load(_MODULE_PATH, "archive_change_folder")
+    _make_change_folder(tmp_path, "foo", "## Why\nBecause.\n")
+    decoy = tmp_path / "docs" / "loom" / "archive" / "my-archive-foo"
+    decoy.mkdir(parents=True)
+
+    dest = mod.archive_change_folder(tmp_path, "foo", date="2026-08-21")
+    assert dest.name == "2026-08-21-foo"
+    assert decoy.is_dir()
+
+
+def test_help_prints_usage_instead_of_archiving_a_folder_named_help(tmp_path):
+    """Dogfood finding #5 (2026-08-21): this script hand-rolls its argv
+    parsing, so `--help` fell through to the positional identifier and the
+    user got `change-folder does not exist: .../docs/loom/--help` — a
+    domain-specific error for the most ordinary first reflex there is."""
+    import subprocess
+    import sys as _sys
+
+    for flag in ("--help", "-h"):
+        result = subprocess.run(
+            [_sys.executable, str(_MODULE_PATH), flag],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "does not exist" not in combined, combined
+        assert "usage" in combined.lower(), combined
+        assert "--unit" in combined and "--date" in combined, combined

@@ -6,8 +6,11 @@ generator/check/migration tests.
 """
 
 import importlib.util
+import re
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 # This file lives at loom-code/scripts/ (inside the plugin — Task 1 of
@@ -15,6 +18,11 @@ from pathlib import Path
 # root is three levels up; the script under test ships beside it.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CHARTER_PATH = REPO_ROOT / "docs" / "loom" / "backlog" / "README.md"
+# BI-11: templates/backlog-README.md is the canonical block; the live
+# charter above is its instantiated copy. Both must agree with
+# CLOSED_STATUS_VOCABULARY, or loom_init.py scaffolds a wrong charter
+# into every newly adopting repo.
+TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "backlog-README.md"
 BACKLOG_SCRIPT = Path(__file__).resolve().parent / "backlog_index.py"
 
 # Direct import (not subprocess) so the revision-round-1 tests below can reuse
@@ -37,43 +45,59 @@ check_onramp_choice = importlib.util.module_from_spec(_ONRAMP_SPEC)
 sys.modules["check_onramp_choice"] = check_onramp_choice
 _ONRAMP_SPEC.loader.exec_module(check_onramp_choice)
 
-# Transcribed VERBATIM from the plan's §Pinned frontmatter contract
-# (docs/loom/plans/2026-08-01-backlog-one-entry-per-file.md, ## Notes).
-CLOSED_STATUS_VOCABULARY = [
-    "COMMITTED-NEXT",
-    "OPEN",
-    "PARKED",
-    "UPSTREAM",
-    "SHIPPED",
-    "CLOSED — SUPERSEDED",
-    "archived",
-]
+def _charter_status_word_section(text: str | None = None, *, path: Path = CHARTER_PATH) -> str:
+    """The charter's §Status word definitions body, nothing else.
 
+    Scoped deliberately (mirrors the retired §Closed status vocabulary
+    scoping): the status words also appear throughout the charter's
+    ordinary prose, so a whole-file substring search cannot tell "the
+    table documents this value" from "the English word happens to
+    occur". Section-scoped is what makes the assertion fail when a
+    table row is actually removed.
 
-def _charter_vocabulary_section() -> str:
-    """The charter's §Closed status vocabulary body, nothing else.
-
-    Scoped deliberately: the bare word "archived" also appears ~8 times in
-    the charter's ordinary archive-rule prose, so a whole-file substring
-    search cannot tell "the enum documents this value" from "the English
-    word happens to occur". Section-scoped + backtick-fenced is what makes
-    the assertion fail when an enum entry is actually removed.
+    Accepts optional `text` so the mutation-kill check below can probe a
+    scratch copy of the charter (or the template) without touching the
+    real file. `path` only names the file for the error message.
     """
-    text = CHARTER_PATH.read_text(encoding="utf-8")
-    _, _, after = text.partition("## Closed status vocabulary")
-    assert after, "charter has no '## Closed status vocabulary' section"
+    if text is None:
+        text = path.read_text(encoding="utf-8")
+    _, _, after = text.partition("## Status word definitions")
+    assert after, f"{path} has no '## Status word definitions' section"
     body, _, _ = after.partition("\n## ")
     return body
 
 
-def test_charter_documents_the_closed_status_vocabulary():
-    assert CHARTER_PATH.is_file(), f"charter missing at {CHARTER_PATH}"
-    section = _charter_vocabulary_section()
-    for status in CLOSED_STATUS_VOCABULARY:
-        assert f"- `{status}`" in section, (
-            f"charter's vocabulary section does not LIST status {status!r} "
-            f"as an enum bullet (prose mentioning it does not count)"
-        )
+# Table row shape: "| `<word>` | ..." with nothing else inside the
+# backticks — this is what excludes the `| `blocked:` (field, not a
+# status) | ...` row, which is documented in the same table but is not
+# a `status:` value.
+_STATUS_TABLE_ROW = re.compile(r"^\| `([\w-]+)` \|", re.MULTILINE)
+
+
+def _charter_table_status_words(section: str) -> set[str]:
+    return set(_STATUS_TABLE_ROW.findall(section))
+
+
+@pytest.mark.parametrize("path", [CHARTER_PATH, TEMPLATE_PATH])
+def test_charter_documents_the_closed_status_vocabulary(path):
+    """The status-word table (in both the live charter AND its BI-11
+    canonical template — a drift between the two would let `loom_init.py`
+    scaffold a wrong charter into every newly adopting repo) must list
+    EXACTLY the words the code enforces
+    (`backlog_index.CLOSED_STATUS_VOCABULARY`) — not a subset check that
+    would pass with a missing word, and not a heading pin that would pass
+    with a retired word still present. Table row shape: "| `<word>` | ..."
+    (see docs/loom/backlog/README.md, ## Status word definitions).
+    """
+    assert path.is_file(), f"charter missing at {path}"
+    section = _charter_status_word_section(path=path)
+    table_words = _charter_table_status_words(section)
+    assert table_words == set(backlog_index.CLOSED_STATUS_VOCABULARY), (
+        f"{path}'s status word table lists {sorted(table_words)}, but "
+        f"the code enforces {sorted(backlog_index.CLOSED_STATUS_VOCABULARY)} "
+        "— every code word must appear as a table row, and no extra "
+        "(e.g. retired) word may remain"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -106,11 +130,32 @@ def _run_validate(store: Path) -> subprocess.CompletedProcess:
     )
 
 
+def test_duplicate_frontmatter_keys_resolve_last_wins():
+    """A frontmatter block carrying `status:` twice must be read as the
+    LAST occurrence, not the first.
+
+    Regression for docs/loom/backlog/2026-08-02-backlog-index-two-
+    frontmatter-readers-disagree-on-duplicate-keys.md: this repo used to
+    carry a second frontmatter reader, a private helper in
+    archive_change_folder.py, that `re.search`'d for the first match
+    (`closed`) while this function
+    iterates and overwrites (last match: `open`) — the same bytes read two
+    different statuses depending which reader touched them. That second
+    reader is gone (loom-code/scripts/archive_change_folder.py no longer
+    has any caller needing it), so this property now lives here, pinned
+    directly against `parse_frontmatter` itself — the only reader left."""
+    frontmatter = backlog_index.parse_frontmatter(
+        "---\nstatus: closed\nstatus: open\n---\n\n## Why\nBecause.\n"
+    )
+
+    assert frontmatter["status"] == "open"
+
+
 def test_rejects_entry_whose_filename_does_not_match_frontmatter_name(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
     # Filename stem is "2026-08-01-alpha" but frontmatter claims a different name.
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-beta", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-beta", "open"))
 
     result = _run_validate(store)
 
@@ -121,14 +166,12 @@ def test_rejects_entry_whose_filename_does_not_match_frontmatter_name(tmp_path):
 def test_clean_store_passes(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
     _write(
         store,
         "archive/2026-07-01-closed-thing.md",
-        # Charter requires `archived: <date>` on every archive-tier entry
-        # (docs/loom/backlog/README.md:20,24-27); a "clean" fixture must
-        # carry it or --validate now correctly rejects it (GAP 1 below).
-        _archived_entry("2026-07-01-closed-thing", "2026-07-15"),
+        # Archive-tier entries carry status: closed by construction.
+        _archived_entry("2026-07-01-closed-thing"),
     )
 
     result = _run_validate(store)
@@ -167,7 +210,7 @@ def test_archived_entry_carrying_a_live_status_is_rejected(tmp_path):
     _write(
         store,
         "archive/2026-07-01-closed-thing.md",
-        _entry("2026-07-01-closed-thing", "OPEN"),
+        _entry("2026-07-01-closed-thing", "open"),
     )
 
     result = _run_validate(store)
@@ -185,6 +228,87 @@ def test_status_outside_the_closed_vocabulary_is_rejected(tmp_path):
 
     assert result.returncode == 1
     assert "2026-08-01-alpha.md" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (docs/loom/plans/2026-08-21-dissolve-direction-layer.md) — the
+# status vocabulary collapses to exactly open/bet/closed; the seven legacy
+# words (including COMMITTED-NEXT and archived) are retired.
+# ---------------------------------------------------------------------------
+
+
+def test_vocabulary_open_bet_closed(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "bet"))
+
+    result = _run_validate(store)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    store2 = tmp_path / "backlog2"
+    store2.mkdir()
+    _write(store2, "2026-08-01-beta.md", _entry("2026-08-01-beta", "COMMITTED-NEXT"))
+
+    result2 = _run_validate(store2)
+    assert result2.returncode == 1
+    assert "2026-08-01-beta.md" in result2.stdout
+
+
+def test_blocked_field_on_open_entry_excludes_it_from_ready(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    text = _entry("2026-08-01-alpha", "open", description="Alpha marker.").replace(
+        "status: open\n", "status: open\nblocked: waiting on X\n"
+    )
+    _write(store, "2026-08-01-alpha.md", text)
+
+    result = _run_ready(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2026-08-01-alpha" not in result.stdout
+
+
+def test_blocked_field_on_a_closed_entry_is_a_violation(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    text = _entry("2026-08-01-alpha", "closed").replace(
+        "status: closed\n", "status: closed\nblocked: waiting on X\n"
+    )
+    _write(store, "2026-08-01-alpha.md", text)
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1
+    assert "2026-08-01-alpha.md" in result.stdout
+
+
+def test_archive_tier_entry_with_status_closed_validates_clean(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    _write(
+        store,
+        "archive/2026-07-01-closed-thing.md",
+        _entry("2026-07-01-closed-thing", "closed"),
+    )
+
+    result = _run_validate(store)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_archive_tier_entry_with_status_archived_is_a_vocabulary_violation(tmp_path):
+    store = tmp_path / "backlog"
+    store.mkdir()
+    _write(
+        store,
+        "archive/2026-07-01-closed-thing.md",
+        _entry("2026-07-01-closed-thing", "archived"),
+    )
+
+    result = _run_validate(store)
+
+    assert result.returncode == 1
+    assert "2026-07-01-closed-thing.md" in result.stdout
 
 
 def test_entry_missing_description_key_is_rejected(tmp_path):
@@ -211,7 +335,7 @@ def test_entry_with_blank_description_is_rejected(tmp_path):
     dangling-em-dash line as a missing key, so it is rejected the same way."""
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN", description=""))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open", description=""))
 
     result = _run_validate(store)
 
@@ -225,7 +349,7 @@ def test_readme_md_directly_under_store_is_never_treated_as_an_entry(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
     _write(store, "README.md", "# not an entry\n")
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     result = _run_validate(store)
 
@@ -233,91 +357,23 @@ def test_readme_md_directly_under_store_is_never_treated_as_an_entry(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Revision round 1, GAP 1 — the charter (docs/loom/backlog/README.md:20,24-27)
-# requires `archived: <YYYY-MM-DD>` on every archive-tier entry and forbids
-# it on a live entry. Without these, a store could pass --validate clean and
-# then fail loudly at --write — the two modes must agree on what "clean"
-# means. `_archived_entry` is defined further below (Task 3 section); Python
-# resolves it at call time, not at file-scan time, so forward reference here
-# is safe.
-# ---------------------------------------------------------------------------
-
-
-def test_archive_tier_entry_missing_archived_date_field_is_rejected(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    _write(
-        store,
-        "archive/2026-07-01-closed-thing.md",
-        _entry("2026-07-01-closed-thing", "archived"),  # no `archived:` field
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1
-    assert "2026-07-01-closed-thing.md" in result.stdout
-
-
-def test_archive_tier_entry_with_malformed_archived_date_is_rejected(tmp_path):
-    """Presence alone is not enough — `archived: yesterday` would otherwise
-    pass validation and render a nonsense '## Archived' line."""
-    store = tmp_path / "backlog"
-    store.mkdir()
-    _write(
-        store,
-        "archive/2026-07-01-closed-thing.md",
-        _archived_entry("2026-07-01-closed-thing", "yesterday"),
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1
-    assert "2026-07-01-closed-thing.md" in result.stdout
-
-
-def test_live_entry_carrying_archived_field_is_rejected(tmp_path):
-    """Charter (README.md:27): 'archived' carries no meaning on a live entry
-    and must not be set on one."""
-    store = tmp_path / "backlog"
-    store.mkdir()
-    text = _entry("2026-08-01-alpha", "OPEN").replace(
-        "status: OPEN\n", "status: OPEN\narchived: 2026-07-15\n"
-    )
-    _write(store, "2026-08-01-alpha.md", text)
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1
-    assert "2026-08-01-alpha.md" in result.stdout
-
-
-# ---------------------------------------------------------------------------
 # Task 3 — scripts/backlog_index.py --write
 #
-# Archived-date design decision: the pinned index shape's "## Archived" line
-# needs a date with no source in the frontmatter contract as originally
-# pinned. This task adds an `archived: <YYYY-MM-DD>` frontmatter field
-# (stamped at archive time), documented in docs/loom/backlog/README.md
-# alongside the pinned contract, rather than shelling out to git — the
-# generator stays a pure function of the entry files' text, which is what
-# keeps two --write runs over unchanged input byte-identical.
+# Task 1 of docs/loom/plans/2026-08-21-dissolve-direction-layer.md collapsed
+# the archive-tier invariant to one rule (an entry under archive/ carries
+# status: closed) and retired the separate `archived: <date>` field — the
+# archive tier is a plain destination excluded from the generated index
+# listing, so no rendered date is needed. `_archived_entry` below is a
+# thin alias over `_entry(..., "closed")` kept for the many call sites
+# below that predate the collapse.
 # ---------------------------------------------------------------------------
 
 
 def _archived_entry(
     name: str,
-    archived: str,
-    description: str = "Should never appear in the Archived line.",
+    description: str = "Should never appear in the generated index.",
 ) -> str:
-    return (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        "status: archived\n"
-        f"archived: {archived}\n"
-        "---\n\n"
-        "Body text.\n"
-    )
+    return _entry(name, "closed", description=description)
 
 
 def _run_write(store: Path, output: Path) -> subprocess.CompletedProcess:
@@ -350,28 +406,28 @@ def _section(text: str, heading: str) -> str:
     return body
 
 
-def test_write_groups_live_entries_by_status_and_compacts_archived(tmp_path):
+def test_write_groups_live_entries_by_status_and_excludes_archive_tier(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
     _write(
         store,
         "2026-08-01-alpha.md",
-        _entry("2026-08-01-alpha", "OPEN", description="Alpha unique marker description."),
+        _entry("2026-08-01-alpha", "open", description="Alpha unique marker description."),
     )
     _write(
         store,
         "2026-08-02-beta.md",
-        _entry("2026-08-02-beta", "OPEN", description="Beta unique marker description."),
+        _entry("2026-08-02-beta", "open", description="Beta unique marker description."),
     )
     _write(
         store,
         "2026-08-03-gamma.md",
-        _entry("2026-08-03-gamma", "PARKED", description="Gamma unique marker description."),
+        _entry("2026-08-03-gamma", "closed", description="Gamma unique marker description."),
     )
     _write(
         store,
         "archive/2026-07-01-closed-thing.md",
-        _archived_entry("2026-07-01-closed-thing", "2026-07-15"),
+        _archived_entry("2026-07-01-closed-thing"),
     )
 
     output = tmp_path / "BACKLOG.md"
@@ -380,42 +436,36 @@ def test_write_groups_live_entries_by_status_and_compacts_archived(tmp_path):
 
     text = output.read_text(encoding="utf-8")
 
-    open_section = _section(text, "## OPEN")
+    open_section = _section(text, "## open")
     assert "Alpha unique marker description." in open_section
     assert "Beta unique marker description." in open_section
 
-    parked_section = _section(text, "## PARKED")
-    assert "Gamma unique marker description." in parked_section
+    closed_section = _section(text, "## closed")
+    assert "Gamma unique marker description." in closed_section
 
-    archived_section = _section(text, "## Archived")
-    assert "2026-07-01-closed-thing (archived 2026-07-15)" in archived_section
-    assert "Should never appear" not in archived_section
+    # Archive-tier entries are excluded entirely (brief BI-10) — no
+    # '## Archived' section, and the archived entry never appears.
+    assert "## Archived" not in text
+    assert "2026-07-01-closed-thing" not in text
+    assert "Should never appear" not in text
 
-    # Kickoff-decision hard contract: COMMITTED-NEXT -> OPEN -> PARKED ->
-    # UPSTREAM -> SHIPPED -> CLOSED — SUPERSEDED -> Archived.
-    assert text.index("## OPEN") < text.index("## PARKED") < text.index("## Archived")
+    # Kickoff-decision hard contract: bet -> open -> closed.
+    assert text.index("## open") < text.index("## closed")
 
 
 def test_write_omits_empty_status_sections(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"
     result = _run_write(store, output)
     assert result.returncode == 0, result.stdout + result.stderr
 
     text = output.read_text(encoding="utf-8")
-    for heading in (
-        "## COMMITTED-NEXT",
-        "## PARKED",
-        "## UPSTREAM",
-        "## SHIPPED",
-        "## CLOSED — SUPERSEDED",
-        "## Archived",
-    ):
+    for heading in ("## bet", "## closed"):
         assert heading not in text, f"{heading} should be omitted when it has no entries"
-    assert "## OPEN" in text
+    assert "## open" in text
 
 
 def test_write_is_idempotent_byte_identical_across_two_runs(tmp_path):
@@ -433,26 +483,26 @@ def test_write_is_idempotent_byte_identical_across_two_runs(tmp_path):
     stable across two in-process calls sharing one hash seed."""
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN", description="Alpha."))
-    _write(store, "2026-08-02-beta.md", _entry("2026-08-02-beta", "OPEN", description="Beta."))
-    _write(store, "2026-08-03-gamma.md", _entry("2026-08-03-gamma", "OPEN", description="Gamma."))
-    _write(store, "2026-08-04-delta.md", _entry("2026-08-04-delta", "OPEN", description="Delta."))
-    _write(store, "2026-08-05-epsilon.md", _entry("2026-08-05-epsilon", "OPEN", description="Epsilon."))
-    _write(store, "2026-08-06-zeta.md", _entry("2026-08-06-zeta", "COMMITTED-NEXT"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open", description="Alpha."))
+    _write(store, "2026-08-02-beta.md", _entry("2026-08-02-beta", "open", description="Beta."))
+    _write(store, "2026-08-03-gamma.md", _entry("2026-08-03-gamma", "open", description="Gamma."))
+    _write(store, "2026-08-04-delta.md", _entry("2026-08-04-delta", "open", description="Delta."))
+    _write(store, "2026-08-05-epsilon.md", _entry("2026-08-05-epsilon", "open", description="Epsilon."))
+    _write(store, "2026-08-06-zeta.md", _entry("2026-08-06-zeta", "bet"))
     _write(
         store,
         "archive/2026-07-01-closed-thing.md",
-        _archived_entry("2026-07-01-closed-thing", "2026-07-15"),
+        _archived_entry("2026-07-01-closed-thing"),
     )
     _write(
         store,
         "archive/2026-06-01-older-thing.md",
-        _archived_entry("2026-06-01-older-thing", "2026-06-10"),
+        _archived_entry("2026-06-01-older-thing"),
     )
     _write(
         store,
         "archive/2026-05-01-oldest-thing.md",
-        _archived_entry("2026-05-01-oldest-thing", "2026-05-05"),
+        _archived_entry("2026-05-01-oldest-thing"),
     )
 
     result_a = _run_write(store, tmp_path / "BACKLOG_a.md")
@@ -463,48 +513,26 @@ def test_write_is_idempotent_byte_identical_across_two_runs(tmp_path):
     assert (tmp_path / "BACKLOG_a.md").read_bytes() == (tmp_path / "BACKLOG_b.md").read_bytes()
 
 
-def test_write_fails_loudly_when_archived_entry_missing_archived_date(tmp_path):
-    """Design decision pinned above: the archived date comes from a new
-    `archived:` frontmatter field, stamped at archive time. An entry under
-    archive/ that lacks it cannot render its '## Archived' line — fail
-    loudly rather than emitting a blank or fabricated date."""
+def test_write_ignores_archive_tier_entry_with_bogus_status(tmp_path):
+    """Archive-tier entries are excluded from `build_index()`'s render step
+    entirely (they never validate their status there — that is
+    `--validate`'s job), so a garbage status under archive/ does not fail
+    `--write` — it is simply not rendered."""
     store = tmp_path / "backlog"
     store.mkdir()
     _write(
         store,
         "archive/2026-07-01-closed-thing.md",
-        _entry("2026-07-01-closed-thing", "archived"),  # no `archived:` field
+        _entry("2026-07-01-closed-thing", "archived"),
     )
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"
     result = _run_write(store, output)
 
-    assert result.returncode == 1
-    assert "2026-07-01-closed-thing" in result.stdout + result.stderr
-    assert not output.exists()
-
-
-def test_write_rejects_a_malformed_archived_date_not_only_a_missing_one(tmp_path):
-    """`--write` is documented as usable on its own, so presence alone is not
-    enough: a malformed value would be rendered verbatim into the committed
-    index, and `--check` would then regenerate the same string and call the
-    file clean — laundering the bad value into the baseline."""
-    store = tmp_path / "backlog"
-    store.mkdir()
-    _write(
-        store,
-        "archive/2026-07-01-closed-thing.md",
-        _entry("2026-07-01-closed-thing", "archived").replace(
-            "---\n\n", "archived: yesterday\n---\n\n", 1
-        ),
-    )
-
-    output = tmp_path / "BACKLOG.md"
-    result = _run_write(store, output)
-
-    assert result.returncode == 1
-    assert "2026-07-01-closed-thing" in result.stdout + result.stderr
-    assert not output.exists()
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = output.read_text(encoding="utf-8")
+    assert "2026-07-01-closed-thing" not in text
 
 
 def test_write_fails_loudly_on_live_entry_with_unrecognized_status(tmp_path):
@@ -548,7 +576,7 @@ def _run_check(store: Path, output: Path) -> subprocess.CompletedProcess:
 def test_check_passes_on_a_freshly_generated_index(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"
     write_result = _run_write(store, output)
@@ -561,7 +589,7 @@ def test_check_passes_on_a_freshly_generated_index(tmp_path):
 def test_check_detects_a_hand_edited_index(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"
     _run_write(store, output)
@@ -583,7 +611,7 @@ def test_check_detects_whitespace_only_drift(tmp_path):
     pass."""
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"
     _run_write(store, output)
@@ -598,7 +626,7 @@ def test_check_detects_whitespace_only_drift(tmp_path):
 def test_check_does_not_write_anything(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"
     _run_write(store, output)
@@ -619,7 +647,7 @@ def test_check_does_not_write_anything(tmp_path):
 def test_check_fails_loudly_when_output_is_missing(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
 
     output = tmp_path / "BACKLOG.md"  # never written
 
@@ -632,11 +660,7 @@ def test_check_fails_loudly_when_output_is_missing(tmp_path):
 def test_check_fails_loudly_on_build_error_without_writing(tmp_path):
     store = tmp_path / "backlog"
     store.mkdir()
-    _write(
-        store,
-        "archive/2026-07-01-closed-thing.md",
-        _entry("2026-07-01-closed-thing", "archived"),  # no `archived:` field
-    )
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "BOGUS-STATUS"))
 
     output = tmp_path / "BACKLOG.md"
     output.write_text("placeholder\n", encoding="utf-8")
@@ -760,7 +784,7 @@ def test_origin_field_matching_a_line_wrapped_body_bullet_is_accepted(tmp_path):
     store.mkdir()
     text = _entry_with_body(
         "2026-08-01-alpha",
-        "OPEN",
+        "open",
         "origin: found during the whole-branch review of feat-x (PR #999).\n",
         "- Origin: found during the whole-branch review of feat-x\n  (PR #999).",
     )
@@ -776,7 +800,7 @@ def test_origin_field_disagreeing_with_its_body_bullet_is_rejected(tmp_path):
     store.mkdir()
     text = _entry_with_body(
         "2026-08-01-alpha",
-        "OPEN",
+        "open",
         "origin: a DIFFERENT origin than the body states.\n",
         "- Origin: found during the whole-branch review of feat-x (PR #999).",
     )
@@ -797,7 +821,7 @@ def test_start_field_matching_body_bullet_ignoring_parenthetical_qualifier_is_ac
     store.mkdir()
     text = _entry_with_body(
         "2026-08-01-alpha",
-        "PARKED",
+        "open",
         "start: a third real thing happens (Rule of Three).\n",
         "- Start (re-trigger): a third real thing happens\n  (Rule of Three).",
     )
@@ -813,7 +837,7 @@ def test_start_field_disagreeing_with_its_body_bullet_is_rejected(tmp_path):
     store.mkdir()
     text = _entry_with_body(
         "2026-08-01-alpha",
-        "PARKED",
+        "open",
         "start: a DIFFERENT re-trigger condition entirely.\n",
         "- Start (re-trigger): a third real thing happens (Rule of Three).",
     )
@@ -878,7 +902,7 @@ def test_origin_field_matching_bullet_followed_by_trailing_prose_is_accepted(tmp
     store.mkdir()
     text = _entry_with_body(
         "2026-08-01-alpha",
-        "OPEN",
+        "open",
         "origin: the CI lane drops coverage\n",
         "- Origin: the CI lane drops coverage\n\n"
         "Then a paragraph that follows the bullet.",
@@ -900,7 +924,7 @@ def test_agreement_check_is_a_noop_when_body_has_no_matching_bullet(tmp_path):
     store.mkdir()
     text = _entry_with_body(
         "2026-08-01-alpha",
-        "OPEN",
+        "open",
         "origin: found during a review, not restated in the body.\n",
         "- What: some unrelated bullet with no Origin/Start label at all.",
     )
@@ -921,47 +945,48 @@ def test_agreement_check_is_a_noop_when_body_has_no_matching_bullet(tmp_path):
 # ---------------------------------------------------------------------------
 # --ready — the store's single READ surface (plan
 # docs/loom/plans/2026-08-06-backlog-ready-verb-and-close-loop.md, Task 1).
-# COMMITTED-NEXT first (filename order), then OPEN; excluded statuses
-# (PARKED / UPSTREAM / SHIPPED / CLOSED — SUPERSEDED / archived) never
-# listed; closing `ready: N committed / M open / K excluded by status` line.
+# `bet` first (filename order), then `open`; excluded statuses (`closed`,
+# archived, or an `open` entry carrying `blocked:`) never listed; closing
+# `ready: N bet / M open / P closed / Q blocked` line.
 # ---------------------------------------------------------------------------
 
 
 def _ready_store(tmp_path: Path) -> Path:
-    """One entry per status — two OPEN entries (with and without `start:`)
-    so assertion (c) can check both the rendered and the absent case —
-    plus one archive-tier entry. Shared by all five --ready assertions."""
+    """One entry per shape — an OPEN entry with and without `start:` (so
+    assertion (c) can check both the rendered and the absent case), a
+    `bet` entry, a `blocked` open entry, a `closed` entry, and one
+    archive-tier entry. Shared by all five --ready assertions."""
     store = tmp_path / "backlog"
     store.mkdir()
     _write(
         store,
-        "2026-08-01-committed.md",
-        _entry("2026-08-01-committed", "COMMITTED-NEXT", description="Committed marker."),
+        "2026-08-01-bet.md",
+        _entry("2026-08-01-bet", "bet", description="Bet marker."),
     )
     _write(
         store,
         "2026-08-02-open-with-start.md",
         _entry(
-            "2026-08-02-open-with-start", "OPEN", description="Open-with-start marker."
-        ).replace("status: OPEN\n", "status: OPEN\nstart: a third real thing happens\n"),
+            "2026-08-02-open-with-start", "open", description="Open-with-start marker."
+        ).replace("status: open\n", "status: open\nstart: a third real thing happens\n"),
     )
     _write(
         store,
         "2026-08-03-open-plain.md",
-        _entry("2026-08-03-open-plain", "OPEN", description="Open-plain marker."),
+        _entry("2026-08-03-open-plain", "open", description="Open-plain marker."),
     )
-    _write(store, "2026-08-04-parked.md", _entry("2026-08-04-parked", "PARKED"))
-    _write(store, "2026-08-05-upstream.md", _entry("2026-08-05-upstream", "UPSTREAM"))
-    _write(store, "2026-08-06-shipped.md", _entry("2026-08-06-shipped", "SHIPPED"))
     _write(
         store,
-        "2026-08-07-superseded.md",
-        _entry("2026-08-07-superseded", "CLOSED — SUPERSEDED"),
+        "2026-08-04-blocked.md",
+        _entry("2026-08-04-blocked", "open").replace(
+            "status: open\n", "status: open\nblocked: waiting on X\n"
+        ),
     )
+    _write(store, "2026-08-05-closed.md", _entry("2026-08-05-closed", "closed"))
     _write(
         store,
         "archive/2026-07-01-archived.md",
-        _archived_entry("2026-07-01-archived", "2026-07-15"),
+        _archived_entry("2026-07-01-archived"),
     )
     return store
 
@@ -974,39 +999,38 @@ def _run_ready(store: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_ready_prints_committed_next_section_before_open(tmp_path):
-    """(a) COMMITTED-NEXT is the 'now' queue — it must render before OPEN,
-    and each section must actually contain its own entries (section-scoped,
+def test_ready_prints_bet_section_before_open(tmp_path):
+    """(a) `bet` is the 'now' queue — it must render before `open`, and
+    each section must actually contain its own entries (section-scoped,
     not whole-output substring)."""
     result = _run_ready(_ready_store(tmp_path))
 
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout
-    assert "## COMMITTED-NEXT" in out and "## OPEN" in out, out
-    assert out.index("## COMMITTED-NEXT") < out.index("## OPEN")
-    committed_section = _section(out, "## COMMITTED-NEXT")
-    assert "- 2026-08-01-committed — Committed marker." in committed_section
-    open_section = _section(out, "## OPEN")
+    assert "## bet" in out and "## open" in out, out
+    assert out.index("## bet") < out.index("## open")
+    bet_section = _section(out, "## bet")
+    assert "- 2026-08-01-bet — Bet marker." in bet_section
+    open_section = _section(out, "## open")
     assert "- 2026-08-02-open-with-start — Open-with-start marker." in open_section
     assert "- 2026-08-03-open-plain — Open-plain marker." in open_section
 
 
-def test_ready_excludes_non_actionable_statuses(tmp_path):
-    """(b) PARKED / UPSTREAM / SHIPPED / CLOSED — SUPERSEDED / archived are
-    not actionable — none of their entries may appear anywhere in the
-    output (they are only tallied in the count line)."""
+def test_ready_excludes_closed_and_blocked_entries(tmp_path):
+    """(b) a `closed` entry, an archive-tier entry, and an `open` entry
+    carrying `blocked:` are not actionable — none of their entries may
+    appear anywhere in the output (they are only tallied in the count
+    line)."""
     result = _run_ready(_ready_store(tmp_path))
 
     assert result.returncode == 0, result.stdout + result.stderr
     for excluded_name in (
-        "2026-08-04-parked",
-        "2026-08-05-upstream",
-        "2026-08-06-shipped",
-        "2026-08-07-superseded",
+        "2026-08-04-blocked",
+        "2026-08-05-closed",
         "2026-07-01-archived",
     ):
         assert excluded_name not in result.stdout, (
-            f"excluded-status entry {excluded_name} leaked into --ready output"
+            f"excluded entry {excluded_name} leaked into --ready output"
         )
 
 
@@ -1024,13 +1048,13 @@ def test_ready_start_line_rendered_only_for_entries_that_have_the_field(tmp_path
 
 
 def test_ready_count_line_reports_exact_numbers(tmp_path):
-    """(d) the output ends with the exact tally: 1 committed, 2 open,
-    5 excluded (parked + upstream + shipped + superseded + archived)."""
+    """(d) the output ends with the exact tally: 1 bet, 2 open,
+    2 closed (1 closed entry + 1 archive-tier entry), 1 blocked."""
     result = _run_ready(_ready_store(tmp_path))
 
     assert result.returncode == 0, result.stdout + result.stderr
     non_empty = [line for line in result.stdout.splitlines() if line.strip()]
-    assert non_empty[-1] == "ready: 1 committed / 2 open / 5 excluded by status"
+    assert non_empty[-1] == "ready: 1 bet / 2 open / 2 closed / 1 blocked"
 
 
 def test_ready_is_a_mode_on_its_own_and_flagless_defaults_to_validate(tmp_path):
@@ -1128,14 +1152,14 @@ def test_ready_excludes_archive_tier_entry_regardless_of_status(tmp_path):
     _write(
         store,
         "2026-08-01-open-plain.md",
-        _entry("2026-08-01-open-plain", "OPEN", description="Legit open marker."),
+        _entry("2026-08-01-open-plain", "open", description="Legit open marker."),
     )
     _write(
         store,
         "archive/2026-07-01-mis-tiered.md",
         _entry(
             "2026-07-01-mis-tiered",
-            "OPEN",
+            "open",
             description="Should never render -- physically archived.",
         ),
     )
@@ -1148,11 +1172,11 @@ def test_ready_excludes_archive_tier_entry_regardless_of_status(tmp_path):
         "archive-tier entry leaked into --ready output despite a "
         "non-archived status"
     )
-    open_section = _section(out, "## OPEN")
+    open_section = _section(out, "## open")
     assert "- 2026-08-01-open-plain — Legit open marker." in open_section
     assert "2026-07-01-mis-tiered" not in open_section
     non_empty = [line for line in out.splitlines() if line.strip()]
-    assert non_empty[-1] == "ready: 0 committed / 1 open / 1 excluded by status", non_empty[-1]
+    assert non_empty[-1] == "ready: 0 bet / 1 open / 1 closed / 0 blocked", non_empty[-1]
 
 
 def test_ready_fails_loudly_on_status_outside_closed_vocabulary(tmp_path):
@@ -1191,704 +1215,194 @@ def test_ready_on_empty_store_prints_zero_count_line_only(tmp_path):
     result = _run_ready(store)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "ready: 0 committed / 0 open / 0 excluded by status\n"
+    assert result.stdout == "ready: 0 bet / 0 open / 0 closed / 0 blocked\n"
 
 
-def test_ready_omits_committed_next_heading_when_empty(tmp_path):
-    """(b) A store with no COMMITTED-NEXT entries at all must omit the
-    '## COMMITTED-NEXT' heading entirely (not print an empty section),
-    while the count line still reports the correct numbers -- this is
-    the real store's current shape."""
+def test_ready_omits_bet_heading_when_empty(tmp_path):
+    """(b) A store with no `bet` entries at all must omit the '## bet'
+    heading entirely (not print an empty section), while the count line
+    still reports the correct numbers -- this is the real store's
+    current shape."""
     store = tmp_path / "backlog"
     store.mkdir()
     _write(
         store,
         "2026-08-01-open-plain.md",
-        _entry("2026-08-01-open-plain", "OPEN", description="Open-plain marker."),
+        _entry("2026-08-01-open-plain", "open", description="Open-plain marker."),
     )
-    _write(store, "2026-08-02-parked.md", _entry("2026-08-02-parked", "PARKED"))
+    _write(
+        store,
+        "2026-08-02-blocked.md",
+        _entry("2026-08-02-blocked", "open").replace(
+            "status: open\n", "status: open\nblocked: waiting on X\n"
+        ),
+    )
 
     result = _run_ready(store)
 
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout
-    assert "## COMMITTED-NEXT" not in out, out
-    assert "## OPEN" in out
+    assert "## bet" not in out, out
+    assert "## open" in out
     non_empty = [line for line in out.splitlines() if line.strip()]
-    assert non_empty[-1] == "ready: 0 committed / 1 open / 1 excluded by status"
+    assert non_empty[-1] == "ready: 0 bet / 1 open / 0 closed / 1 blocked"
 
 
-# ---------------------------------------------------------------------------
-# Direction layer (plan docs/loom/plans/2026-08-07-loom-direction-layer.md,
-# Task 1): `--direction-write <path>` / `--direction-check <path>` regenerate
-# / self-confirm the generated `## Now` section of a DIRECTION.md from
-# COMMITTED-NEXT entry files; the flagless validate mode gains independent
-# DIRECTION.md checks ONLY when the file exists (absent file = silently
-# valid — the direction layer is opt-in per repo). Validate resolves the
-# direction file at `<store>/../DIRECTION.md` (the convention's fixed
-# location, docs/loom/DIRECTION.md beside docs/loom/backlog/).
-# ---------------------------------------------------------------------------
-
-
-EMPTY_QUEUE_LINE = "_(queue empty — bet at the next close-out)_"
-
-
-def _direction_text(now_body: str = EMPTY_QUEUE_LINE) -> str:
-    """A minimal DIRECTION.md fixture: charter-header stand-in + the three
-    required sections. `now_body` is the ## Now section body (default: the
-    exact empty-queue line the generator renders)."""
-    return (
-        "# Direction — fixture\n"
-        "\n"
-        "> Charter fixture header: Now is generated; no dates anywhere.\n"
-        "\n"
-        "## Now\n"
-        "\n"
-        f"{now_body}\n"
-        "\n"
-        "## Next\n"
-        "\n"
-        "- a fixture next theme\n"
-        "\n"
-        "## Later\n"
-        "\n"
-        "- a fixture later theme\n"
-    )
-
-
-def _direction_store(tmp_path: Path, statuses: list[tuple[str, str]]) -> tuple[Path, Path]:
-    """A fixture (store, direction-file) pair laid out per the convention:
-    DIRECTION.md sits at the store's parent (`tmp/DIRECTION.md` beside
-    `tmp/backlog/`), which is where the validate mode resolves it."""
-    store = tmp_path / "backlog"
-    store.mkdir()
-    for name, status in statuses:
-        _write(store, f"{name}.md", _entry(name, status, description=f"{name} marker."))
-    direction = tmp_path / "DIRECTION.md"
-    direction.write_text(_direction_text(), encoding="utf-8")
-    return store, direction
-
-
-def _run_direction_write(direction: Path, store: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [
-            sys.executable,
-            str(BACKLOG_SCRIPT),
-            "--direction-write",
-            str(direction),
-            "--store",
-            str(store),
-        ],
+def test_direction_verbs_removed(tmp_path):
+    """Task 7 (docs/loom/plans/2026-08-21-dissolve-direction-layer.md)
+    deleted the direction half wholesale: the CLI must reject
+    --direction-write as an unknown argument rather than accept it."""
+    result = subprocess.run(
+        [sys.executable, str(BACKLOG_SCRIPT), "--direction-write", str(tmp_path / "DIRECTION.md")],
         capture_output=True,
         text=True,
     )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "unrecognized arguments" in result.stderr, result.stderr
+    assert "--direction-write" in result.stderr, result.stderr
 
 
-def _run_direction_check(direction: Path, store: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [
-            sys.executable,
-            str(BACKLOG_SCRIPT),
-            "--direction-check",
-            str(direction),
-            "--store",
-            str(store),
-        ],
-        capture_output=True,
-        text=True,
-    )
+def test_index_and_ready_agree_on_an_archive_tier_entry_with_a_bad_status(tmp_path):
+    """Round-4 finding: the shared-walk extraction closed three of FOUR
+    copies, and the fourth (`_collect_index_entries`) skipped archive-tier
+    entries WITHOUT validating them while the other three validated every
+    entry — so one store made `build_index()` return normally and
+    `build_ready()` raise.
 
+    The agreed direction is the one two shipped artifacts already record:
+    `test_write_ignores_archive_tier_entry_with_bogus_status` ("that is
+    `--validate`'s job") and `build_ready`'s own docstring ("an archive-tier
+    entry is always tallied as `closed` ... independent of what its
+    frontmatter literally says"). The archive tier OVERRIDES the status, so
+    no reader routes on it; `--validate` owns it via `_check_archive_tier`.
+    Validating it in the readers would leave a repo holding historical
+    retired vocabulary unable to render its own index.
 
-def test_direction_write_renders_committed_next_entries_in_file_date_order(tmp_path):
-    """Generation from a fixture store with COMMITTED-NEXT entries: one
-    `- <name> — <description>` line per entry, filename (= file-date) order,
-    other statuses excluded, human sections untouched, and a second run is
-    byte-identical (pure function of the entry files)."""
-    store, direction = _direction_store(
-        tmp_path,
-        [
-            ("2026-08-02-second-bet", "COMMITTED-NEXT"),
-            ("2026-08-01-first-bet", "COMMITTED-NEXT"),
-            ("2026-08-03-open-thing", "OPEN"),
-        ],
-    )
-
-    result = _run_direction_write(direction, store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    text = direction.read_text(encoding="utf-8")
-    now_section = _section(text, "## Now")
-    first = now_section.index("- 2026-08-01-first-bet — 2026-08-01-first-bet marker.")
-    second = now_section.index("- 2026-08-02-second-bet — 2026-08-02-second-bet marker.")
-    assert first < second, now_section
-    assert "2026-08-03-open-thing" not in now_section, now_section
-    assert EMPTY_QUEUE_LINE not in now_section, now_section
-    # Human sections untouched:
-    assert "- a fixture next theme" in _section(text, "## Next")
-    assert "- a fixture later theme" in _section(text, "## Later")
-    # Idempotent:
-    rerun = _run_direction_write(direction, store)
-    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
-    assert direction.read_text(encoding="utf-8") == text
-
-
-def test_direction_write_renders_exact_empty_queue_line(tmp_path):
-    """An empty COMMITTED-NEXT queue renders exactly the pinned line —
-    nothing else in the ## Now body."""
-    store, direction = _direction_store(tmp_path, [("2026-08-03-open-thing", "OPEN")])
-    # Pre-seed a stale Now body so the run demonstrably regenerates it.
-    direction.write_text(
-        _direction_text(now_body="- stale-hand-edited-line — should vanish."),
-        encoding="utf-8",
-    )
-
-    result = _run_direction_write(direction, store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    now_section = _section(direction.read_text(encoding="utf-8"), "## Now")
-    assert now_section.strip() == EMPTY_QUEUE_LINE, now_section
-
-
-def test_direction_write_refuses_file_without_now_heading(tmp_path):
-    """Refusal on missing `## Now`: loud exit 1, file left byte-untouched."""
-    store, direction = _direction_store(tmp_path, [])
-    headless = "# Direction — fixture\n\n## Next\n\n- a theme\n\n## Later\n\n- b theme\n"
-    direction.write_text(headless, encoding="utf-8")
-
-    result = _run_direction_write(direction, store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "backlog_index --direction-write: FAIL —" in result.stdout, result.stdout
-    assert "## Now" in result.stdout, result.stdout
-    assert direction.read_text(encoding="utf-8") == headless
-
-
-def test_direction_write_refuses_malformed_entry_frontmatter(tmp_path):
-    """An entry whose status falls outside the closed vocabulary (the
-    malformed-frontmatter case build_ready also refuses) fails loudly
-    rather than being silently skipped or laundered into the queue."""
-    store, direction = _direction_store(tmp_path, [])
-    _write(store, "2026-08-01-bogus.md", _entry("2026-08-01-bogus", "NOT-A-REAL-STATUS"))
-    before = direction.read_text(encoding="utf-8")
-
-    result = _run_direction_write(direction, store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "NOT-A-REAL-STATUS" in result.stdout, result.stdout
-    assert direction.read_text(encoding="utf-8") == before
-
-
-def test_direction_check_is_self_confirmation_pass_and_drift(tmp_path):
-    """--direction-check re-runs the generator and diffs (self-confirmation):
-    exit 0 right after --direction-write; exit 1 with a diff after a
-    hand-edit to the generated ## Now body, without writing anything."""
-    store, direction = _direction_store(tmp_path, [("2026-08-01-first-bet", "COMMITTED-NEXT")])
-    assert _run_direction_write(direction, store).returncode == 0
-
-    clean = _run_direction_check(direction, store)
-    assert clean.returncode == 0, clean.stdout + clean.stderr
-
-    hand_edited = direction.read_text(encoding="utf-8").replace(
-        "- 2026-08-01-first-bet — 2026-08-01-first-bet marker.",
-        "- 2026-08-01-first-bet — a hand-tweaked description.",
-    )
-    direction.write_text(hand_edited, encoding="utf-8")
-
-    drifted = _run_direction_check(direction, store)
-    assert drifted.returncode == 1, drifted.stdout + drifted.stderr
-    assert "backlog_index --direction-check: FAIL —" in drifted.stdout, drifted.stdout
-    assert direction.read_text(encoding="utf-8") == hand_edited  # never writes
-
-
-def test_direction_check_fails_loudly_when_file_missing(tmp_path):
+    Pinned at FUNCTION level deliberately: at CLI level `--check` exits 1
+    via `find_violations` either way, which hides the divergence."""
     store = tmp_path / "backlog"
-    store.mkdir()
-    missing = tmp_path / "DIRECTION.md"
-
-    result = _run_direction_check(missing, store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "backlog_index --direction-check: FAIL —" in result.stdout, result.stdout
-
-
-def test_validate_flags_date_token_in_later_section(tmp_path):
-    """Mutation pin for the charter's no-dates rule as a checked invariant:
-    a `2026-09` token in ## Later must fail validate; a `Q3` token must
-    fail too (the plan's `20\\d\\d[-/年.]` + `Q[1-4]` regex)."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text.replace("- a fixture later theme", "- a fixture later theme (2026-09)"),
-        encoding="utf-8",
-    )
-    result = _run_validate(store)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "direction-date" in result.stdout, result.stdout
-    assert "2026-" in result.stdout, result.stdout
-
-    direction.write_text(
-        text.replace("- a fixture later theme", "- a fixture later theme in Q3"),
-        encoding="utf-8",
-    )
-    result = _run_validate(store)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "direction-date" in result.stdout, result.stdout
-
-
-def test_validate_exempts_generated_now_body_from_the_date_ban(tmp_path):
-    """Entry FILENAMES are date-prefixed by store convention, so a non-empty
-    generated ## Now necessarily carries `20\\d\\d-` tokens. The date ban
-    scopes to the human-owned text (header, ## Next, ## Later); the ## Now
-    body is exempt — it is safe to exempt precisely because the separate
-    now-matches-entries check pins that body to the generator's output."""
-    store, direction = _direction_store(tmp_path, [("2026-08-01-first-bet", "COMMITTED-NEXT")])
-    assert _run_direction_write(direction, store).returncode == 0
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_validate_flags_now_section_drifted_from_entries(tmp_path):
-    """The ## Now content must match the COMMITTED-NEXT entry files — a
-    hand-edit (here: a stale empty-queue line while the store has a
-    committed entry) is an independent validate violation."""
-    store, direction = _direction_store(tmp_path, [("2026-08-01-first-bet", "COMMITTED-NEXT")])
-    # direction still carries the default empty-queue Now — stale.
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "direction-now" in result.stdout, result.stdout
-
-
-def test_validate_flags_missing_next_heading(tmp_path):
-    store, direction = _direction_store(tmp_path, [])
-    direction.write_text(
-        f"# Direction — fixture\n\n## Now\n\n{EMPTY_QUEUE_LINE}\n", encoding="utf-8"
+    (store / "archive").mkdir(parents=True)
+    _write(store, "2026-08-01-live.md", _entry("2026-08-01-live", "open"))
+    _write(
+        store,
+        "archive/2026-07-01-stale.md",
+        _entry("2026-07-01-stale", "SHIPPED"),
     )
 
-    result = _run_validate(store)
+    # Both readers accept the store, and both treat the archived entry as
+    # closed rather than as its literal status.
+    ready = backlog_index.build_ready(store)
+    index = backlog_index.build_index(store)
+    assert "2026-07-01-stale" not in index
+    assert "SHIPPED" not in ready and "SHIPPED" not in index
+    assert "/ 1 closed /" in ready, ready
 
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "'## Next'" in result.stdout, result.stdout
+    # A LIVE entry with the same status still fails loudly in both.
+    _write(store, "2026-08-02-bad.md", _entry("2026-08-02-bad", "SHIPPED"))
+    with pytest.raises(ValueError, match="SHIPPED"):
+        backlog_index.build_ready(store)
+    with pytest.raises(ValueError, match="SHIPPED"):
+        backlog_index.build_index(store)
 
-
-def test_validate_does_not_require_later_heading(tmp_path):
-    """`## Later` was hand-written prose duplicating the backlog store's
-    own OPEN entries; it is no longer required. A DIRECTION.md with only
-    `## Now`/`## Next` (no `## Later` at all) validates clean."""
-    store, direction = _direction_store(tmp_path, [])
-    direction.write_text(
-        f"# Direction — fixture\n\n## Now\n\n{EMPTY_QUEUE_LINE}\n\n"
-        "## Next\n\n- a fixture next theme\n",
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_validate_still_flags_missing_now_heading(tmp_path):
-    """Mutation guard: making `## Later` optional must not weaken the
-    `## Now`/`## Next` checks — a file missing `## Now` is still
-    rejected."""
-    store, direction = _direction_store(tmp_path, [])
-    direction.write_text(
-        "# Direction — fixture\n\n## Next\n\n- a fixture next theme\n",
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "'## Now'" in result.stdout, result.stdout
-
-
-def test_validate_is_silently_valid_when_direction_file_absent(tmp_path):
-    """Absent DIRECTION.md = the repo has not opted into the direction
-    layer: validate passes with no direction-* mention at all."""
-    store = tmp_path / "backlog"
-    store.mkdir()
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "direction" not in result.stdout.lower(), result.stdout
-
-
-def test_real_direction_file_exists_and_real_store_validates_clean_with_it():
-    """monkey-skills is the direction layer's first consumer: the real
-    docs/loom/DIRECTION.md exists with the three sections, and flagless
-    validate over the real store — which now includes the DIRECTION
-    checks — passes."""
-    real_direction = REPO_ROOT / "docs" / "loom" / "DIRECTION.md"
-    assert real_direction.is_file(), f"missing {real_direction}"
-    text = real_direction.read_text(encoding="utf-8")
-    for heading in ("## Now", "## Next"):
-        assert f"\n{heading}\n" in text, f"real DIRECTION.md missing {heading}"
-
-    result = _run_validate(REPO_ROOT / "docs" / "loom" / "backlog")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_validate_exempts_backlog_entry_filename_reference_from_date_ban(tmp_path):
-    """The charter permits a `## Next`/`## Later` line pointing at a
-    backlog-entry FILENAME (e.g. '- theme X — see
-    `2026-08-07-execute-complexity-audit-keep-lanes.md`'). The date-ban
-    scanner must strip such filename references before token-matching so
-    this is not a [direction-date] violation — user-ratified exemption,
-    not a dropped feature."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text.replace(
-            "- a fixture next theme",
-            "- a fixture next theme — see "
-            "`2026-08-07-execute-complexity-audit-keep-lanes.md`",
-        ),
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "direction-date" not in result.stdout, result.stdout
-
-
-def test_validate_still_flags_bare_date_token_beside_filename_reference(tmp_path):
-    """Mutation pin: the filename exemption strips ONLY the filename
-    substring — a bare date token elsewhere on the same line must still
-    fail [direction-date]."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text.replace(
-            "- a fixture next theme",
-            "- 2026-09 target — see "
-            "2026-08-07-execute-complexity-audit-keep-lanes.md",
-        ),
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "direction-date" in result.stdout, result.stdout
-
-
-def test_validate_exempts_wellformed_standing_choice_entry_from_date_ban(tmp_path):
-    """Second user-ratified exemption: a well-formed `## On-ramp standing
-    choices` entry (grammar SSOT: check_onramp_choice.py /
-    family-reception.md) carries a trailing `(YYYY-MM-DD)` by design — the
-    date-ban scanner must strip only that trailing date before matching,
-    the same technique as the entry-filename exemption."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text
-        + "\n## On-ramp standing choices\n\n"
-        "- row 1 (product-principles): standing direct — a fixture reason "
-        "(2026-08-18)\n",
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "direction-date" not in result.stdout, result.stdout
-
-
-def test_validate_still_flags_malformed_standing_choice_line_with_date(tmp_path):
-    """Mutation pin: the standing-choice exemption matches the FULL entry
-    grammar — a malformed line inside the section (missing the `row <n>
-    (<station>): standing <direct|detour>` prefix) still fails
-    [direction-date] on its embedded token."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text
-        + "\n## On-ramp standing choices\n\n"
-        "- some hand-written note about 2026-08-18 that isn't the grammar\n",
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "direction-date" in result.stdout, result.stdout
-
-
-def test_validate_still_flags_wellformed_looking_entry_outside_standing_section(tmp_path):
-    """Mutation pin: the exemption is scoped to lines INSIDE the
-    `## On-ramp standing choices` section — an identically-formatted line
-    placed in `## Later` (outside that section) still fails
-    [direction-date]."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text.replace(
-            "- a fixture later theme",
-            "- a fixture later theme\n"
-            "- row 1 (product-principles): standing direct — a fixture "
-            "reason (2026-08-18)",
-        ),
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "direction-date" in result.stdout, result.stdout
-
-
-def test_validate_exempts_indented_standing_choice_entry(tmp_path):
-    """The checker (`load_standing`) matches on `line.strip()`, so it
-    ACCEPTS a CommonMark-legal indented entry as a real standing choice.
-    validate must agree: matching on the raw line would flag the very
-    entry the checker is honouring as [direction-date] — an inconsistency
-    between the two readers of the same section, not a charter breach."""
-    store, direction = _direction_store(tmp_path, [])
-    text = direction.read_text(encoding="utf-8")
-    direction.write_text(
-        text
-        + "\n## On-ramp standing choices\n\n"
-        "  - row 1 (product-principles): standing direct — a fixture reason "
-        "(2026-08-18)\n",
-        encoding="utf-8",
-    )
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "direction-date" not in result.stdout, result.stdout
-
-
-def test_standing_entry_regex_matches_check_onramp_choice():
-    """Drift pin (round-3 code-quality-review fix): DIRECTION_STANDING_ENTRY_RE
-    in backlog_index.py and _STANDING_ENTRY in check_onramp_choice.py are two
-    independent copies of the same grammar (SSOT: family-reception.md `###
-    On-ramp standing choices`) -- deliberately not import-shared (backlog_index
-    must not import check_onramp_choice), so nothing else stops them silently
-    drifting apart. If they disagree, an entry the checker accepts as a valid
-    standing choice could still be flagged [direction-date] by backlog_index's
-    validate (or vice versa) -- a real inconsistency a plain diff of the two
-    files would not surface as a test failure. This corpus is the mutation
-    pin: every string's match-truthiness must agree between the two regexes.
-    """
-    corpus = [
-        "- row 1 (product-principles): standing direct — a fixture reason (2026-08-18)",
-        "- row 1 (product-principles): standing direct —a fixture reason (2026-08-18)",  # no-space em-dash
-        "- row 1 (product-principles): standing direct — (2026-08-18)",  # empty reason
-        "- row 1 (product-principles): standing direct — a fixture reason (1999-08-18)",  # non-20xx year
-        "- row 1 product-principles: standing direct — a fixture reason (2026-08-18)",  # malformed station (no parens)
-        "- row 1 (product-principles): standing direct — a fixture reason with no date",  # missing date
-        "- row 12 (interface-design): standing detour — a fixture reason (2026-08-18)",  # row 12, detour
-        "- row 1 (product-principles): standing direct — a fixture reason (2026-08-18)   ",  # trailing spaces
-        "  - row 1 (product-principles): standing direct — a fixture reason (2026-08-18)",  # indented (CommonMark-legal list indent)
+    # And `--validate` — the owner of the archive-tier rule — still flags
+    # the archived entry, so nothing is laundered by the readers' silence.
+    flagged = [
+        v for v in backlog_index.find_violations(store)
+        if v.kind == "archive-tier" and "2026-07-01-stale" in v.file
     ]
-    for s in corpus:
-        backlog_result = bool(
-            backlog_index.DIRECTION_STANDING_ENTRY_RE.match(s.strip())
+    assert flagged, backlog_index.find_violations(store)
+
+
+def test_output_defaults_beside_its_store_not_beside_the_cwd(tmp_path):
+    """Dogfood finding (2026-08-21, end-to-end shakedown): `--write` with an
+    explicit `--store` and a defaulted `--output` resolved the output against
+    the CWD, so running it from one repo against another repo's store wrote
+    the wrong index over the standing repo's `BACKLOG.md` — silently, and with
+    a success line printing a relative path that hid where it landed. It
+    happened for real: a dogfood agent destroyed monkey-skills' own
+    docs/loom/BACKLOG.md this way (recovered from HEAD).
+
+    The index belongs beside its own store. For the canonical layout
+    (`--store docs/loom/backlog` from the repo root) the derived default is
+    byte-identical to the old one — only the cross-repo case, which was
+    always wrong, changes.
+
+    Six whole-branch review rounds did not find this; ten minutes of running
+    the thing did. Recorded in DL-30.
+    """
+    store = tmp_path / "theirs" / "docs" / "loom" / "backlog"
+    store.mkdir(parents=True)
+    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "open"))
+
+    standing = tmp_path / "mine" / "docs" / "loom"
+    standing.mkdir(parents=True)
+    victim = standing / "BACKLOG.md"
+    victim.write_text("PRECIOUS — this repo's own index\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(BACKLOG_SCRIPT), "--write", "--store", str(store)],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path / "mine",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert victim.read_text(encoding="utf-8") == "PRECIOUS — this repo's own index\n", (
+        "writing another store's index clobbered the standing repo's "
+        "BACKLOG.md:\n" + victim.read_text(encoding="utf-8")
+    )
+    written = store.parent / "BACKLOG.md"
+    assert written.is_file(), (
+        f"the index was not written beside its own store at {written}:\n"
+        + result.stdout
+    )
+    assert "2026-08-01-alpha" in written.read_text(encoding="utf-8")
+    # The success line must name where it landed, absolutely — a relative
+    # path is exactly what hid the cross-repo write.
+    assert str(written) in result.stdout, result.stdout
+
+
+def test_a_store_path_that_does_not_exist_is_a_failure_not_a_clean_empty_store(tmp_path):
+    """Dogfood finding #1 (2026-08-21, end-to-end shakedown) — the worst
+    defect this arc shipped, and six whole-branch review rounds read past it.
+
+    `--store` is the ONLY way to locate the store (there is no `--repo-root`
+    here), and a typo in it produced `OK — every invariant holds` at exit 0:
+    `_entry_files` globs a directory that is not there, gets an empty list,
+    and every invariant holds vacuously. `--ready` reported an empty queue and
+    `--write` generated an empty index over whatever `--output` pointed at.
+    A green validate bought with a typo is worse than a red one.
+
+    Absence of a store is a legitimate state for a repo that never adopted the
+    queue layer — but that is the CALLER's judgment (see
+    `check_queue_relation.py`, which reports a loud N/A and exits 0 for
+    exactly that case). This script is pointed at a store explicitly; being
+    unable to find it is a failure.
+    """
+    missing = tmp_path / "docs" / "loom" / "backlogg"
+
+    for mode in ("--validate", "--ready", "--write", "--check"):
+        result = subprocess.run(
+            [sys.executable, str(BACKLOG_SCRIPT), mode, "--store", str(missing)],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
         )
-        checker_result = bool(check_onramp_choice._STANDING_ENTRY.match(s.strip()))
-        assert backlog_result == checker_result, (
-            f"regex drift on {s!r}: backlog_index={backlog_result} "
-            f"check_onramp_choice={checker_result}"
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"{mode} reported success against a store that does not exist "
+            f"at {missing}:\n{combined}"
         )
-    # The two modules also parse the same SECTION. A heading that drifted
-    # would send each side scanning a different span of DIRECTION.md,
-    # which no regex-level pin above would notice.
-    assert (
-        backlog_index.DIRECTION_STANDING_HEADING
-        == check_onramp_choice.DIRECTION_STANDING_HEADING
+        assert "every invariant holds" not in combined, combined
+        assert str(missing) in combined, combined
+
+    # A path that exists but is not a directory is the same failure.
+    not_a_dir = tmp_path / "PURPOSE.md"
+    not_a_dir.write_text("not a store\n", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(BACKLOG_SCRIPT), "--validate", "--store", str(not_a_dir)],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
     )
-
-
-def test_direction_write_preserves_indented_next_heading(tmp_path):
-    """CommonMark permits 1-3 leading spaces before a heading marker. The
-    `## Now` section's end-of-section predicate must recognize an indented
-    '## Next' just like the start-of-section predicate does (whitespace-
-    tolerant `line.strip()`) — otherwise --direction-write's wholesale
-    splice swallows an indented '## Next' into the regenerated Now body
-    and silently deletes it."""
-    store, direction = _direction_store(tmp_path, [("2026-08-01-first-bet", "COMMITTED-NEXT")])
-    indented = direction.read_text(encoding="utf-8").replace("## Next", " ## Next")
-    direction.write_text(indented, encoding="utf-8")
-
-    result = _run_direction_write(direction, store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    after = direction.read_text(encoding="utf-8")
-    assert " ## Next" in after, after
-    assert "- a fixture next theme" in after, after
-
-
-# ---------------------------------------------------------------------------
-# Task 1 (docs/loom/plans/2026-08-20-north-star-serves-link.md), retargeted
-# by Task 3 of the same plan -- `serves:` frontmatter field on
-# COMMITTED-NEXT entries, gated on the repo having docs/loom/PURPOSE.md
-# (not PRINCIPLES.md -- the long-horizon purpose moved there; PRINCIPLES.md
-# goes back to holding only design/engineering principles).
-# ---------------------------------------------------------------------------
-
-
-def test_committed_next_entry_missing_serves_is_rejected_when_purpose_exists(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1
-    assert "2026-08-01-alpha.md" in result.stdout
-    assert "serves" in result.stdout
-
-
-def test_committed_next_entry_serves_unrelated_with_no_reason_is_rejected(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
-    text = _entry("2026-08-01-alpha", "COMMITTED-NEXT").replace(
-        "status: COMMITTED-NEXT\n", "status: COMMITTED-NEXT\nserves: unrelated\n"
-    )
-    _write(store, "2026-08-01-alpha.md", text)
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1
-    assert "2026-08-01-alpha.md" in result.stdout
-    assert "serves" in result.stdout
-
-
-def test_committed_next_entry_serves_unrelated_with_reason_validates_clean(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
-    text = _entry("2026-08-01-alpha", "COMMITTED-NEXT").replace(
-        "status: COMMITTED-NEXT\n",
-        "status: COMMITTED-NEXT\nserves: unrelated — churn cleanup\n",
-    )
-    _write(store, "2026-08-01-alpha.md", text)
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_open_entry_with_no_serves_validates_clean(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "OPEN"))
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_committed_next_entry_with_no_serves_validates_clean_without_purpose_md(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    # No PURPOSE.md written under tmp_path -- exemption case.
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_committed_next_entry_with_no_serves_validates_clean_with_only_principles_md(tmp_path):
-    """Pins the retarget itself: PRINCIPLES.md's mere presence must no
-    longer make the `serves` requirement fire now that the gate probes
-    PURPOSE.md. Without this assertion a revert to the old filename would
-    still pass every other test in this block."""
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PRINCIPLES.md").write_text("## Principles\n\nSomething.\n", encoding="utf-8")
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
-
-    result = _run_validate(store)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-# Whole-branch review F3 (2026-08-20): `serves` presence/grammar failures
-# were emitted under the "field-agreement" kind, which in this module
-# means frontmatter <-> body-bullet disagreement (_check_field_agreement).
-# A `serves`-absent violation is not a disagreement between two present
-# values — it reads misleadingly under that kind.
-
-
-def test_missing_serves_violation_uses_its_own_kind_not_field_agreement(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
-    _write(store, "2026-08-01-alpha.md", _entry("2026-08-01-alpha", "COMMITTED-NEXT"))
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "[serves]" in result.stdout, result.stdout
-    assert "[field-agreement]" not in result.stdout, (
-        "a missing 'serves' field is not a frontmatter<->body disagreement:\n"
-        f"{result.stdout}"
-    )
-
-
-def test_malformed_serves_violation_uses_its_own_kind_not_field_agreement(tmp_path):
-    store = tmp_path / "backlog"
-    store.mkdir()
-    (tmp_path / "PURPOSE.md").write_text("## North Star\n\nSomething.\n", encoding="utf-8")
-    text = _entry("2026-08-01-alpha", "COMMITTED-NEXT").replace(
-        "status: COMMITTED-NEXT\n", "status: COMMITTED-NEXT\nserves: unrelated\n"
-    )
-    _write(store, "2026-08-01-alpha.md", text)
-
-    result = _run_validate(store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "[serves]" in result.stdout, result.stdout
-    assert "[field-agreement]" not in result.stdout, (
-        "a malformed 'serves' value is not a frontmatter<->body "
-        f"disagreement:\n{result.stdout}"
-    )
-
-
-# Whole-branch review F6 (2026-08-20): the charter (rules for editing
-# DIRECTION.md) moved out of DIRECTION.md itself and into
-# loom-code/hooks/family-reception.md § DIRECTION.md charter. Three
-# in-code statements were never updated after that move and now claim
-# DIRECTION.md carries "its own charter header" — it does not.
-
-
-def test_direction_write_missing_file_message_does_not_claim_charter_header(
-    tmp_path,
-):
-    store, direction = _direction_store(tmp_path, [])
-    direction.unlink()
-
-    result = _run_direction_write(direction, store)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "charter header" not in result.stdout, (
-        "DIRECTION.md no longer carries its own charter header — the "
-        f"charter moved to family-reception.md:\n{result.stdout}"
-    )
-
-
-def test_backlog_index_source_does_not_claim_direction_owns_its_charter_header():
-    text = BACKLOG_SCRIPT.read_text(encoding="utf-8")
-    assert "the file's own charter header" not in text, (
-        "backlog_index.py still claims DIRECTION.md's ## Now section is "
-        "machine-owned per its own charter header — the charter moved to "
-        "family-reception.md"
-    )
-    assert "the direction file's charter header" not in text, (
-        "backlog_index.py still claims splice_direction_now's section is "
-        "machine-owned per the direction file's own charter header — the "
-        "charter moved to family-reception.md"
-    )
+    assert result.returncode != 0, result.stdout + result.stderr

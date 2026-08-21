@@ -1,10 +1,10 @@
 """Tests for check_north_star_link.py — the betting-moment checker that
-every COMMITTED-NEXT backlog entry carries a well-formed `serves:` line
+every `bet` backlog entry carries a well-formed `serves:` line
 against `docs/loom/PURPOSE.md` (grammar SSOT:
 `backlog_index._is_well_formed_serves`).
 
 Exercised as a CLI subprocess (the actual interface) — same convention
-as `test_check_onramp_choice.py` / `test_check_direction_freshness.py`.
+as `test_check_onramp_choice.py`.
 
 Stdlib only (subprocess + pathlib).
 """
@@ -54,25 +54,25 @@ def test_source_does_not_parse_bold_labels():
     assert "**Success:**" not in source
 
 
-def test_exit_0_when_every_committed_next_entry_is_well_formed(tmp_path):
+def test_exit_0_when_every_bet_entry_is_well_formed(tmp_path):
     store = tmp_path / "docs" / "loom" / "backlog"
     store.mkdir(parents=True, exist_ok=True)
     (tmp_path / "docs" / "loom" / "PURPOSE.md").write_text(
         "Some long-horizon purpose.\n", encoding="utf-8"
     )
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
-    _write_entry(store, "entry-b", "OPEN", None)
+    _write_entry(store, "entry-a", "bet", "ships the thing")
+    _write_entry(store, "entry-b", "open", None)
 
     result = _run(store)
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
 
-def test_exit_0_when_no_committed_next_entries_and_no_purpose_md(tmp_path):
+def test_exit_0_when_no_bet_entries_and_no_purpose_md(tmp_path):
     """A fresh repo with nothing committed yet must not be blocked —
     the Decision's 'never block a fresh repo with nothing in it yet.'"""
     store = tmp_path / "docs" / "loom" / "backlog"
-    _write_entry(store, "entry-a", "OPEN", None)
+    _write_entry(store, "entry-a", "open", None)
 
     result = _run(store)
 
@@ -88,13 +88,17 @@ def test_exit_1_on_missing_store_path(tmp_path):
     assert str(missing) in result.stderr
 
 
-def test_exit_2_names_offending_entry_and_question(tmp_path):
+def test_bet_entry_without_serves_exits_2(tmp_path):
+    """The checker keys on the `bet` status (not the retired
+    all-caps literal it used to compare against) — a live `bet` entry
+    with no `serves:` line must be caught, not silently skipped as
+    nothing-to-check."""
     store = tmp_path / "docs" / "loom" / "backlog"
     store.mkdir(parents=True, exist_ok=True)
     (tmp_path / "docs" / "loom" / "PURPOSE.md").write_text(
         "Some long-horizon purpose.\n", encoding="utf-8"
     )
-    _write_entry(store, "entry-c", "COMMITTED-NEXT", None)
+    _write_entry(store, "entry-c", "bet", None)
 
     result = _run(store)
 
@@ -110,7 +114,7 @@ def test_exit_2_asks_for_purpose_md_when_absent_but_entries_exist(tmp_path):
     defect per the task brief)."""
     store = tmp_path / "docs" / "loom" / "backlog"
     purpose_path = tmp_path / "docs" / "loom" / "PURPOSE.md"
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store, "entry-a", "bet", "ships the thing")
 
     result = _run(store)
 
@@ -122,6 +126,22 @@ def test_exit_2_asks_for_purpose_md_when_absent_but_entries_exist(tmp_path):
 _TEMPLATE = (Path(__file__).parent / "templates" / "PURPOSE.md").read_text(encoding="utf-8")
 
 
+def test_retired_status_fails_loudly_instead_of_clean_pass(tmp_path):
+    """A store holding only an out-of-vocabulary status (e.g. a retired
+    `PARKED` entry) must not be silently dropped as nothing-to-check —
+    it must fail loudly, matching `live_bet_names`'s ValueError posture
+    over the same bytes (`check_queue_relation.py`), not report a clean
+    'OK — no live bet backlog entries to check yet.'"""
+    store = tmp_path / "docs" / "loom" / "backlog"
+    _write_entry(store, "entry-a", "PARKED", None)
+
+    result = _run(store)
+
+    assert result.returncode == 1, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "entry-a" in result.stderr
+    assert "PARKED" in result.stderr
+
+
 def test_exit_2_when_purpose_md_is_unedited_template(tmp_path):
     """A scaffolded-but-untouched PURPOSE.md must not silently pass — the
     Decision's whole point is that a filled-in placeholder is worse than
@@ -131,7 +151,7 @@ def test_exit_2_when_purpose_md_is_unedited_template(tmp_path):
     purpose_path = tmp_path / "docs" / "loom" / "PURPOSE.md"
     purpose_path.parent.mkdir(parents=True, exist_ok=True)
     purpose_path.write_text("<!-- scaffolded by loom-init v9.9.9 -->\n" + _TEMPLATE, encoding="utf-8")
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store, "entry-a", "bet", "ships the thing")
 
     result = _run(store)
 
@@ -142,14 +162,14 @@ def test_exit_2_when_purpose_md_is_unedited_template(tmp_path):
 
 def test_absent_and_template_messages_are_distinguishable(tmp_path):
     store_a = tmp_path / "a" / "docs" / "loom" / "backlog"
-    _write_entry(store_a, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store_a, "entry-a", "bet", "ships the thing")
     result_absent = _run(store_a)
 
     store_b = tmp_path / "b" / "docs" / "loom" / "backlog"
     purpose_b = tmp_path / "b" / "docs" / "loom" / "PURPOSE.md"
     purpose_b.parent.mkdir(parents=True, exist_ok=True)
     purpose_b.write_text(_TEMPLATE, encoding="utf-8")
-    _write_entry(store_b, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store_b, "entry-a", "bet", "ships the thing")
     result_template = _run(store_b)
 
     assert result_absent.returncode == 2
@@ -165,7 +185,7 @@ def test_exit_0_when_purpose_is_not_yet_with_reason(tmp_path):
         "# Purpose\n\n**Why:** not yet — no product decision yet\n",
         encoding="utf-8",
     )
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store, "entry-a", "bet", "ships the thing")
 
     result = _run(store)
 
@@ -177,7 +197,7 @@ def test_bare_not_yet_does_not_resolve(tmp_path):
     purpose_path = tmp_path / "docs" / "loom" / "PURPOSE.md"
     purpose_path.parent.mkdir(parents=True, exist_ok=True)
     purpose_path.write_text("# Purpose\n\n**Why:** not yet\n", encoding="utf-8")
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store, "entry-a", "bet", "ships the thing")
 
     result = _run(store)
 
@@ -193,7 +213,7 @@ def test_exit_0_when_purpose_is_genuinely_written(tmp_path):
         "**Done when:** every team member can find a doc in <30s.\n",
         encoding="utf-8",
     )
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store, "entry-a", "bet", "ships the thing")
 
     result = _run(store)
 
@@ -217,8 +237,34 @@ def test_exit_0_when_real_template_why_replaced_with_not_yet_reason(tmp_path):
     )
     assert edited != _TEMPLATE  # sanity: the replace actually matched the shipped text
     purpose_path.write_text(edited, encoding="utf-8")
-    _write_entry(store, "entry-a", "COMMITTED-NEXT", "ships the thing")
+    _write_entry(store, "entry-a", "bet", "ships the thing")
 
     result = _run(store)
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+
+
+def test_unreadable_purpose_file_exits_1_not_a_traceback(tmp_path):
+    """Round-4 finding (arm B): round 3 guarded the reads in
+    `check_queue_relation.py` and its commit message even cited THIS
+    file's `is_dir()` guard as the model — but the sweep went one
+    direction and did not come back. `determine_purpose_state()`'s own
+    `read_text` stayed bare, so an existing-but-unreadable PURPOSE.md
+    died on a raw traceback.
+
+    Exit 1, not 2: an unreadable file is a different fact from an absent
+    one, and only the absent case is a question for the user."""
+    store = tmp_path / "docs" / "loom" / "backlog"
+    _write_entry(store, "a-bet", "bet", "the purpose")
+    purpose = tmp_path / "docs" / "loom" / "PURPOSE.md"
+    purpose.write_text("Ship the thing.\n", encoding="utf-8")
+    purpose.chmod(0o000)
+
+    try:
+        result = _run(store)
+    finally:
+        purpose.chmod(0o644)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    assert "unreadable" in result.stderr

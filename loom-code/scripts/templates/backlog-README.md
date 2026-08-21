@@ -11,29 +11,24 @@
 
 ## Frontmatter contract
 
-Every entry (live or archived) carries this frontmatter:
+Every entry — live or under `archive/` — carries this frontmatter:
 
 ```
 ---
 name: <YYYY-MM-DD-slug — identical to the filename without .md>
 description: <one line; what the item is>
-status: <COMMITTED-NEXT | OPEN | PARKED | UPSTREAM | SHIPPED | CLOSED — SUPERSEDED | archived>
+status: <open | bet | closed>
+blocked: <optional; why this cannot be picked up now — legal only on an open entry>
 origin: <optional; where the item came from>
 start: <optional; the start / re-trigger condition>
-archived: <optional; required when status is archived — YYYY-MM-DD the entry was archived>
-serves: <required only when status is COMMITTED-NEXT and this repo has docs/loom/PURPOSE.md; otherwise optional>
+serves: <required only when status is bet and this repo has docs/loom/PURPOSE.md; otherwise optional>
 ---
 ```
 
-`archived` is stamped when an entry is closed (see the Archive rule
-below) and is what the generated index's compact `## Archived` line
-(`- <name> (archived <date>)`) reads its date from. It carries no
-meaning on a live entry and must not be set on one.
-
 `serves` states how the entry connects to the repo's north star. It is
-required only when BOTH hold: `status` is `COMMITTED-NEXT`, and the
+required only when BOTH hold: `status` is `bet`, and the
 repo has a `docs/loom/PURPOSE.md`. A repo with no such file is NOT
-silently exempt — betting on a COMMITTED-NEXT entry there prompts the
+silently exempt — betting on a `bet` entry there prompts the
 author to write one first, rather than skipping the field. Where
 required, the value must take one of a closed two-form grammar:
 `serves: unrelated — <reason>` (em dash; the reason clause after
@@ -42,12 +37,15 @@ violation), or `serves: <any other non-empty text>` describing the
 link. `scripts/backlog_index.py --validate` enforces both the
 presence rule and the grammar.
 
-Live entries — those directly under `docs/loom/backlog/`, excluding
-`archive/` — carry any status **except** `archived`. Entries under
-`docs/loom/backlog/archive/` carry `status: archived` and no other value.
+An entry under `docs/loom/backlog/archive/` carries `status: closed` and
+no other value — `--validate` reports an `[archive-tier]` violation for
+anything else. The rule runs one way only: a live entry directly under
+`docs/loom/backlog/` may equally carry `closed`, because the close-out
+flip and the physical move into `archive/` are separate steps (see the
+Close duty verb and the Archive rule below).
 
 **`description` never restates the status.** Write `description: the CI
-lane drops coverage for foreign carrier files`, never `… (OPEN)`. The
+lane drops coverage for foreign carrier files`, never `… (open)`. The
 status lives in the `status` field and nowhere else: a copy in the
 description is a second source of truth that drifts the moment the entry
 is reclassified, and the generated index already renders each entry under
@@ -97,43 +95,35 @@ must be able to act on it. State what the item is, why it matters, and
 what the next step is, inside the entry itself. Do not write a body
 that only makes sense to someone who already knows the context.
 
-## Closed status vocabulary
+## Status word definitions
 
-The `status` field is a closed enum — exactly these seven values, no
-others. Pick by what is *blocking the item*, not by how important it
-feels:
+This is the canonical definition of every status word and the
+`blocked:` field — meaning, who sets it, when it flips, what duties
+attach. Every skill surface that reads or flips a status points at
+this block; none paraphrases it.
 
-- `COMMITTED-NEXT` — decided, scheduled, and active/claimed for the
-  parallel set. Nothing is blocking it but our own turn to start. When
-  `docs/loom/DIRECTION.md` exists, this queue is mirrored into its
-  generated `## Now` section by `scripts/backlog_index.py
-  --direction-write docs/loom/DIRECTION.md` (see §Verbs' Bet flow). This is a PARALLEL ACTIVE
-  SET, not a serial queue: one entry typically maps to one
-  worktree/lane, and the ≤5 cap is parallel-steering capacity. See the
-  loom-code plugin's `hooks/direction-charter.md` — the convention's
-  SSOT.
-- `OPEN` — agreed to be worth doing, not yet scheduled. Anyone may
-  pick it up.
-- `PARKED` — deliberately not being done for now, with the reason
-  recorded in the body. Distinct from `OPEN`: a parked item needs a
-  condition to change before it is eligible again, which is what
-  `start:` records.
-- `UPSTREAM` — the fix belongs to something this repo does not own (an
-  external tool, another project, a file outside this repo). We can
-  describe and track it here; we cannot land it here.
-- `SHIPPED` — the work is done and merged, but the entry is being kept
-  live deliberately, usually because a follow-up or measurement is
-  still attached to it. An entry with nothing left attached should be
-  archived instead.
-- `CLOSED — SUPERSEDED` — no longer applicable because a later
-  decision replaced it. The body should name what superseded it.
-- `archived` — closed and moved to `archive/`; see the Archive rule
-  below. Never used on a live entry.
+| Word | Means | Set by | Flips when | Duties attached |
+|---|---|---|---|---|
+| `open` | Recorded, not chosen. The default at creation; may stay open forever. | Anyone filing an entry | → `bet` at a betting moment; → `closed` when shipped/superseded/abandoned | Optional `start:` memo (prose trigger, never machine-read). Optional `blocked: <reason>` — present ⇒ excluded from `--ready`. |
+| `bet` | Chosen by the user at a close-out betting moment as what the repo works on next. A bet can be lost — dropping one back to `open` is legal and carries no ceremony beyond removing the promotion. | **User only** — agents never promote | → `closed` at that arc's close-out; → `open` if the user withdraws it | Must carry a well-formed `serves:` line (`check_north_star_link.py`); the queue-relation gate resolves `in-queue:`/`displaces:` against live bets. |
+| `closed` | This line ended — shipped, superseded, or deliberately abandoned. The reason is one body line naming the evidence (branch/PR/decision), not a status variant. | Agent at close-out, per the user's instruction | Terminal (an entry under `archive/` is `closed` by construction) | Body line naming the evidence. |
+| `blocked:` (field, not a status) | Why this `open` entry cannot be picked right now. | Whoever knows the fact | Delete the line when the impediment lifts — the entry re-enters `--ready` | Legal only on an `open` entry — `--validate` rejects it elsewhere (`_check_blocked`); otherwise a filter flag, `--ready` is its only reader. |
 
-The first six are live statuses. `archived` is reserved for entries
-that have been closed and moved to `archive/` (see below) — a live
-entry must never carry `status: archived`, and an archived entry must
-never carry any other status.
+### `bet` is a parallel active set, not a serial queue
+
+A `bet` entry is decided, scheduled, and active/claimed for the parallel
+set — nothing is blocking it but our own turn to start. One entry
+typically maps to one worktree/lane; the ≤5 cap on the set (Verbs →
+Ready query below) is parallel-steering capacity, not a serial queue
+depth.
+
+`open` items may still be picked up by anyone even before a `bet`
+promotion — the promotion step exists for the parallel set's capacity
+limit, not as a gate on who may act.
+
+The `status` field is otherwise a closed enum of exactly the three
+values in the frontmatter contract above (`open` / `bet` / `closed`);
+`--validate` rejects any other value as outside the vocabulary.
 
 ## Verbs
 
@@ -141,11 +131,11 @@ Four flows read, close, or promote items in this store; everything
 else only writes it.
 
 - **Ready query** — `python3 scripts/backlog_index.py --ready` is the
-  store's read surface: it prints the `COMMITTED-NEXT` queue (the
+  store's read surface: it prints the `bet` queue (the
   "now" queue, file-date order — a listing order, not an execution
   order; store policy — not enforced by the tool — keep it to ≤5
   entries: a sixth commitment means re-judging the queue) followed by
-  `OPEN` candidates with their `start:` conditions. The script path
+  `open` candidates with their `start:` conditions. The script path
   resolves per the generated-index section below (repo-root first,
   else the loom-code plugin copy).
 - **Close duty** — `finishing-a-development-branch`'s Step 8
@@ -157,31 +147,27 @@ else only writes it.
   later.
 - **Kickoff read** — `brainstorming`'s Axis 0 Backlog ready check runs
   the ready query at arc kickoff, so the queue informs new work.
-- **Bet (promote)** — promoting a backlog entry into `COMMITTED-NEXT`
+- **Bet (promote)** — promoting a backlog entry into `bet`
   is **user-only**; agents never promote. Triggered by
   `finishing-a-development-branch`'s close-out when that close-out
-  flips a backlog entry (the duty lives in its Backlog-close row), the
-  `COMMITTED-NEXT` queue is empty after the flip, and the repo has
-  `docs/loom/DIRECTION.md` — or manually at any time. Candidates: the
-  active roadmap entries' next arcs first (same-lane first — when an
-  arc of theme X just closed, theme X's next arc leads the list), then
-  the ready query's `OPEN` output. To promote, the user edits the
-  chosen entry's `status:` to `COMMITTED-NEXT`; `--write` and
-  `--direction-write` then regenerate `BACKLOG.md` and DIRECTION.md's
-  `## Now` from it. Those flags belong to the same script, resolved per
-  the generated-index section below (repo-root first, else the
-  loom-code plugin copy).
+  flips a backlog entry (the duty lives in its Backlog-close row) and
+  the `bet` queue is empty after the flip — or manually at
+  any time. Candidates: the active roadmap entries' next arcs first
+  (same-lane first — when an arc of theme X just closed, theme X's
+  next arc leads the list), then the ready query's `open` output. To
+  promote, the user edits the chosen entry's `status:` to
+  `bet`; `--write` then regenerates `BACKLOG.md` from it.
+  The flag belongs to the same script, resolved per the
+  generated-index section below (repo-root first, else the loom-code
+  plugin copy).
 
 ## Roadmap entries — a named pattern, not a new file type
 
 A **roadmap entry** is an ordinary backlog entry whose body is an
-ordered arc list with dependency notes, serving one DIRECTION theme —
-not a new file type, not a DIRECTION section. `docs/loom/DIRECTION.md`'s
-`## Next` lines may point at one by filename (the filename's date
-prefix is a file identifier, exempt from DIRECTION.md's no-dates
-rule). As each arc ships, its evidence line accumulates in the entry's
-body rather than opening a new entry per arc, so one theme's whole
-history stays readable in one place.
+ordered arc list with dependency notes, serving one theme across
+multiple arcs — not a new file type. As each arc ships, its evidence
+line accumulates in the entry's body rather than opening a new entry
+per arc, so one theme's whole history stays readable in one place.
 
 ## Filename rule
 
@@ -239,17 +225,14 @@ python3 <loom-code plugin>/scripts/archive_change_folder.py <identifier> [root] 
 For a backlog entry, `--unit file` and `<identifier>` is the entry's
 filename including `.md` (e.g. `2026-08-01-example-entry.md`).
 
-Under the hood, closing an entry means:
+Under the hood, archiving an entry means one thing: moving the file
+from `docs/loom/backlog/<name>.md` to
+`docs/loom/backlog/archive/<name>.md`. The entry's `status:` is already
+`closed` by then — the close-out flip is a separate, earlier step — and
+the move must leave it that way.
 
-1. Move the entry file from `docs/loom/backlog/<name>.md` to
-   `docs/loom/backlog/archive/<name>.md`.
-2. Stamp `status: archived` into the moved file's frontmatter.
-3. Stamp `archived: <YYYY-MM-DD>` (the archive date) into the same
-   frontmatter — the generated index's `## Archived` line needs it and
-   has no other source for it.
-
-Knowing these three steps lets you verify the script's result; it is
-not an invitation to perform them by hand. Archiving **never renames**
+Knowing what the move does lets you verify the script's result; it is
+not an invitation to perform it by hand. Archiving **never renames**
 the file (the filename rule above still applies) and **never deletes**
 the file. The entry's full body and history remain readable at its new
 path indefinitely.

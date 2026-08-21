@@ -1,7 +1,7 @@
 ---
 name: 2026-08-02-backlog-index-two-frontmatter-readers-disagree-on-duplicate-keys
 description: four generator and reader nits in scripts/backlog_index.py and its neighbours, all latent today
-status: OPEN
+status: open
 origin: whole-branch review of the docs-backlog-one-entry-per-file arc, 2026-08-02 — green-level findings deferred out of that branch
 start: the next substantive edit to scripts/backlog_index.py, or the first time an entry file is found with duplicate frontmatter keys
 ---
@@ -14,6 +14,16 @@ the three this same remediation round added (this entry among them) —
 found none.
 
 **1. Two readers of the same frontmatter disagree on duplicate keys.**
+_(CLOSED 2026-08-21 by the dissolve-direction-layer arc, by deletion: the
+second reader no longer exists. `archive_change_folder.py`'s `_read_status`
+is gone — once `archived` was retired from the status vocabulary, a
+frontmatter status could no longer distinguish "closed and live" from
+"already archived", so the archiver stopped reading status at all and keys
+its idempotency guard on the archive tier instead. Findings 2, 3 and 4 below
+are UNCHANGED and are why this entry stays `open`; in particular finding 2's
+`name`-not-`path.stem` link target is still live at `backlog_index.py:483`
+and `:605`.)_
+
 `scripts/backlog_index.py`'s `parse_frontmatter` is **last-wins**;
 `loom-code/scripts/archive_change_folder.py`'s `_read_status` uses a
 regex `search`, which is **first-match**. So a file carrying
@@ -63,3 +73,14 @@ re-deriving the shape from the plan later.
 2026-08-10 note: since PR #680 the canonical code lives at
 `loom-code/scripts/backlog_index.py` (the repo-root `scripts/backlog_index.py`
 is an exec shim); the code references in this entry refer to the canonical file.
+
+2026-08-21 note: finding 1 (the two readers' duplicate-key disagreement)
+shipped via docs/loom/plans/2026-08-21-dissolve-direction-layer.md Task 3.
+The second frontmatter reader named above no longer exists in the
+codebase at all (a later debt-clearing pass on the same task deleted it
+as a function with no production caller left); the last-wins property
+it existed to pin now lives directly against `parse_frontmatter` in
+`test_backlog_index.py`. There is now only one frontmatter reader in
+this codebase, so the disagreement this entry describes is structurally
+gone, not just reconciled. Findings 2-4 were passed by on this touch and
+stay open.

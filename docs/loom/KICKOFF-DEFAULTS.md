@@ -1,17 +1,4 @@
-# Direction — monkey-skills
-
-> Charter (rules for editing this file) owned by
-> `loom-code/hooks/direction-charter.md` — read there, never copy back
-> here.
-
-## Now
-
-_(queue empty — bet at the next close-out)_
-
-## Next
-
-- investing-toolkit 三大表＋管理層 KPI 完整歷史入 kpi_store
-- loom-code replay matrix——skill 文本改動的客觀迴歸量測
+# Kickoff Defaults — monkey-skills
 
 ## On-ramp standing choices
 

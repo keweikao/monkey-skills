@@ -72,16 +72,12 @@ multi-state new work.
 **Backlog ready check** — when the target repo has
 `docs/loom/backlog/`, run `python3 scripts/backlog_index.py --ready`
 before settling the arc's scope, and surface to the user any
-COMMITTED-NEXT items plus OPEN items related to the seed idea (no
+`bet` items plus `open` items related to the seed idea (no
 store, or neither copy of `backlog_index.py` → skip silently, N/A).
 Repo-root `scripts/backlog_index.py` when it exists; otherwise run
 the plugin-shipped copy:
 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/backlog_index.py" --ready`
-(a load-time substitution, not a run-time shell variable). When
-the target repo has `docs/loom/DIRECTION.md` — with or without a
-backlog store — read it and surface its `## Now` and `## Next`
-sections alongside the ready queue (no file → skip silently, same
-posture as the no-store case above).
+(a load-time substitution, not a run-time shell variable).
 The queue informs the arc decision — it never hijacks it: the user's seed
 idea stays the default subject. This check is independent of the
 Negative guard above — a bug-fix or refactor arc that skips the rest
@@ -89,7 +85,7 @@ of Axis 0 still runs the ready check (backlog entries are often
 exactly bug-fix shaped).
 
 **No queue layer yet** — when the ready check skips because the target
-repo has no `docs/loom/backlog/` store **and no `docs/loom/DIRECTION.md`**
+repo has no `docs/loom/backlog/` store **and no `docs/loom/KICKOFF-DEFAULTS.md`**
 (the verb refuses on either existing — never offer a guaranteed
 refusal), offer scaffolding one **ONCE**
 via the plugin-shipped verb:
@@ -109,9 +105,9 @@ and blocks the plan. When
 neither copy of `backlog_index.py` resolves, stay N/A as today — the
 scaffold verb ships alongside it, so there is no offer to make.
 
-If a criteria row triggers, first check `docs/loom/DIRECTION.md`'s
+If a criteria row triggers, first check `docs/loom/KICKOFF-DEFAULTS.md`'s
 `## On-ramp standing choices` — a standing entry for every fired row means
-write `fired: rows <n> — standing <direct|detour> (DIRECTION.md)` in the
+write `fired: rows <n> — standing <direct|detour> (KICKOFF-DEFAULTS.md)` in the
 `## Design-side on-ramp` line and continue without asking. Otherwise write
 `pending` and surface the recommendation **ONCE** as a standalone ask (per
 `loom-code/hooks/family-reception.md` §On-ramp — point, don't copy),

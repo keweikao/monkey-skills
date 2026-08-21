@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Betting-moment checker: every live `COMMITTED-NEXT` backlog entry
+"""Betting-moment checker: every live `bet` backlog entry
 must carry a well-formed `serves:` line, checked against
 `docs/loom/PURPOSE.md` — same family and exit-code contract as
-`check_onramp_choice.py` / `check_direction_freshness.py`.
+`check_onramp_choice.py`.
 
 Grammar SSOT: `backlog_index._is_well_formed_serves` — this script
 imports it rather than re-implementing it, so the two-form grammar
@@ -11,7 +11,7 @@ the two checkers that enforce it (plan Task 1's `--validate` path, and
 this betting-moment path).
 
 `PURPOSE.md` is a FOUNDATIONAL artifact (the arc's Decision), not an
-optional one: a repo with live COMMITTED-NEXT entries but no
+optional one: a repo with live `bet` entries but no
 `PURPOSE.md` is not silently exempt — it is asked to write one. A
 fresh repo with nothing committed yet is never blocked, so absence of
 the file is only checked once a live entry exists. This script treats the file's body as wholly opaque — it never parses
@@ -24,20 +24,27 @@ convention with a different sub-structure.
 
 Exit codes:
 
-    0 — every live COMMITTED-NEXT entry has a well-formed `serves:`
+    0 — every live `bet` entry has a well-formed `serves:`
         line and `docs/loom/PURPOSE.md` exists, OR there are no live
-        COMMITTED-NEXT entries at all (nothing to bet on yet).
+        `bet` entries at all (nothing to bet on yet).
     1 — the given backlog store path does not exist or is not a
-        readable directory.
+        readable directory, OR `docs/loom/PURPOSE.md` exists but is
+        unreadable (distinct from absent, which is exit 2 — absence is a
+        question for the user, unreadability is a permissions fix), OR an
+        entry's `status` falls outside the closed status vocabulary (`backlog_index.CLOSED_STATUS_VOCABULARY`)
+        — a malformed entry fails loudly rather than being silently
+        dropped from the live-bet set it might belong to (mirrors
+        `check_queue_relation.py`'s `live_bet_names()` over the same
+        bytes).
     2 — one of three distinct causes, distinguishable by message:
-        (a) a live COMMITTED-NEXT entry exists but `PURPOSE.md` is
+        (a) a live `bet` entry exists but `PURPOSE.md` is
             absent — stderr asks the user to write one;
         (b) `PURPOSE.md` exists but is still unanswered — either the
             shipped template's placeholder text is untouched, or the
             file records a bare `not yet` deferral with no reason —
             stderr names the template state and the `not yet — <reason>`
             escape hatch;
-        (c) a live COMMITTED-NEXT entry lacks a well-formed `serves:`
+        (c) a live `bet` entry lacks a well-formed `serves:`
             line — stderr names the offending entry and the question
             the user must answer.
 
@@ -66,7 +73,11 @@ import re
 import sys
 from pathlib import Path
 
-from backlog_index import _entry_files, _is_well_formed_serves, _purpose_path_for, parse_frontmatter
+from backlog_index import (
+    _is_well_formed_serves,
+    _purpose_path_for,
+    live_entries,
+)
 
 # The shipped template's own placeholder text (templates/PURPOSE.md) —
 # loom-code controls this literal string. Its presence means the file
@@ -94,20 +105,17 @@ _NOT_YET_RE = re.compile(
 )
 
 
-def find_committed_next_entries(store: Path) -> list[tuple[str, dict[str, str]]]:
-    """Every live COMMITTED-NEXT entry (in `_entry_files()` order) as
+def find_bet_entries(store: Path) -> list[tuple[str, dict[str, str]]]:
+    """Every live `bet` entry (in `_entry_files()` order) as
     `(display_name, frontmatter)`. Archived entries are never checked —
-    a closed entry cannot be re-bet."""
-    entries = []
-    for path, is_archived in _entry_files(store):
-        if is_archived:
-            continue
-        frontmatter = parse_frontmatter(path.read_text(encoding="utf-8"))
-        if frontmatter.get("status") != "COMMITTED-NEXT":
-            continue
-        name = frontmatter.get("name", path.stem)
-        entries.append((name, frontmatter))
-    return entries
+    a closed entry cannot be re-bet.
+
+    Raises ValueError (caller decides exit codes) on a status outside the
+    closed status vocabulary — the guard lives once, in
+    `backlog_index.iter_validated_entries()`, which `live_entries()`
+    walks: malformed frontmatter must fail loudly, never be silently
+    dropped as nothing-to-check."""
+    return live_entries(store, "bet")
 
 
 def find_offending_entry(
@@ -132,7 +140,7 @@ def determine_purpose_state(purpose_path: Path) -> str:
     present elsewhere in the file — the deferral IS the answer."""
     if not purpose_path.is_file():
         return "absent"
-    text = purpose_path.read_text(encoding="utf-8")
+    text = purpose_path.read_text(encoding="utf-8")  # OSError -> main() exit 1
     not_yet = _NOT_YET_RE.search(text)
     if not_yet is not None:
         reason = not_yet.group("reason")
@@ -146,10 +154,10 @@ def determine_purpose_state(purpose_path: Path) -> str:
 
 def build_purpose_missing_question(purpose_path: Path) -> str:
     """The exact user-facing question when `PURPOSE.md` is absent but a
-    live COMMITTED-NEXT entry exists — shared by `main()`'s stderr
+    live `bet` entry exists — shared by `main()`'s stderr
     message."""
     return (
-        f"no {purpose_path} found, but a COMMITTED-NEXT backlog entry "
+        f"no {purpose_path} found, but a bet backlog entry "
         "exists. What is this repo's purpose? Write it to "
         f"{purpose_path} before betting on this entry."
     )
@@ -172,7 +180,7 @@ def build_serves_question(name: str, purpose_path: Path) -> str:
     """The exact user-facing question for an offending entry — shared
     by `main()`'s stderr message."""
     return (
-        f"backlog entry '{name}' is COMMITTED-NEXT but has no well-formed "
+        f"backlog entry '{name}' is a bet but has no well-formed "
         f"'serves' line. How does it serve the purpose recorded in "
         f"{purpose_path}? Record the answer as 'serves: <how this "
         "serves the purpose>' or 'serves: unrelated — <reason>'."
@@ -181,7 +189,7 @@ def build_serves_question(name: str, purpose_path: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Check every live COMMITTED-NEXT backlog entry "
+        description="Check every live bet backlog entry "
                     "carries a well-formed 'serves:' line against "
                     "docs/loom/PURPOSE.md."
     )
@@ -198,20 +206,32 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        entries = find_committed_next_entries(store)
+        entries = find_bet_entries(store)
     except OSError as exc:
         print(f"Error: backlog store at {store} is unreadable ({exc}).", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     if not entries:
         print(
-            "North-star link check: OK — no live COMMITTED-NEXT backlog "
+            "North-star link check: OK — no live bet backlog "
             "entries to check yet."
         )
         return 0
 
     purpose_path = _purpose_path_for(store)
-    purpose_state = determine_purpose_state(purpose_path)
+    # Same guard as the store read above: an unreadable PURPOSE.md is a
+    # different fact from an absent one (absent is a legitimate exit-2
+    # question to the user), and neither may surface as a traceback.
+    try:
+        purpose_state = determine_purpose_state(purpose_path)
+    except OSError as exc:
+        print(
+            f"Error: {purpose_path} is unreadable ({exc}).", file=sys.stderr
+        )
+        return 1
     if purpose_state == "absent":
         print(f"Error: {build_purpose_missing_question(purpose_path)}", file=sys.stderr)
         return 2
@@ -222,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     offending = find_offending_entry(entries)
     if offending is None:
         print(
-            "North-star link check: OK — every live COMMITTED-NEXT entry "
+            "North-star link check: OK — every live bet entry "
             "carries a well-formed 'serves' line."
         )
         return 0

@@ -87,10 +87,10 @@ Bulleted list of adjacent things explicitly NOT in this change. Each bullet shou
 
 - `not fired — <reason>`
 - `fired: rows <comma-separated row numbers> — user chose <detour|direct>`
-- `fired: rows <comma-separated row numbers> — standing <detour|direct> (DIRECTION.md)`
+- `fired: rows <comma-separated row numbers> — standing <detour|direct> (KICKOFF-DEFAULTS.md)`
 - `pending`
 
-Any other wording is *unresolved* — never treated as a pass (lookalike wording does not resolve the gate). `pending` is what the agent writes until the user has answered; it is never the agent's own default. The `standing` form is legal only when `docs/loom/DIRECTION.md`'s `## On-ramp standing choices` section names every row cited on that line — that section's own grammar is owned by `loom-code/hooks/family-reception.md`, not repeated here.
+Any other wording is *unresolved* — never treated as a pass (lookalike wording does not resolve the gate). `pending` is what the agent writes until the user has answered; it is never the agent's own default. The `standing` form is legal only when `docs/loom/KICKOFF-DEFAULTS.md`'s `## On-ramp standing choices` section names every row cited on that line — that section's own grammar is owned by `loom-code/hooks/family-reception.md`, not repeated here.
 
 ### `## Queue relation`
 
@@ -102,7 +102,7 @@ Any other wording is *unresolved* — never treated as a pass (lookalike wording
 
 `in-queue: <entry-name>` states that this arc is the queue entry of that name. `unqueued — <reason>` states that this arc is not in the queue, and states the reason. `displaces: <entry-name> — <reason>` states that this arc goes before a queued entry, and states the reason.
 
-A name cited by `in-queue:` or `displaces:` must also exist as an entry in `docs/loom/DIRECTION.md`'s `## Now` section — a well-formed line naming an absent entry is *unresolved*, the same as any other unresolved wording below; a typo must not silently satisfy the gate. When `## Now` is empty, `in-queue:` and `displaces:` can never resolve — write `unqueued — <reason>` until an entry exists there. An empty `## Now` is a normal resting state, not a setup failure: the queue is filled by betting at a close-out, so a repo between arcs legitimately has none, and `unqueued` is the right answer rather than a workaround.
+A name cited by `in-queue:` or `displaces:` must also exist as a live `status: bet` entry under `docs/loom/backlog/` — a well-formed line naming an absent entry is *unresolved*, the same as any other unresolved wording below; a typo must not silently satisfy the gate. When there are no live bet entries, `in-queue:` and `displaces:` can never resolve — write `unqueued — <reason>` until one exists. No live bet entries is a normal resting state, not a setup failure: the queue is filled by betting at a close-out, so a repo between arcs legitimately has none, and `unqueued` is the right answer rather than a workaround.
 
 Any other wording is *unresolved* — never treated as a pass (lookalike wording does not resolve the gate). `pending` is what the agent writes until the user has answered; it is never the agent's own default.
 
@@ -196,7 +196,7 @@ Copy-paste this skeleton:
 
 ## Design-side on-ramp
 
-(one of: `not fired — <reason>` / `fired: rows <list> — user chose <detour|direct>` / `fired: rows <list> — standing <detour|direct> (DIRECTION.md)` / `pending`; any other wording is unresolved)
+(one of: `not fired — <reason>` / `fired: rows <list> — user chose <detour|direct>` / `fired: rows <list> — standing <detour|direct> (KICKOFF-DEFAULTS.md)` / `pending`; any other wording is unresolved)
 
 ## Queue relation
 

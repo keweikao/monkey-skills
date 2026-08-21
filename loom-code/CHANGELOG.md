@@ -5,6 +5,67 @@ All notable changes to the `loom-code` plugin (formerly `code-toolkit`) will be 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.92.0] — 2026-08-21 — direction layer dissolved
+
+### Removed
+
+- **`DIRECTION.md`, its generator verbs, charter, and template all
+  deleted.** The direction layer's document side no longer exists: no
+  live reader remains once the `## Now` view moved out (below) and the
+  queue gate stopped resolving against it.
+
+### Changed
+
+- **The `## Now` materialized view is gone; the live answer is a query.**
+  "What's in flight" is no longer a section anyone maintains — ask the
+  store directly with `backlog_index.py --ready`, which reads the live
+  `status: bet` entries.
+- **Status vocabulary collapsed to `open` / `bet` / `closed`.**
+  Blocked-ness is no longer a status word — it moved to a `blocked:`
+  field on an `open` entry, read only by `--ready`.
+- **The queue gate reborn as `check_queue_relation.py`** (renamed from
+  `check_direction_freshness.py`). `in-queue:`/`displaces:` now
+  resolve against live `status: bet` entries instead of a DIRECTION.md
+  `## Now` list; an unresolved name lists the live candidates instead
+  of a literal placeholder; a repo with no queue layer at all gets a
+  loud `queue-relation: N/A — no queue layer in this repo` at exit 0,
+  never a silent skip.
+- **On-ramp standing choices moved to `docs/loom/KICKOFF-DEFAULTS.md`**
+  — the old `(DIRECTION.md)` grammar is retired; the section heading
+  itself (`## On-ramp standing choices`) is unchanged.
+- **`archive_change_folder.py` stamps `status: closed`, not
+  `status: archived`.** `archived` is retired vocabulary: no
+  `archived: <date>` field is written by either unit any more, and the
+  file unit additionally strips a `blocked:` field from the entry it
+  moves (a closed entry cannot be blocked).
+- **Gate scripts fail loud on an unreadable input.** `backlog_index.py`,
+  `check_onramp_choice.py`, `check_queue_relation.py` and
+  `check_north_star_link.py` now print one actionable line and exit
+  nonzero when a store entry, brief, `KICKOFF-DEFAULTS.md`,
+  `PURPOSE.md`, or the committed index exists but cannot be read, or when
+  `--write`'s output cannot be written — previously several of these died
+  on a raw traceback, and one of them read an unreadable store as an
+  ABSENT one and exited 0.
+- **`backlog_index.py` refuses a `--store` path that is not there.** A typo
+  in `--store` used to print `OK — every invariant holds` at exit 0: an
+  absent directory globs to no entries and every invariant holds vacuously.
+  All four verbs now fail loudly. (A repo that never adopted the queue
+  layer is still exempt — that judgment belongs to `check_queue_relation.py`,
+  which reports a loud N/A at exit 0.)
+- **`backlog_index.py --output` defaults beside its own `--store`,** not
+  beside the current directory. Running `--write --store <other-repo>` used
+  to overwrite the standing repo's `BACKLOG.md` with the other store's
+  entries, silently. The success line now prints an absolute path. For the
+  canonical layout the default is unchanged.
+- **`archive_change_folder.py --help` prints usage.** It hand-rolls its argv
+  parsing, so `--help` was consumed as the positional identifier and
+  produced `change-folder does not exist: .../docs/loom/--help`.
+- **The queue gate names the em dash** when a `## Queue relation` line has
+  the right form but an ASCII `--`. The hint is earned by re-matching a
+  dash-swapped copy against the grammar, so it never fires on a line that
+  was wrong anyway.
+- Promotion to `bet` is unchanged and stays **user-only**.
+
 ## [0.91.0] — 2026-08-20 — purpose layer + serves link
 
 ### Added

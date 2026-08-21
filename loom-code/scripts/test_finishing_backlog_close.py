@@ -4,7 +4,7 @@ Pins the Backlog-close check row in finishing-a-development-branch/
 SKILL.md Step 8's close-out sub-checks table (flip a shipped or
 superseded backlog entry's status in the same close-out commit,
 regenerate the index, silent skip without a hit or a store) and the
-Step 13 queue-tail report line ("backlog next: <name>"). Added by the
+Step 13 queue-tail report line ("next bet: <name>"). Added by the
 backlog ready-verb-and-close-loop arc: 90 entries filed, zero ever
 closed, because no flow ever read or closed the store. The five Step 8
 ONCE-per-branch bullets collapsed into one table in loom arc 4b; these
@@ -43,8 +43,9 @@ def test_backlog_close_bullet_lead_present():
 
 
 def test_backlog_close_flip_vocabulary_present():
-    """The bullet names the exact status-flip vocabulary."""
-    assert "SHIPPED (or CLOSED — SUPERSEDED)" in _normalized_text()
+    """The bullet names the exact status-flip vocabulary (dissolve-
+    direction-layer arc: seven legacy words collapsed to `closed`)."""
+    assert "Flip the entry's `status:` to `closed`" in _normalized_text()
 
 
 def test_backlog_close_same_commit_duty_present():
@@ -83,9 +84,9 @@ def test_backlog_close_follows_memory_store_integrity_row():
 
 
 def test_step13_queue_tail_phrase_present():
-    """Step 13's report ends naming the top of the remaining
-    COMMITTED-NEXT queue."""
-    assert '"backlog next: <name>"' in _normalized_text()
+    """Step 13's report ends naming the top of the remaining bet
+    queue."""
+    assert '"next bet: <name>"' in _normalized_text()
 
 
 def test_backlog_close_script_absent_na_string_present():
@@ -112,9 +113,9 @@ def test_step13_skip_clause_names_the_script_path():
 
 def test_step13_queue_empty_alternative_phrase_present():
     """Step 13's report line has two renderings depending on queue
-    state: 'backlog next: <name>' when non-empty, or this literal
-    string when the COMMITTED-NEXT queue has nothing in it."""
-    assert '"COMMITTED-NEXT queue empty"' in _normalized_text()
+    state: 'next bet: <name>' when non-empty, or this literal
+    string when the bet queue has nothing in it."""
+    assert '"bet queue empty"' in _normalized_text()
 
 
 def _backlog_close_row_text() -> str:
@@ -131,33 +132,19 @@ def _backlog_close_row_text() -> str:
 
 def test_backlog_close_betting_prompt_never_auto_promotes():
     """Direction-layer arc (task 4): the betting duty surfaces a prompt
-    but only the USER promotes a candidate to COMMITTED-NEXT — agents
+    but only the USER promotes a candidate to `bet` — agents
     must never auto-promote. Promotion is never a silent default."""
     assert "agents never auto-promote" in _backlog_close_row_text()
 
 
-def test_backlog_close_betting_prompt_fires_on_empty_committed_next():
-    """The betting duty is event-driven: it fires when COMMITTED-NEXT
-    is EMPTY after the flip + regen, not on every close-out."""
-    assert "COMMITTED-NEXT is EMPTY" in _backlog_close_row_text()
-
-
-def test_backlog_close_direction_write_command_spelling_pinned():
-    """Task 4 review probe: deleting the whole `--direction-write
-    docs/loom/DIRECTION.md` command sentence left all 13 prior tests
-    green. Pins the exact command spelling."""
-    assert (
-        "--direction-write docs/loom/DIRECTION.md"
-        in _backlog_close_row_text()
-    )
-
-
-def test_backlog_close_no_direction_md_silent_skip_pinned():
-    """Task 4 review probe: deleting the no-DIRECTION.md silent-skip
-    fallback left all 13 prior tests green. Pins the fallback
-    wording."""
-    assert (
-        "No `docs/loom/DIRECTION.md` in this repo → skip the betting "
-        "duty silently"
-        in _backlog_close_row_text()
-    )
+def test_close_out_row_bets_on_store_without_direction():
+    """dissolve-direction-layer arc (Task 10): the betting prompt no
+    longer keys on the retired file existing — it fires when the
+    backlog store is present and holds zero live `bet` entries. The
+    retired regeneration verb is gone, and the agents-never-auto-
+    promote rule survives verbatim (the only place in this skill the
+    user-only promotion ruling is written down)."""
+    row = _backlog_close_row_text()
+    assert "zero live `bet` entries" in row
+    assert "--direction-write" not in row
+    assert "agents never auto-promote — promotion is never a silent default" in row
