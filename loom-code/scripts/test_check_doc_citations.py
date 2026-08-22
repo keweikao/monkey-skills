@@ -1,10 +1,9 @@
-"""Tests for check_doc_citations: path:line citation bounds checking.
+"""Tests for check_doc_citations: path+anchor and path:line verification.
 
 `check_doc(doc_path, repo_root)` scans one Markdown file for backtick
-citations of the form `` `path:line` `` or `` `path:line-range` `` and
-returns one finding string per citation whose target file is missing
-or whose line (or range end) exceeds the target file's length. Clean
-citations produce no finding.
+citations of the canonical `` `path` "verbatim anchor" `` form and the
+legacy `` `path:line` `` / `` `path:line-range` `` forms. It verifies
+anchors when supplied and otherwise bounds-checks legacy line numbers.
 
 Round 4 (2026-07-29, plan Task 4 final): the default invocation now
 runs ONLY the path:line bounds check (see module docstring's Round 4
@@ -629,3 +628,133 @@ def test_main_sections_flag_enables_section_anchor_check(
     out = capsys.readouterr().out
     assert rc == 1
     assert "sibling.md:§9 section not found" in out
+
+
+# --- anchor substring verification (paired `"..."` on same line) ---
+
+
+def test_line_less_citation_whose_anchor_is_absent_is_flagged(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "target.md", "different text\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, 'See `target.md` "missing anchor".\n')
+
+    findings = check_doc(doc, tmp_path)
+
+    assert len(findings) == 1
+    assert "quoted string not found in target" in findings[0]
+
+
+def test_line_less_citation_whose_anchor_is_present_is_clean(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "target.md", "the stable anchor survives\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, 'See `target.md` "stable anchor".\n')
+
+    assert check_doc(doc, tmp_path) == []
+
+
+def test_line_less_inline_code_without_anchor_is_not_a_citation(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "target.md", "content\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, "Use `target.md` as the input file.\n")
+
+    report = check_doc_report(doc, tmp_path, list_repo_files(tmp_path))
+
+    assert report.findings == []
+    assert report.checked == 0
+    assert report.unchecked == 0
+
+
+def test_mixed_line_less_and_legacy_citations_pair_with_their_own_anchors(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "a.md", "alpha\n")
+    _write(tmp_path / "b.md", "beta\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, '`a.md` "alpha" and `b.md:1` "not beta"\n')
+
+    findings = check_doc(doc, tmp_path)
+
+    assert len(findings) == 1
+    assert "b.md:1" in findings[0]
+
+
+def test_a_citation_whose_quoted_string_is_absent_from_the_target_is_flagged(
+    tmp_path: Path,
+) -> None:
+    # A backtick `path:line` citation carrying a paired `"..."` quote whose
+    # string does NOT occur in the target file is flagged. The substring
+    # (anchor) check is the new primary verification; the line-bounds check
+    # remains as a secondary check.
+    _write(tmp_path / "target.py", "line1\nline2\nline3\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, 'See `target.py:1` "this string is not in the file".\n')
+
+    findings = check_doc(doc, tmp_path)
+
+    assert len(findings) == 1
+    assert "target.py" in findings[0]
+
+
+def test_a_citation_whose_quoted_string_is_present_in_the_target_is_clean(
+    tmp_path: Path,
+) -> None:
+    # The paired `"..."` string DOES occur in the target file — no finding.
+    _write(tmp_path / "target.py", "the verbatim string is here\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, 'See `target.py:1` "the verbatim string".\n')
+
+    assert check_doc(doc, tmp_path) == []
+
+
+def test_a_citation_whose_anchor_resolves_but_line_is_out_of_bounds_is_clean(
+    tmp_path: Path,
+) -> None:
+    # The anchor (paired `"..."` string) is the PRIMARY check; the line
+    # number is optional precision. When the anchor resolves as a verbatim
+    # substring in the target file, the citation is clean — a stale
+    # out-of-bounds line does NOT invalidate a resolved anchor (the rule
+    # this checker enforces: the anchor survives the change that writes
+    # it, the line number rots within it). Pre-fix this returned the
+    # "line ... exceeds file length" finding because line-bounds ran first
+    # and short-circuited before the anchor check.
+    _write(tmp_path / "target.py", "the verbatim string is here\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, 'See `target.py:999` "the verbatim string".\n')
+
+    assert check_doc(doc, tmp_path) == []
+
+
+def test_citation_without_paired_quote_is_unaffected(tmp_path: Path) -> None:
+    # Backward compatibility: a citation with NO paired `"..."` quote on the
+    # same line is unaffected — the substring check does not fire.
+    _write(tmp_path / "target.py", "line1\nline2\nline3\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, "See `target.py:1` (no paired quote, unaffected).\n")
+
+    assert check_doc(doc, tmp_path) == []
+
+
+def test_citation_with_empty_paired_quote_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path / "target.py", "line1\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, 'See `target.py:1` "".\n')
+
+    findings = check_doc(doc, tmp_path)
+
+    assert len(findings) == 1
+    assert "quoted string not found in target" in findings[0]
+
+
+def test_multiple_citations_each_use_their_adjacent_quote(tmp_path: Path) -> None:
+    _write(tmp_path / "a.py", "alpha\n")
+    _write(tmp_path / "b.py", "beta\n")
+    doc = tmp_path / "doc.md"
+    _write(doc, '`a.py:1` "alpha" and `b.py:1` "beta"\n')
+
+    assert check_doc(doc, tmp_path) == []

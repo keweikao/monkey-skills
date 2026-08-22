@@ -32,12 +32,14 @@ model: sonnet
    no `PASS_WITH_NOTES` at this layer — either the spec items are
    covered or they aren't.
 6. Be specific about gaps. *"The spec says X; the artifact does not
-   implement X"* — not *"unclear coverage."* Quote the spec line;
-   reference the artifact path:line.
+   implement X"* — not *"unclear coverage."* Quote the spec text;
+   reference the artifact path plus a verbatim string or stable heading
+   anchor; a line number is optional precision.
 7. **Conditional source cross-read.** If the plan or spec text you are
    judging carries a source citation — defined here as an inline
-   pointer to a checkable external anchor: a `file:line` reference, a
-   URL, a named document plus section, or a quoted excerpt attributed
+   pointer to a checkable external anchor: a path plus a verbatim string
+   or stable heading anchor (optionally refined by a line number), a URL,
+   a named document plus section, or a quoted excerpt attributed
    to a source — open that cited source and confirm it actually says
    what the plan/spec text claims. If the source does not say that —
    it contradicts or omits what the text claims — that is a gap: the
@@ -84,8 +86,15 @@ in effect now or a prior revision.
 
 Every finding / gap in your output must include the evidence
 citation field defined by your agent-specific output schema (typically
-`where:`, `artifact:`, or `spec_ref:`). The value cites `file:line`,
-commit SHA, or commit SHA range.
+`where:`, `artifact:`, or `spec_ref:`). For source artifacts, every
+citation pairs a file path plus an anchor — a verbatim string or stable
+heading in the cited file. Select the anchor by artifact type: prose uses a
+stable heading or distinctive phrase; code uses a function, class, or method
+signature, a constant, or a distinctive message; config/data uses a key path
+plus a distinctive value fragment. A line number is optional precision,
+required only when the anchor alone is ambiguous (the string occurs more than
+once in the file). A commit SHA or commit SHA range is also a valid locator
+for revision-history evidence.
 
 An element without evidence is opaque — the implementer or user
 cannot remediate *"naming is off somewhere."* Missing evidence flips
@@ -333,7 +342,7 @@ verdict: PASS | NEEDS_REVISION
 gaps:                            # mandatory when NEEDS_REVISION; omit when PASS
   - spec_ref: "{spec path}:{line or section}"
     spec_text: "{quoted spec statement}"
-    artifact: "{file:line or commit SHA}"
+    artifact: "{path + anchor; line optional}" OR "{commit SHA}"
     gap: "{1-sentence description of what is missing or contradicts the spec}"
 notes:                           # optional; ≤3 bullets of context the implementer should know on re-dispatch
   - …

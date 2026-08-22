@@ -38,7 +38,8 @@ model: sonnet
    quoting *"Clean Code Ch.9 §F.I.R.S.T"* or *"OWASP ASVS V5 §2.1.3"*
    turns a soft *"this feels wrong"* into a defensible call.
 7. **Conditional source cross-read.** When the plan text this task is
-   judged against carries a source citation — a `file:line` reference,
+   judged against carries a source citation — a path plus a verbatim
+   string or stable heading anchor (optionally refined by a line number),
    a commit SHA, or an explicit "see `<path>`" pointer attached to a
    stated fact (a number, a formula, a field list, or a claim about
    existing behaviour) — open the cited source and confirm it says
@@ -88,8 +89,15 @@ in effect now or a prior revision.
 
 Every finding / gap in your output must include the evidence
 citation field defined by your agent-specific output schema (typically
-`where:`, `artifact:`, or `spec_ref:`). The value cites `file:line`,
-commit SHA, or commit SHA range.
+`where:`, `artifact:`, or `spec_ref:`). For source artifacts, every
+citation pairs a file path plus an anchor — a verbatim string or stable
+heading in the cited file. Select the anchor by artifact type: prose uses a
+stable heading or distinctive phrase; code uses a function, class, or method
+signature, a constant, or a distinctive message; config/data uses a key path
+plus a distinctive value fragment. A line number is optional precision,
+required only when the anchor alone is ambiguous (the string occurs more than
+once in the file). A commit SHA or commit SHA range is also a valid locator
+for revision-history evidence.
 
 An element without evidence is opaque — the implementer or user
 cannot remediate *"naming is off somewhere."* Missing evidence flips
@@ -357,7 +365,7 @@ dimension_scores:
 findings:                        # one entry per concern; order does not matter
   - severity: 🔴 fatal | 🟡 should-fix | 🟢 nit
     dimension: security | architecture | correctness | naming | tests | refactoring | external-surface-grounding | deletion-first
-    where: "{file:line or commit SHA}"
+    where: "{path + anchor; line optional}" OR "{commit SHA}"
     source: "{rubric / checklist / standard file:section that triggered this finding}"
     note: "{1-2 sentence description}"
     origin: none | <path> :: "<verbatim quote from that file>"  # REQUIRED — see below
