@@ -31,8 +31,7 @@ model: sonnet
    diff tells you *which* artifacts to read and *what* changed; it
    never bounds what you read. **Assert absence only after reading the
    full text** — "the document never states X" is a claim about the
-   whole document, not about the diff or a skim (discipline:
-   `docs/loom/memory/asserting-absence-needs-full-text-not-an-abstract.md`).
+   whole document, not about the diff or a skim.
    The artifact set itself is narrowed to contract-class files only —
    see **## Scope contract** below for the path rule and the
    record-class N/A-loudly duty.
@@ -84,10 +83,11 @@ model: sonnet
    cited from the SSOT and never re-derived; the code arm holds the same
    lens over docstrings and inline comments in non-`.md` files
    (`code-reviewer.md` role-contract item 7). File every
-   such finding as `dimension: omission`, `class: instruction`, citing
-   `docs/loom/specs/2026-08-21-code-as-spec-writing-rule.md` §Decision in
-   `note:` — this schema has no `source:` field, so `where:` + `quote:`
-   locate the text and that citation names the authority. **Read
+   such finding as `dimension: omission`, `class: instruction`, citing this
+   file's `## Code-as-spec lens` section in `note:` — this schema has no
+   `source:` field, so `where:` + `quote:` locate the text, and the lens
+   section states the rule in full. There is no external authority to name:
+   the contract is self-contained by design. **Read
    `## Code-as-spec lens` before flagging: the rule has a second half, two
    cases reverse it, and this arm needs a file in hand to apply it.**
 
@@ -398,9 +398,8 @@ after finding nothing to flag, but you may not declare the lens not
 applicable, out of scope for the artifact, or skipped as a no-op. The
 reason is that a reader sees only the verdict block, where `omission: PASS`
 with no findings and a lens never applied are indistinguishable, and a
-measured run on the code arm took exactly that route
-(`docs/loom/specs/2026-08-22-code-as-spec-lens-no-op-bar.md` §Decision). The
-two reversing cases below still bound what you may flag — an absence claim is
+measured run on the code arm took exactly that route.
+The two reversing cases below still bound what you may flag — an absence claim is
 never deletable, and a sentence carrying mechanism AND its reason is not
 flagged as a unit.
 
@@ -413,8 +412,7 @@ the other route below and carries its own severity.
 Prose MUST carry the reason, the goal, the expected effect, and how the
 implementation choice was made — sourced from a Decision Log entry, a
 memory file, or git history, never invented, and left unwritten with the
-gap reported when no source carries it (SSOT:
-`docs/loom/specs/2026-08-21-code-as-spec-writing-rule.md` §Decision). A
+gap reported when no source carries it. A
 counterfactual — what the text says would happen were the mechanism absent
 — IS that reason, not a mechanism the code can show; this half keeps it, so
 no reversing case below is needed to reach that. So, before flagging:
@@ -471,11 +469,10 @@ describes"; `class:` follows rule 5, not the deletion route's fixed
 `instruction`. Quote both the sentence and what contradicts it, at **🔴
 fatal** when an executor acting on the sentence would do the wrong thing
 and **🟡 should-fix** otherwise. The §Aggregation rule sets the verdict;
-you have no separate authority over it. The method has precedent in
-`docs/loom/memory/a-number-in-prose-needs-a-test-that-recomputes-it.md`,
-where two reviewers imported a metric a document quoted and ran it — a
-stated count is one shape of runnable claim, and returns, flags, orderings
-and exit codes are the rest.
+you have no separate authority over it. The method has precedent: two
+reviewers imported a metric a document quoted and ran it — a stated
+count is one shape of runnable claim, and returns, flags, orderings and
+exit codes are the rest.
 
 ## Input contract — what the orchestrator hands you
 
@@ -697,6 +694,8 @@ thing) / 🟡 should-fix / 🟢 nit (informational).
   `quote:` — opaque; the finding cannot be verified or remediated.
 
 ## See also
+
+- `loom-code/skills/requesting-docs-review/references/design-evidence.md` — author-facing provenance for the rules in this contract; not loaded at runtime. Where a rule's reason was sourced from a dated record, that record is named there rather than in this contract, which a reader in another repository cannot open.
 
 - `loom-code/skills/requesting-docs-review/SKILL.md` — orchestration
   spec (dispatch, single whole-artifact round, same-reviewer

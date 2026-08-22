@@ -278,6 +278,67 @@ def test_fresh_store_passes_the_real_validators(tmp_path):
     assert validate.returncode == 0, validate.stdout + validate.stderr
 
 
+def test_scaffold_creates_the_memory_store(tmp_path):
+    """loom-memory and the knowledge-triage references route a reader to
+    docs/loom/memory/ (README.md missing => loom-memory answers N/A per its
+    own conditional-fire contract) — the scaffold must mint that store too,
+    not just backlog/plans/specs, or a by-the-book adoption leaves that
+    recall path permanently dead.
+
+    The charter is a fresh scaffold document (this repo's own
+    docs/loom/memory/README.md is a live 113KB index, not a template — see
+    plan Task 4's trap note) that must still satisfy the same integrity
+    checker a real store is graded against."""
+    target = tmp_path / "repo"
+    result = _scaffold_ok(target)
+
+    memory_readme = target / "docs" / "loom" / "memory" / "README.md"
+    assert memory_readme.is_file(), "memory store charter not scaffolded"
+
+    expected_version = json.loads(
+        (REPO_ROOT / "loom-code" / ".claude-plugin" / "plugin.json").read_text(
+            encoding="utf-8"
+        )
+    )["version"]
+    stamp = f"<!-- scaffolded by loom-init (loom-code {expected_version}) -->"
+    first_line = memory_readme.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == stamp, f"memory README first line is {first_line!r}, expected {stamp!r}"
+
+    text = memory_readme.read_text(encoding="utf-8")
+    assert "## Index" in text, "memory charter missing the §Index section the integrity checker splices"
+
+    checker = REPO_ROOT / "scripts" / "check_loom_memory_integrity.py"
+    validate = subprocess.run(
+        [sys.executable, str(checker), "--store", str(target / "docs" / "loom" / "memory")],
+        capture_output=True,
+        text=True,
+    )
+    assert validate.returncode == 0, validate.stdout + validate.stderr
+    assert "OK" in validate.stdout, validate.stdout + validate.stderr
+
+
+def test_scaffold_refuses_when_the_memory_store_already_exists(tmp_path):
+    """Mirrors the backlog `store` guard: an adopted docs/loom/memory/ (this
+    repo's own live 113KB index is the real-world instance) must never be
+    clobbered by a template README — same refuse-before-any-write shape as
+    the existing backlog/kickoff-defaults/purpose guards above."""
+    target = tmp_path / "repo"
+    (target / "docs" / "loom" / "memory").mkdir(parents=True)
+
+    result = _run_init(target)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    # Name the ADOPTION guard specifically, not just the word "memory". A
+    # whole-branch reviewer deleted this guard's whole `is_dir()` block and
+    # both memory tests still passed: the stray-file `exists()` guard fired
+    # instead and its message also contains "memory". A refusal test that any
+    # refusal satisfies pins nothing.
+    assert "has adopted the practice-memory store" in result.stdout, result.stdout
+    assert not (target / "docs" / "loom" / "backlog").exists(), (
+        "residue: backlog/ was created before the refusal"
+    )
+
+
 def test_scaffolded_readme_carries_the_charter_sections(tmp_path):
     target = tmp_path / "repo"
     _scaffold_ok(target)
@@ -567,3 +628,22 @@ def test_scaffolded_kickoff_defaults_onramp_comment_does_not_name_an_unresolvabl
         "scaffolded KICKOFF-DEFAULTS.md's on-ramp comment must name the "
         "pointer as the loom-code plugin's file, not a repo-relative path"
     )
+
+
+def test_scaffold_refuses_a_stray_file_at_the_memory_store_path(tmp_path):
+    """The second memory guard, previously untested.
+
+    A plain FILE at docs/loom/memory is not an adopted store — it is a
+    mistake — and the two cases must be distinguishable, or neither is
+    pinned. Mirrors `test_stray_file_at_store_path_is_not_called_adoption`
+    for the backlog store.
+    """
+    target = tmp_path / "repo"
+    (target / "docs" / "loom").mkdir(parents=True)
+    (target / "docs" / "loom" / "memory").write_text("not a store\n", encoding="utf-8")
+
+    result = _run_init(target)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "exists but is not a" in result.stdout, result.stdout
+    assert "has adopted" not in result.stdout, result.stdout

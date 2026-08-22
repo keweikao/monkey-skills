@@ -444,14 +444,14 @@ findings using the same 🔴 / 🟡 / 🟢 taxonomy.
 
 The agent has no author authority over external surfaces — third-party HTTP APIs, third-party packages, MCP server tools, CLI binaries, internal sibling-team contracts. Whole-branch scope adds the **cross-task surface-consistency check** that per-task reviewers cannot perform. See `standards/external-surface-grounding.md` for the rule, the 5 surface categories, the 4 grounding sources, and the anti-patterns.
 
-**Severity calibration** (mirrors per-task D7 from `code-quality-reviewer.md` per §Resolved Decisions Q4 of the brief `docs/loom/specs/2026-05-22-external-surface-grounding-discipline.md`, PLUS the cross-task 🟡 unique to whole-branch):
+**Severity calibration** (mirrors per-task D7 from `code-quality-reviewer.md`, PLUS the cross-task 🟡 unique to whole-branch):
 
 - 🔴 **Fatal MUST**: a call into surface category **HTTP API / SDK package / MCP tool / CLI flag** anywhere in the branch lacks a grounding cite.
-- 🟡 **Should-fix SHOULD**: a call into surface category **internal sibling-team contract** lacks a grounding cite (per Q4 — lower severity because sibling-team contracts are harder to objectively audit at review time).
+- 🟡 **Should-fix SHOULD**: a call into surface category **internal sibling-team contract** lacks a grounding cite (lower severity because sibling-team contracts are harder to objectively audit at review time).
 - 🟡 **Should-fix SHOULD (whole-branch only)**: **two or more tasks in this branch call the SAME external surface with CONFLICTING parameter shapes / version pins / endpoints / output expectations**. Per-task reviewers could not see this; the whole-branch reviewer owns it. Cite both task numbers and the conflicting lines in `where`.
 - 🟢 **Nit**: cite uses **in-repo evidence (source 4d)** when **live verification (source 4a)** was available — next-touch opportunity to anchor on higher-fidelity source.
 
-**Scope** (per §Resolved Decisions Q3): this dimension's cross-task-conflict check (the second 🟡 above) is **whole-branch reviewer's exclusive responsibility** — per-task `code-quality-reviewer.md` is structurally blind to sibling tasks and that 🟡 will never fire there.
+**Scope**: this dimension's cross-task-conflict check (the second 🟡 above) is **whole-branch reviewer's exclusive responsibility** — per-task `code-quality-reviewer.md` is structurally blind to sibling tasks and that 🟡 will never fire there.
 
 #### D8 — Principles Conformance (conditional; whole-branch)
 
@@ -601,9 +601,8 @@ score it PASS after finding nothing to flag, but you may not declare it not
 applicable, out of scope for the branch, or skipped as a no-op while such a
 line is in the diff. The reason is that a reader sees only the verdict
 block, where a dimension scored PASS with no findings and a dimension never
-examined are indistinguishable, and a measured run took exactly that route
-(`docs/loom/specs/2026-08-22-code-as-spec-lens-no-op-bar.md` §Decision). The
-two reversing cases below still bound what you may flag — an absence claim is
+examined are indistinguishable, and a measured run took exactly that route.
+The two reversing cases below still bound what you may flag — an absence claim is
 never deletable, and a sentence carrying mechanism AND its reason is not
 flagged as a unit. File every finding as `dimension:
 deletion-first`, `source: rubrics/arch-gate.md §Deletion-First Scoring`, at
@@ -615,8 +614,7 @@ that is wrong today is the other route below and carries its own severity.
 Prose MUST carry the reason, the goal, the expected effect, and how the
 implementation choice was made — sourced from a Decision Log entry, a
 memory file, or git history, never invented, and left unwritten with the
-gap reported when no source carries it (SSOT:
-`docs/loom/specs/2026-08-21-code-as-spec-writing-rule.md` §Decision). A
+gap reported when no source carries it. A
 counterfactual — what the text says would happen were the mechanism absent
 — IS that reason, not a mechanism the code can show; this half keeps it, so
 no reversing case below is needed to reach that. So, before flagging:
@@ -668,11 +666,9 @@ rubrics/quality-gate.md §Correctness & Logic`, quoting both the sentence
 and the output that contradicts it, at **🔴 fatal** when a caller acting on
 the sentence would do the wrong thing and **🟡 should-fix** otherwise. The
 §Aggregation rule sets the verdict; you have no separate authority over it.
-The method has precedent in
-`docs/loom/memory/a-number-in-prose-needs-a-test-that-recomputes-it.md`,
-where two reviewers imported a metric a document quoted and ran it — a
-stated count is one shape of runnable claim, and returns, flags, orderings
-and exit codes are the rest.
+The method has precedent: two reviewers imported a metric a document
+quoted and ran it — a stated count is one shape of runnable claim, and
+returns, flags, orderings and exit codes are the rest.
 
 ## Anti-patterns the orchestrator will reject
 
@@ -694,6 +690,8 @@ and exit codes are the rest.
   reviewer.
 
 ## See also
+
+- `loom-code/skills/requesting-code-review/references/design-evidence.md` — author-facing provenance for the rules in this contract; not loaded at runtime. Where a rule's reason was sourced from a dated record, that record is named there rather than in this contract, which a reader in another repository cannot open.
 
 - `loom-code/skills/requesting-code-review/SKILL.md` — orchestration spec.
 - `loom-code/agents/code-quality-reviewer.md` — per-task evaluator
