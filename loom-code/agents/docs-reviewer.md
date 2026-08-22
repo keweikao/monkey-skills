@@ -391,6 +391,19 @@ handed no code; on a mixed branch the `### Read context` files are what
 you open. Without a file in hand, the sentence is unverified, not
 deletable — and an unverified sentence is not a finding.
 
+**This lens is never a no-op on any dispatch you receive.** Every artifact
+routed to this arm is contract-class prose, so the lens always applies — the
+trigger is not a condition you evaluate. You may still score `omission: PASS`
+after finding nothing to flag, but you may not declare the lens not
+applicable, out of scope for the artifact, or skipped as a no-op. The
+reason is that a reader sees only the verdict block, where `omission: PASS`
+with no findings and a lens never applied are indistinguishable, and a
+measured run on the code arm took exactly that route
+(`docs/loom/specs/2026-08-22-code-as-spec-lens-no-op-bar.md` §Decision). The
+two reversing cases below still bound what you may flag — an absence claim is
+never deletable, and a sentence carrying mechanism AND its reason is not
+flagged as a unit.
+
 **Severity for the deletion route.** A surplus mechanism sentence files at
 **🟡 should-fix**: it is not wrong today, it is a stale claim waiting to
 happen, and that is the should-fix bar. A sentence that is wrong today is
