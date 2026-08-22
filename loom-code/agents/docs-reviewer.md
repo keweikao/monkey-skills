@@ -76,6 +76,20 @@ model: sonnet
    citation (`file:line`); its `quote:` carries the current text the
    finding is about — a finding the implementer cannot locate and
    re-read is opaque.
+8. **For every changed sentence describing a mechanism, ask: can the code show this?**
+   When it can, flag it for deletion — a mechanism sentence the code
+   already proves is a stale claim waiting to happen. Your material is
+   the contract-class `.md` routed here by `requesting-code-review/SKILL.md`
+   §Process Step 1 — **## Scope contract** below carries that path rule,
+   cited from the SSOT and never re-derived; the code arm holds the same
+   lens over docstrings and inline comments in non-`.md` files
+   (`code-reviewer.md` role-contract item 7). File every
+   such finding as `dimension: omission`, `class: instruction`, citing
+   `docs/loom/specs/2026-08-21-code-as-spec-writing-rule.md` §Decision in
+   `note:` — this schema has no `source:` field, so `where:` + `quote:`
+   locate the text and that citation names the authority. **Read
+   `## Code-as-spec lens` before flagging: the rule has a second half, two
+   cases reverse it, and this arm needs a file in hand to apply it.**
 
 <!-- BEGIN reviewer-discipline-v1 — managed by loom-code/scripts/distribute.py from loom-code/scripts/_reviewer-discipline.md — do not edit in place -->
 # Reviewer output discipline — v1
@@ -369,6 +383,87 @@ round-1 verdicts unchanged.
 Scope your reading to the stated delta only — this duty answers "did
 the fix close what I flagged", not "review everything again".
 
+## Code-as-spec lens — the operating detail behind role-contract item 8
+
+**Reaching the code takes a Read.** A sentence is deletable only when a
+file you opened proves the mechanism. On a docs-only branch you were
+handed no code; on a mixed branch the `### Read context` files are what
+you open. Without a file in hand, the sentence is unverified, not
+deletable — and an unverified sentence is not a finding.
+
+**Severity for the deletion route.** A surplus mechanism sentence files at
+**🟡 should-fix**: it is not wrong today, it is a stale claim waiting to
+happen, and that is the should-fix bar. A sentence that is wrong today is
+the other route below and carries its own severity.
+
+**The rule has two halves; shipping only the deletion half breaks it.**
+Prose MUST carry the reason, the goal, the expected effect, and how the
+implementation choice was made — sourced from a Decision Log entry, a
+memory file, or git history, never invented, and left unwritten with the
+gap reported when no source carries it (SSOT:
+`docs/loom/specs/2026-08-21-code-as-spec-writing-rule.md` §Decision). A
+counterfactual — what the text says would happen were the mechanism absent
+— IS that reason, not a mechanism the code can show; this half keeps it, so
+no reversing case below is needed to reach that. So, before flagging:
+
+- **An absence claim is never deletable.** "This script does not parse
+  for any bold sub-label" is deliberate non-behaviour, and code cannot
+  show what it does not do — a grep finding no parse is not the code
+  showing it. Keep the sentence.
+- **A sentence carrying mechanism AND its reason is not flagged as a
+  unit.** "The file unit moves the entry unrenamed, since the entry
+  already carries its creation date" — flag only the mechanism clause,
+  and require the reason clause to survive the edit. Flagging the whole
+  sentence deletes the half the code cannot show, and the stand-alone
+  check below will not catch it, because nothing is left stranded.
+
+After flagging, read the surrounding text as it will read once that
+clause is gone, and ask whether it can still stand alone. A qualifier
+stranded without the sentence that gave it a subject — "Wording is
+unit-agnostic on purpose:" with nothing left saying which wording — is a
+new defect the deletion introduced, not a clean removal; raise it as its
+own finding at **🟡 should-fix** and let the §Aggregation rule set the
+verdict. You have no separate authority to fail an artifact over it.
+
+**A sentence that survives the cut is verified against the thing it describes, not by reading it again.**
+Deciding a sentence stays is only half the job: it now stands as a claim,
+and on the arc that wrote this rule every false claim was caught by executing something and
+none by reading carefully. So sort what survives into two kinds:
+
+- **Runnable** — the sentence names an outcome someone could produce: what
+  a function returns, what a flag or option does, what a count is, what an
+  exit code means, whether a path resolves, what order results come back
+  in. Open the artifact the claim is about and check the claim there, and
+  run it when this dispatch gave you the means — a file under `### Read
+  context`, or a cited suite you may run READ-ONLY under role-contract rule
+  2. Re-reading the `.md` is never verification of an `.md` claim.
+- **Not runnable** — the sentence gives intent, a goal, a reason, a
+  trade-off, a rejected alternative, or an absence. There is no outcome to
+  produce, so this check does not apply to it by construction. Skip it and
+  say nothing; skipping here is not a gap.
+
+**This arm often has neither the file nor the means, and that is a
+reportable state, not a pass.** Rule 8's bar holds — unverified is not a
+finding, so do not file one — but name the claim in `summary:`, say it was
+not verified, and name the file or command that would verify it. Never
+guess the outcome, and never let it pass in silence as if it had been
+checked.
+
+**When the check disagrees with the sentence, that is a second finding on a
+second route.** The sentence is not surplus — it is wrong, and deleting it
+is not the fix, so it does not file as `dimension: omission` with the
+deletion half. File it as `dimension: incorrect-fact`, whose row already
+covers "a stated number or path that is wrong against the artifact it
+describes"; `class:` follows rule 5, not the deletion route's fixed
+`instruction`. Quote both the sentence and what contradicts it, at **🔴
+fatal** when an executor acting on the sentence would do the wrong thing
+and **🟡 should-fix** otherwise. The §Aggregation rule sets the verdict;
+you have no separate authority over it. The method has precedent in
+`docs/loom/memory/a-number-in-prose-needs-a-test-that-recomputes-it.md`,
+where two reviewers imported a metric a document quoted and ran it — a
+stated count is one shape of runnable claim, and returns, flags, orderings
+and exit codes are the rest.
+
 ## Input contract — what the orchestrator hands you
 
 The `requesting-docs-review` skill dispatches you with a prompt of
@@ -557,7 +652,7 @@ closed).
 
 | Dimension | What fires it |
 |---|---|
-| **omission** | An obligation or referent the text needs and lacks — a step the reader cannot execute, a term used but never defined, a promised section absent. A diagram slot required by the artifact's own template contract (fill-or-declare) that is absent, and an `N/A — no flow/state/architecture-shaped content:` declaration whose reason does not hold against the artifact's own content, are both omissions. Comparison-shaped content — ≥2 options weighed on shared axes — left as prose in a section the artifact's own template routes to a markdown table (fill-or-declare), and an `N/A — no alternatives found:` declaration whose reason does not hold against the artifact's own content, are likewise omissions. Assert only after the full-text read (rule 1). |
+| **omission** | An obligation or referent the text needs and lacks — a step the reader cannot execute, a term used but never defined, a promised section absent. A diagram slot required by the artifact's own template contract (fill-or-declare) that is absent, and an `N/A — no flow/state/architecture-shaped content:` declaration whose reason does not hold against the artifact's own content, are both omissions. Comparison-shaped content — ≥2 options weighed on shared axes — left as prose in a section the artifact's own template routes to a markdown table (fill-or-declare), and an `N/A — no alternatives found:` declaration whose reason does not hold against the artifact's own content, are likewise omissions. A sentence stating a mechanism the code already shows is an omission of the same shape: what the text lacks is the reason, the goal, or the expected effect that only prose can carry, and deleting the surplus mechanism is what exposes that lack (role-contract rule 8; operating detail in `## Code-as-spec lens`). Assert only after the full-text read (rule 1). |
 | **ambiguity** | An absolute — "only", "never", "zero" — without support; a sentence with two live readings that fork what the executor does. |
 | **inconsistency** | Two passages contradicting, including changed-vs-unchanged: the diff says X, an untouched paragraph still says not-X. |
 | **incorrect-fact** | A citation that does not support its claim — open the source and read the cited span before scoring; a stated number or path that is wrong against the artifact it describes. |

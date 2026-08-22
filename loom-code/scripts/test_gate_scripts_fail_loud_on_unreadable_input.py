@@ -54,11 +54,8 @@ _FS_CALLS = frozenset({
     "iterdir", "glob", "rglob", "mkdir", "rmdir", "touch", "unlink",
     "rename", "replace", "symlink_to", "hardlink_to", "samefile",
     "stat", "lstat", "chmod", "resolve", "readlink",
-    # `is_file`/`is_dir`/`exists` are here deliberately: an unreadable
-    # PARENT makes them raise PermissionError, and that exact case was a
-    # finding in two separate rounds of this arc — one of them fail-OPEN,
-    # because the unhandled raise was the only thing keeping an unreadable
-    # store out of an exit-0 branch.
+    # `is_file`/`is_dir`/`exists` are here for the same reason given above
+    # the frozenset.
     "is_file", "is_dir", "exists", "is_symlink",
     # os / os.path / shutil, matched on the attribute name alone (so
     # `os.listdir`, `from os import listdir`, and an aliased import all
@@ -299,6 +296,15 @@ def leaky_scopes(source: str) -> set[str]:
     consumed, and this leg credits the guard at construction. No FAMILY
     script contains a `yield` today, so that shape is latent rather than
     live; it is listed because a reviewer built it and the leg passed.
+
+    It also does NOT catch a guard placed around a top-level helper whose
+    body delegates the filesystem read to a symbol imported from another
+    module — `leaky_scopes` parses one file at a time, so the delegate's
+    leakiness never enters the caller file's AST. This shape is LIVE, not
+    latent: `check_queue_relation.live_bet_names` and
+    `check_north_star_link.find_bet_entries` both delegate today to
+    `live_entries`, imported from `backlog_index` (filed at
+    docs/loom/backlog/2026-08-21-leaky-scopes-cannot-see-a-guard-over-a-cross-module-delegating-helper.md).
 
     It can also FALSE-POSITIVE on an attribute call whose name collides with
     a recognised one (`obj.open()` on something that is not a path). That
