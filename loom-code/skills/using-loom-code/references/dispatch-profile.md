@@ -10,15 +10,17 @@ and `frontier`, paired with `low`, `medium`, and `high` effort.
 1. Classify the task: routine mechanical work → `economy`; ordinary feature,
    integration, or rubric review → `standard`; architecture, security-sensitive
    work, or an adversarial second opinion → `frontier`.
-2. Select effort: `low` for deterministic mechanical work, `medium` for normal
-   implementation and checklist review, `high` for architecture or high-stakes
-   judgment.
+2. Select the requested effort: `low` for deterministic mechanical work,
+   `medium` for normal implementation and checklist review, `high` for
+   architecture or high-stakes judgment. The host adapter records whether it
+   can enforce that request.
 3. Apply the reviewer rule: reviewers run one tier below the implementer when
    that still meets the task's floor. A code-quality reviewer for a `frontier`
    architecture task remains `frontier`.
-4. Put the resolved `tier` and `effort` in the dispatch packet, then use the
-   current host adapter below. The dispatch packet—not an agent file's hidden
-   default—is loom-code's source of truth.
+4. Put the resolved `tier` and `requested_effort` in the dispatch packet, then
+   use the current host adapter below. The host adapter records
+   `effective_effort` separately. The dispatch packet—not an agent file's
+   hidden default—is loom-code's source of truth.
 
 ## Failure and fallback policy
 
@@ -30,27 +32,29 @@ and `frontier`, paired with `low`, `medium`, and `high` effort.
 - A host policy, organization allowlist, or environment override can win over
   loom's request. Do not infer effective capability from the child agent's
   self-report. For `frontier`, unavailable **or unverified** effective
-  capability halts the dispatch and is surfaced; lower tiers may continue with
-  `effective_runtime: unverified` only when their requested floor still holds.
+  model-tier or runtime capability halts the dispatch and is surfaced; lower
+  tiers may continue with `effective_runtime: unverified` only when their
+  requested floor still holds. An inherited `effective_effort` is recorded as
+  such; it does not itself make the model-tier or runtime capability unverified.
 
 ## Claude Code adapter
 
 Translate the resolved tier to Claude's current family aliases:
 
-| Loom tier | Claude model | Default effort |
+| Loom tier | Claude model | Requested effort |
 | --- | --- | --- |
 | `economy` | `haiku` | `low` |
 | `standard` | `sonnet` | `medium` |
 | `frontier` | `opus` | `high` |
 
-Pass `model` on the `Agent` dispatch. This host's documented loom call shape
-does not expose a per-invocation `effort` field, so `effort` is a requested
-budget rather than a dynamically enforceable setting: compatible reviewer
-frontmatter supplies the `standard` / `medium` baseline, and a `frontier` task
-halts unless the host exposes evidence that its effective effort meets `high`.
-Claude Code can resolve family aliases to a permitted newer model; a blocked
-`frontier` alias still follows the failure policy above rather than being
-treated as approval to use the parent model.
+Pass `model` on the `Agent` dispatch and leave `effort` unset. Every loom
+agent omits `effort` frontmatter, so Claude Code inherits the main session's effort
+(subject to its own environment or workspace policy). A `frontier`
+dispatch therefore guarantees its Opus model tier, not `high` effort; when
+high effort is a hard requirement, the user must raise the Claude session
+effort before dispatch. Claude Code can resolve family aliases to a permitted
+newer model; a blocked `frontier` alias still follows the failure policy above
+rather than being treated as approval to use the parent model.
 
 ## Codex adapter
 
@@ -72,8 +76,10 @@ Every station includes this compact record in its packet and final status when
 the host exposes it:
 
 ```text
-dispatch_profile: tier=<economy|standard|frontier>; effort=<low|medium|high>
+dispatch_profile: tier=<economy|standard|frontier>; requested_effort=<low|medium|high>
+effective_effort: <host-applied value, inherited, or unverified>
 effective_runtime: <host metadata or unverified>
 ```
 
-The record is observability, not a promise that a provider accepted a request.
+The record distinguishes loom's requested budget from the host's effective
+budget. It is observability, not a promise that a provider accepted a request.

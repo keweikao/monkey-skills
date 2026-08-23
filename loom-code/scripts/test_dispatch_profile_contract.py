@@ -88,7 +88,9 @@ def test_stations_do_not_keep_a_competing_host_model_policy():
     assert "profile tier to `frontier`" in code_review
     assert "OPTIONAL `model` field to `opus`" not in code_review
     assert "legacy `OPTIONAL model`" not in docs_review
-    assert "reviewer frontmatter only to supply" in docs_review
+    assert "inherits the main session's effort" in docs_review
+    assert "resolved `tier` plus `effort`" not in docs_review
+    assert "requested_effort` and `effective_effort" in docs_review
 
 
 def test_codex_adapter_matches_the_current_one_child_lifecycle():
@@ -119,7 +121,7 @@ def test_profile_precedes_host_spawn_and_replaces_inheritance_evidence():
     assert "reviewers inherit the session model by design" not in evidence
 
 
-def test_all_loom_agent_roles_supply_the_claude_standard_effort_baseline():
+def test_claude_roles_inherit_the_main_session_effort():
     for role in (
         "implementer.md",
         "spec-reviewer.md",
@@ -128,11 +130,29 @@ def test_all_loom_agent_roles_supply_the_claude_standard_effort_baseline():
         "docs-reviewer.md",
     ):
         text = (ROOT / "agents" / role).read_text(encoding="utf-8")
-        assert "effort: medium" in text
+        assert "effort:" not in text
+
+    profile = _profile()
+    assert "inherits the main session's effort" in profile
+    assert "must halt when high effort cannot be verified" not in profile
+    assert "model-tier or runtime capability halts the dispatch" in profile
+    assert "unverified effective effort halts" not in profile
 
 
-def test_privacy_judges_are_frontier_high_profile_dispatches():
+def test_dispatch_record_separates_requested_and_effective_effort():
+    profile = _profile()
+    claude_tools = (
+        ROOT / "skills" / "using-loom-code" / "references" / "claude-code-tools.md"
+    ).read_text(encoding="utf-8")
+
+    assert "requested_effort=<low|medium|high>" in profile
+    assert "effective_effort: <host-applied value, inherited, or unverified>" in profile
+    assert "requested_effort=<low|medium|high>; effective_effort=inherited" in claude_tools
+
+
+def test_privacy_judges_request_high_effort_without_claiming_it_is_effective():
     closeout = DISPATCH_STATIONS[-1].read_text(encoding="utf-8")
 
     assert closeout.count("Resolve the dispatch profile") >= 2
-    assert closeout.count("tier=frontier; effort=high") >= 2
+    assert closeout.count("tier=frontier; requested_effort=high") >= 2
+    assert "tier=frontier; effort=high" not in closeout

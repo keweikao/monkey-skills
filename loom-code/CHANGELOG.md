@@ -5,6 +5,30 @@ All notable changes to the `loom-code` plugin (formerly `code-toolkit`) will be 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.97.5] — 2026-08-23
+
+### Fixed
+
+- Limit frontier fail-closed checks to model-tier and runtime capability; inherited effort is recorded separately.
+
+## [0.97.4] — 2026-08-23
+
+### Fixed
+
+- Carry requested and effective effort through docs-review dispatch packets instead of the retired ambiguous field.
+
+## [0.97.3] — 2026-08-23
+
+### Fixed
+
+- Separate requested and effective effort in dispatch records so Claude session inheritance is never reported as enforced high effort.
+
+## [0.97.2] — 2026-08-23
+
+### Changed
+
+- Let Claude Code loom roles inherit the main session's effort while retaining task-tier model selection.
+
 ## [0.97.1] — 2026-08-23
 
 ### Changed
