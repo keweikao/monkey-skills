@@ -39,7 +39,10 @@ finishing-a-development-branch (this skill)
   ├─→ Phase 6 (optional): gh pr create
   │     only if gh CLI configured AND not opted out; PR body per git-memory convention
   │
-  └─→ Phase 7 (optional): git worktree cleanup
+  ├─→ Phase 7: Post-PR CI
+  │     post_pr_ci.py waits on the created PR's current head; bounded repair on fail
+  │
+  └─→ Phase 8 (optional): git worktree cleanup
         if branch was in .worktrees/, offer (do NOT auto-execute) the remove
         per using-git-worktrees §Removing a worktree
 
@@ -49,7 +52,7 @@ procedure — "Phase N" and "Step N" are distinct numbering schemes.)
 
 ## When NOT to use
 
-Exempt: **mid-task work** (SDD plan incomplete), **trivial direct-to-main commits** (solo, tiny doc fix), a **branch you're abandoning** (close out first if real), and **explicit user override** with a real reason. Near-miss rationalizations ("I'm tired of this branch") do NOT qualify. These waive the close-out orchestration (review / verification / PR) but **NEVER waive `loom-workflow:git-memory`** — it gates every commit. Full table in [`references/when-not-to-use.md`](references/when-not-to-use.md).
+Exempt: **mid-task work**, **trivial direct-to-main commits**, an **abandoned branch**, and an **explicit override** with a real reason. These waive close-out but **NEVER `loom-workflow:git-memory`**. Full table: [`references/when-not-to-use.md`](references/when-not-to-use.md).
 
 ## When to use
 
@@ -75,9 +78,10 @@ This skill is light on novel logic — its value is orchestration; the work happ
 | 4 | git CLI | Standard commit |
 | 5 | git CLI | Standard push |
 | 6 | gh CLI | Request-derived authorization |
-| 7 | `using-git-worktrees` | Own cleanup pattern |
+| 7 | `post_pr_ci.py` + `systematic-debugging` | Post-PR CI waits on the current PR head; own bounded CI repair evidence |
+| 8 | `using-git-worktrees` | Own cleanup pattern |
 
-Full per-step rationale + **the orchestrator does NOT** boundary list in [`references/delegation-boundaries.md`](references/delegation-boundaries.md).
+Boundaries: [`references/delegation-boundaries.md`](references/delegation-boundaries.md).
 
 ## Default flow — what happens if user just says "finish this branch"
 
@@ -189,7 +193,7 @@ Full per-step rationale + **the orchestrator does NOT** boundary list in [`refer
      | Open-questions check | The branch has a plan — reuse the path Step 1 already read to render the progress card, not a fresh discovery rule. | Run `python3 loom-code/scripts/check_open_questions.py <plan-path>` before the close-out commit; exit 0 is the gate — every `## Open Questions` entry is `[RESOLVED]`, or the section carries the well-formed N/A line. Prose orchestrator check, not hook-level — `git-guard.py` (Step 9c) is blind to plan content. | Nonzero (an `[OPEN]` entry, or section absent/malformed) → **STOP**; surface stderr verbatim (it names the unresolved `OQ-<n>`, or describes the absent/malformed section) and route back to the user or plan author — do not commit past it. No plan → skip silently, per Step 1. |
      | Stage-flip duty | The branch has a plan carrying the progress headers (the same plan Step 1 rendered). | BEFORE the close-out commit, flip the plan's terminal state: run `python3 scripts/plan_card.py <plan-path> --set-stage "finishing"` — repo-root `scripts/plan_card.py` when it exists; otherwise the plugin-shipped copy: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_card.py" <plan-path> --set-stage "finishing"` (a load-time substitution, not a run-time shell variable). Then stage the flipped plan file (`git add docs/loom/plans/<plan>.md`) into THIS close-out commit. | No plan, a plan with no Status lines at all (old-format), or a plan whose ledger predates the `Stage:` header (Status lines but no `Stage:` — `--set-stage` refuses nonzero on that shape) → skip silently, per Step 1's entry-card rules. |
      | Stale-scan relay | Every close-out where the repo has a `docs/loom/plans/` directory. | Run `python3 scripts/plan_card.py --stale-scan docs/loom/plans` — repo-root `scripts/plan_card.py` when it exists; otherwise the plugin-shipped copy: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_card.py" --stale-scan docs/loom/plans` (a load-time substitution, not a run-time shell variable). Relay its stdout VERBATIM and loudly to the user — including the single `stale-scan: clean` line. A candidate plan belonging to an already-merged arc gets fixed on the spot: the same `--set-stage "finishing"` flip, staged into THIS close-out commit. A candidate belonging to a live parallel arc is named and passed through untouched. The scan is advisory by design — it always exits 0, because all-done at `review:round-N` is a legitimate transient state of a live arc; never harden a candidate line into a block or a STOP. | No `docs/loom/plans/` directory → skip silently (nothing to scan, auditable from the tree). |
-   - **Purpose-linked betting.** The automatic close-out path never lists candidates or asks for a new bet. Only AFTER the user explicitly requests choosing or promoting a bet, and before listing betting candidates, print `docs/loom/PURPOSE.md` verbatim so the decision is against the purpose, not from memory. When `PURPOSE.md` is absent, say so loudly and offer to write one — never silently skip the print. After the user promotes an entry to `bet`, run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_north_star_link.py" <backlog-store>` (a load-time substitution, not a run-time shell variable) — this script ships only inside the plugin, with no repo-root shim. Exit 0 means every live `bet` entry is linked to the purpose — proceed. Exit 1 means the check could not run at all, for one of three causes its stderr distinguishes: the backlog store path is unreadable — treat it the same as this row's own store-absent case; `PURPOSE.md` exists but is unreadable, which is a permissions fix and is deliberately NOT the absent-file case below (absence is a question for you, unreadability is not); or an entry's `status:` falls outside the closed status vocabulary, which is that entry's frontmatter to fix, not a reason to skip the row. Exit 2 means the link is unresolved, for one of three distinct causes named in its stderr: `PURPOSE.md` is absent; `PURPOSE.md` exists but is still unanswered (the shipped template's placeholder text, or a bare `not yet`); or the just-promoted entry lacks a well-formed `serves:` line. Every cause is STOP-and-ask: relay the printed question verbatim, wait for the user's answer, record it where that question asks — the entry's `serves:` line for the third cause, `PURPOSE.md` itself for the first two — then re-run the checker until it exits 0. Status-word meaning, who may set `bet`, and when it flips are defined once — `docs/loom/backlog/README.md` §"Status word definitions" — this row points at that block rather than restating it.
+   - **Purpose-linked betting.** Never list or promote a bet on automatic close-out. Only AFTER the user explicitly requests choosing or promoting a bet, and before listing betting candidates, print `docs/loom/PURPOSE.md`; if absent, offer to write one — never silently skip the print. After promotion run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/check_north_star_link.py" <backlog-store>` (load-time substitution, not a run-time shell variable). Exit 0 means every live bet is linked. Exit 1 means an unreadable store or status vocabulary outside its closed vocabulary; fix that entry's frontmatter. Exit 2 means unresolved `PURPOSE.md` is absent, unanswered, or `serves` is malformed. STOP-and-ask: relay the printed question, wait, record it where that question asks (`PURPOSE.md` itself when applicable), then re-run. Status semantics remain in `docs/loom/backlog/README.md`.
    - **N/A consolidation (close-out report)**: when two or more close-out
      sub-checks above are N/A, do NOT stack ~4-5 separate "N/A — checker not
      present" lines before the conclusion. Each N/A stays STATEABLE (the
@@ -263,23 +267,46 @@ Full per-step rationale + **the orchestrator does NOT** boundary list in [`refer
       and do NOT create the PR until the user resolves it. This is explicit, not transitive:
       the PR body is an outward-facing carrier and gets the identical mechanized gate as the
       commit, per the arc's mechanize-don't-rely-on-prose premise.
+    - PR-carrier check (memory-worthy branch only): before creating the PR,
+      grep the composed body for a `## Memory` section. If Phase 3 returned a
+      non-empty trailer set and the section is absent, add it. Also verify the
+      true last block is the raw `Decision:`/`Learning:`/`Gotcha:` trailer
+      footer required by `loom-workflow:git-memory`'s `compose-pr.md` Step 4;
+      fix the body before submitting if either carrier is missing or misplaced.
     - **Resolve the dispatch profile** in [`using-loom-code`'s portable
       profile](../using-loom-code/references/dispatch-profile.md) before the
       fresh-context PR-body judge spawn. Its packet is
       `tier=frontier; requested_effort=high`; the host adapter records its
       effective effort separately.
-    - Then: gh pr create with title/body from git-memory + branch name
-    - PR-carrier check (memory-worthy branch only): before declaring the PR ready,
-      grep the PR body you just composed for a `## Memory` section. If Phase 3
-      returned a non-empty trailer set and body has no `## Memory` section, flag
-      it and add the section (both-carrier policy: commit AND PR carry memory;
-      no new tooling, it's a grep on the body you're about to submit). Also
-      verify the raw trailer footer carrier — the PR body's true last block
-      must be a raw trailer block (one or more plain `Decision:`/`Learning:`/
-      `Gotcha:` `Key: value` lines, blank-line-separated from what precedes,
-      NOTHING after them — a single such line qualifies), per
-      `loom-workflow:git-memory`'s `compose-pr.md` Step 4 for full
-      placement rules; fix the body before submitting if missing/not last.
+    - Then: `PR_URL="$(gh pr create --title "$PR_TITLE" --body-file
+      "$PR_BODY_FILE")"`, using the title/body composed by git-memory. The
+      locally verified `gh pr create --help` documents stdout URL output and
+      exposes no `--json` flag.
+    - Resolve `PR_NUMBER="$(gh pr view "$PR_URL" --json number --jq .number)"`.
+      Use `$PR_NUMBER` for every later `gh pr view` and helper call.
+    - **Post-PR CI phase:** after `gh pr create` succeeds, resolve the created
+      PR and its current head with `gh pr view "$PR_NUMBER" --json headRefOid`, then
+      run `python3 <plugin-root>/scripts/post_pr_ci.py --pr "$PR_NUMBER"
+      --expected-head <current-head>`. This helper owns polling and does not
+      replace its algorithm with prose here.
+      - On status `"pass"`, report that the PR is CI-verified and continue to
+        the final report.
+      - On status `"fail"`, enter one repair attempt through
+        `systematic-debugging` using the remote CI evidence. After its fix,
+        re-run `requesting-code-review`, then
+        `verification-before-completion`, then `loom-workflow:git-memory`.
+        Run the privacy gate, then `git commit` the repair. Mint fresh
+        `loom_gate_markers.py` markers at that repaired head; then `git push`.
+        Resolve the new HEAD with `gh pr view "$PR_NUMBER" --json headRefOid` and wait
+        again with `post_pr_ci.py` against that new HEAD.
+      - Permit at most two automated repair attempts. A third `"fail"` is
+        budget exhaustion: STOP, surface the CI evidence, and wait for user
+        direction.
+      - On `cancelled`, STOP with the helper JSON and cancellation evidence;
+        do not let a cancelled check fall through to repair or a pass report.
+      - On `timeout`, `no_checks`, `operational_error`, or `head_drift`, STOP
+        with the helper JSON and actionable evidence. The orchestrator must
+        never auto-merge.
     - Offer BOTH merge paths in the report: the PR web URL — with a reminder
       to glance that the merge dialog's description box is prefilled before
       confirming — AND the ready-to-run `gh pr merge <N> --squash` CLI
@@ -306,6 +333,8 @@ Full per-step rationale + **the orchestrator does NOT** boundary list in [`refer
     `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/backlog_index.py" --ready`);
     skip the line when the repo has no backlog store or neither copy
     of `backlog_index.py`.
+    Include CI evidence: the checked PR head, helper status, and any repair
+    attempt count or stopping evidence.
 ```
 
 **ASK = stop and wait for user.** Exception-based, not blanket: close-out is autonomous on the happy path — Steps 1–10 proceed silently once each step's gate PASSes. What asks: one outward-facing action — Step 12 (worktree removal — touches shared state) — and a Step 7 privacy-gate BLOCK (human returns only because the gate failed). Step 11 (open a PR) reports loudly instead of asking — authorization arrived with the request. For any remaining question, run the ask-vs-resolve triage at `subagent-driven-development` §Asking the user, gate ① (the cross-skill SSOT) before asking.
