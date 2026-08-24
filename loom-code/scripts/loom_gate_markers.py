@@ -86,6 +86,9 @@ _KEY_RE = {
     "verdict": re.compile(r"^\s*verdict:[^\S\n]*([A-Z_]+)[^\S\n]*$", re.M),
     "dimension_scores": re.compile(r"^\s*dimension_scores:", re.M),
 }
+_TERMINAL_REVIEWED_SHA_RE = re.compile(r"^reviewed_sha:[^\S\n]*(.*)$")
+_FENCED_CODE_DELIMITER_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+_FULL_SHA_RE = re.compile(r"[0-9a-fA-F]{40}")
 _FINDING_RE = re.compile(r"^\s*-\s*severity\s*:")
 _WHERE_RE = re.compile(r"^\s*where\s*:[^\S\n]*(\S.*)$")
 _DIMENSION_RE = re.compile(r"^\s*dimension\s*:[^\S\n]*(.*)$")
@@ -101,6 +104,14 @@ _DOCS_ARM_DIMENSIONS = {
     "missing-population",
 }
 _TOP_KEY_RE = re.compile(r"^\S+\s*:")
+_SIMPLIFICATION_LEDGER_RE = re.compile(
+    r"^simplification_ledger:[^\S\n]*(\[\])?[^\S\n]*$"
+)
+_SIMPLIFICATION_LEDGER_ANCHOR_RE = re.compile(r"^simplification_ledger:")
+_LEDGER_LIST_FIELD_RE = re.compile(
+    r"^\s*-\s*([a-z_]+):[^\S\n]*(.*)$"
+)
+_LEDGER_FIELD_RE = re.compile(r"^\s+([a-z_]+):[^\S\n]*(.*)$")
 _PASSED_RE = re.compile(r"(\d+) passed")
 # where: value counts as location-like if it has a path separator /
 # extension dot, or is a bare commit SHA (reviewer output contract
@@ -441,7 +452,134 @@ def validate_verdict_text(text: str) -> tuple[str | None, list[str]]:
         problems.append("dimension_scores: block missing")
 
     problems.extend(_finding_problems(text))
+    problems.extend(_simplification_ledger_problems(text))
     return verdict, problems
+
+
+def _simplification_ledger_problems(text: str) -> list[str]:
+    """Validate an optional, harvested simplification ledger.
+
+    Older verdict artifacts did not carry this field, so an absent ledger
+    remains schema-valid.  When a review supplies one, however, every
+    nonempty entry is gate evidence: each required marker field must be
+    present, the reviewer must have marked it valid, and the evidence must
+    have been read from the reviewed snapshot.  A failure must therefore
+    refuse the pass marker instead of letting a prose-only ledger claim an
+    all-clear.
+    """
+    lines = text.splitlines()
+    headings = [
+        index
+        for index, line in enumerate(lines)
+        if _SIMPLIFICATION_LEDGER_ANCHOR_RE.match(line)
+    ]
+    if not headings:
+        return []
+    if len(headings) > 1:
+        return ["simplification_ledger: must appear at most once"]
+
+    start = headings[0]
+    heading = _SIMPLIFICATION_LEDGER_RE.match(lines[start])
+    if heading is None:
+        return [
+            "simplification_ledger: malformed value; use [] or an indented list"
+        ]
+    if heading.group(1) == "[]":
+        return []
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if _TOP_KEY_RE.match(lines[index]):
+            end = index
+            break
+    block = lines[start + 1 : end]
+    meaningful = [line for line in block if line.strip() and not line.lstrip().startswith("#")]
+    if not meaningful:
+        return ["simplification_ledger: empty body must be written as []"]
+
+    entry_starts = [
+        index for index, line in enumerate(block) if _LEDGER_LIST_FIELD_RE.match(line)
+    ]
+    if not entry_starts:
+        return ["simplification_ledger: nonempty ledger must be a list of entries"]
+
+    problems: list[str] = []
+    required = ("where", "shortcut", "ceiling", "upgrade", "ref")
+    for number, start_index in enumerate(entry_starts, start=1):
+        end_index = (
+            entry_starts[number]
+            if number < len(entry_starts)
+            else len(block)
+        )
+        fields: dict[str, list[str]] = {}
+        entry_lines = block[start_index:end_index]
+        for offset, line in enumerate(entry_lines):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            match = (
+                _LEDGER_LIST_FIELD_RE.match(line)
+                if offset == 0
+                else _LEDGER_FIELD_RE.match(line)
+            )
+            if match is None:
+                problems.append(
+                    f"simplification ledger entry {number}: malformed field line"
+                )
+                continue
+            fields.setdefault(match.group(1), []).append(match.group(2).strip())
+
+        for field in required:
+            values = fields.get(field, [])
+            if len(values) != 1 or not values[0]:
+                problems.append(
+                    f"simplification ledger entry {number}: {field}: missing or empty"
+                )
+        for field, expected in (("marker_valid", "true"), ("snapshot_read", "verified")):
+            values = fields.get(field, [])
+            if len(values) != 1 or values[0].lower() != expected:
+                problems.append(
+                    f"simplification ledger entry {number}: {field} must be {expected}"
+                )
+    return problems
+
+
+def _terminal_reviewed_sha(text: str) -> tuple[str | None, str | None]:
+    """Return a terminal verdict's SHA, or one precise refusal reason.
+
+    This is deliberately separate from ``validate_verdict_text``: historical
+    callers that omit ``--expected-head`` retain their legacy verdict schema.
+    A caller that binds a marker to an immutable head opts into this stronger
+    terminal-verdict provenance contract.
+    """
+    matches: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines():
+        delimiter = _FENCED_CODE_DELIMITER_RE.match(line)
+        if delimiter:
+            run = delimiter.group(1)
+            if fence is None:
+                fence = (run[0], len(run))
+            elif (
+                run[0] == fence[0]
+                and len(run) >= fence[1]
+                and not line[delimiter.end() :].strip(" \t")
+            ):
+                fence = None
+            continue
+        if fence is None:
+            match = _TERMINAL_REVIEWED_SHA_RE.match(line)
+            if match:
+                matches.append(match.group(1))
+    if not matches:
+        return None, "reviewed_sha: missing from terminal verdict"
+    if len(matches) != 1:
+        return None, "reviewed_sha: must appear exactly once in terminal verdict"
+
+    value = matches[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    if not _FULL_SHA_RE.fullmatch(value):
+        return None, "reviewed_sha: invalid terminal verdict SHA"
+    return value.lower(), None
 
 
 def _origin_required(dimension_value: str | None) -> bool:
@@ -818,6 +956,36 @@ def _cmd_review_pass(repo: Path, marker_dir: Path, args: argparse.Namespace) -> 
     if branch is None or head_sha is None:
         print("loom-gate-markers: cannot resolve HEAD.", file=sys.stderr)
         return 2
+    if args.expected_head is not None and head_sha != args.expected_head:
+        print(
+            "loom-gate-markers: current HEAD does not match the reviewed "
+            "SHA; no marker written. "
+            f"Expected: {args.expected_head}; current: {head_sha}",
+            file=sys.stderr,
+        )
+        return 3
+
+    # `--expected-head` is the SHA-bound route used by the cross-host review
+    # stations.  It requires the terminal artifact itself to attest to the
+    # same commit; checking only repository HEAD would permit verdict A to
+    # mint a marker for B.  The no-flag branch remains intentionally backward
+    # compatible for older callers until they migrate to the immutable packet.
+    if args.expected_head is not None:
+        verdict_reviewed_sha, verdict_sha_problem = _terminal_reviewed_sha(text)
+        if verdict_sha_problem is not None:
+            print(
+                f"loom-gate-markers: {verdict_sha_problem}; no marker written.",
+                file=sys.stderr,
+            )
+            return 4
+        if verdict_reviewed_sha != args.expected_head.lower():
+            print(
+                "loom-gate-markers: terminal verdict reviewed_sha does not match "
+                f"--expected-head; verdict: {verdict_reviewed_sha}; "
+                f"expected: {args.expected_head}",
+                file=sys.stderr,
+            )
+            return 3
 
     quote_statuses = _quote_verification_statuses(text, repo, head_sha)
 
@@ -843,6 +1011,21 @@ def _cmd_review_pass(repo: Path, marker_dir: Path, args: argparse.Namespace) -> 
     patch_id_fields = compute_patch_id(repo)
     if patch_id_fields is not None:
         payload["base_sha"], payload["patch_id"] = patch_id_fields
+    current_head_sha = _git(repo, "rev-parse", "HEAD")
+    if current_head_sha is None:
+        print("loom-gate-markers: cannot resolve HEAD.", file=sys.stderr)
+        return 2
+    if (
+        args.expected_head is not None
+        and current_head_sha != args.expected_head
+    ):
+        print(
+            "loom-gate-markers: current HEAD does not match the reviewed "
+            "SHA; no marker written. "
+            f"Expected: {args.expected_head}; current: {current_head_sha}",
+            file=sys.stderr,
+        )
+        return 3
     path = _write_marker(marker_dir, "review-pass.json", payload)
     print(path)
     _print_normalised_quote_advisory(quote_statuses)
@@ -982,6 +1165,14 @@ def _cmd_mint(repo: Path, marker_dir: Path, args: argparse.Namespace) -> int:
     if branch is None or head_sha is None:
         print("loom-gate-markers: cannot resolve HEAD.", file=sys.stderr)
         return 2
+    if args.expected_head is not None and head_sha != args.expected_head:
+        print(
+            "loom-gate-markers: current HEAD does not match the reviewed "
+            "SHA; no marker written. "
+            f"Expected: {args.expected_head}; current: {head_sha}",
+            file=sys.stderr,
+        )
+        return 3
 
     payload = {
         "schema": 1,
@@ -993,6 +1184,18 @@ def _cmd_mint(repo: Path, marker_dir: Path, args: argparse.Namespace) -> int:
     patch_id_fields = compute_patch_id(repo)
     if patch_id_fields is not None:
         payload["base_sha"], payload["patch_id"] = patch_id_fields
+    current_head_sha = _git(repo, "rev-parse", "HEAD")
+    if current_head_sha is None:
+        print("loom-gate-markers: cannot resolve HEAD.", file=sys.stderr)
+        return 2
+    if args.expected_head is not None and current_head_sha != args.expected_head:
+        print(
+            "loom-gate-markers: current HEAD does not match the reviewed "
+            "SHA; no marker written. "
+            f"Expected: {args.expected_head}; current: {current_head_sha}",
+            file=sys.stderr,
+        )
+        return 3
     path = _write_marker(marker_dir, "review-pass.json", payload)
     print(path)
     return 0
@@ -1069,9 +1272,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry: `review-pass --verdict-file <path>` /
+    """CLI entry: `review-pass --verdict-file <path> [--expected-head <SHA>]` /
     `verified --run "<cmd>"` / `waiver --reason "<text>"` /
-    `mint --review-na-record-only` /
+    `mint --review-na-record-only [--expected-head <SHA>]` /
     `validate --verdict-file <path> [--suite-line "<text>"]`,
     each of the first four with optional `--repo <path>` (default
     cwd). `validate` is a dry-run text check — no repo, no marker
@@ -1089,6 +1292,10 @@ def main(argv: list[str] | None = None) -> int:
     rp = subparsers.add_parser("review-pass")
     rp.add_argument("--repo", default=".", help="repo path (default: cwd)")
     rp.add_argument("--verdict-file", required=True)
+    rp.add_argument(
+        "--expected-head",
+        help="reviewed commit SHA; refuse marker creation if HEAD differs",
+    )
     rp.set_defaults(func=_cmd_review_pass)
 
     vf = subparsers.add_parser("verified")
@@ -1108,6 +1315,10 @@ def main(argv: list[str] | None = None) -> int:
 
     mt = subparsers.add_parser("mint")
     mt.add_argument("--repo", default=".", help="repo path (default: cwd)")
+    mt.add_argument(
+        "--expected-head",
+        help="reviewed commit SHA; refuse marker creation if HEAD differs",
+    )
     mt.add_argument(
         "--review-na-record-only",
         action="store_true",

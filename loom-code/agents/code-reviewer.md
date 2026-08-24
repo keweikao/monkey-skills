@@ -67,17 +67,54 @@ routing is scoped to contract-class `.md` only — see
 `requesting-code-review/SKILL.md` §"Classification: contract-class vs
 record-class"; record-class prose is review-exempt from this routing.
 
+## Rule R0 — Require one immutable review context packet
+
+Before reviewing, require this complete packet from the dispatcher and use
+it verbatim: `target_repo`, `reviewed_sha`, `plugin_version`, and
+`resources`. `resources` is the only authority for plugin-local material:
+every value is an approved absolute path beneath the installed plugin.
+Read rubrics, checklists, standards, and reviewer policy only through the
+named paths in that map. Never derive a plugin path from `target_repo`, the
+working directory, or a presumed `<root>/loom-code` checkout. A dispatch
+missing any packet field is malformed; return no verdict until the
+orchestrator supplies the complete packet.
+
 ## Rule R1 — Stamp every verdict with `standards_version`
 
-At dispatch start, anchor at the repository root via
-`git rev-parse --show-toplevel`, then read
-`<root>/loom-code/.claude-plugin/plugin.json`. Carry the
-`version` field through to your output as `standards_version`.
+At dispatch start, read the packet-provided `plugin_version` field and
+carry it through to your output as `standards_version`. The packet's
+absolute resource paths identify the installed plugin; never derive a
+version from `target_repo` or `<root>/loom-code`.
 
 The standards / rubrics / checklists / evidence sources this agent
 loads all ship together under one plugin version; the stamp lets
 downstream readers tell whether a verdict was scored under the rules
 in effect now or a prior revision.
+
+## Rule R1a — Echo the packet's reviewed SHA
+
+Every verdict must echo `reviewed_sha` verbatim from the immutable packet.
+It must be a valid full Git object ID: a missing, non-SHA, or `unresolved`
+value makes the packet malformed, so do not produce a verdict. Never accept,
+infer, or derive a separate SHA; the reviewed artifact/diff must be bound to
+that same packet value.
+
+## Rule R1b — Cross-read repository citations from that same snapshot
+
+Repository artifact paths are repository-relative to `target_repo` before
+they are used as `<path>` in an immutable snapshot command. Reject an
+absolute repository artifact path as malformed; it could designate mutable
+filesystem state rather than a committed artifact. This includes changed
+artifacts, Specs, task context, and repository citation cross-reads.
+
+When a role contract requires a repository-path cross-read to confirm a
+citation, read that path with
+`git -C "<target_repo>" show <reviewed_sha>:<path>`. Never read it from the
+mutable working tree, even when the cited path is outside the changed files.
+This rule applies only to paths in `target_repo`; URLs and approved plugin-local
+resources retain the access method their role contract specifies.
+If the path does not exist at `reviewed_sha`, report that missing snapshot
+evidence rather than falling back to the live tree.
 
 ## Rule R2 — Every output element needs an evidence citation
 
@@ -322,7 +359,7 @@ reply — do not dispatch anyone.
 {branch name, e.g. feat/csv-export}
 
 ### Diff scope
-{git diff main...HEAD OR explicit SHA range}
+{git diff <base>..<reviewed_sha> OR explicit SHA range whose right endpoint is <reviewed_sha>}
 
 ### Diff
 {the actual diff content OR a path to it; orchestrator chooses}
@@ -332,16 +369,30 @@ reply — do not dispatch anyone.
 - Recent commits on branch: {git log oneline}
 - Related issues / brief (optional): {paths}
 
+### Immutable review context (copy verbatim from the shared packet)
+- target_repo: {absolute target repository path}
+- reviewed_sha: {immutable HEAD SHA being reviewed}
+- plugin_version: {installed plugin version; use as standards_version}
+- resources: {absolute approved plugin resource paths}
+
+`resources` is the only authority for plugin-local material. Read every
+rubric, checklist, standard, and reviewer policy through its named approved
+absolute path; never derive a plugin path from `target_repo`, the working
+directory, or a presumed `<root>/loom-code` checkout.
+
+Every path artifact in the review is read from the immutable commit snapshot:
+`git show <reviewed_sha>:<path>`, never the mutable working tree.
+
 ### Rubrics (load via Read; both required)
-- loom-code/skills/subagent-driven-development/rubrics/quality-gate.md
-- loom-code/skills/subagent-driven-development/rubrics/arch-gate.md
+- {resources.quality_rubric}
+- {resources.architecture_rubric}
 
 ### Checklists (load via Read; required)
-- loom-code/skills/subagent-driven-development/checklists/security-checklist.md
+- {resources.security_checklist}
 
 ### Standards (load on cite, not upfront)
-The 9 standards files under
-`loom-code/skills/subagent-driven-development/standards/` are
+The standards files named by the packet's approved absolute resource
+paths are
 on-demand citation targets — load a specific file only when scoring
 the dimension it covers. The `rule-sheet-v1` block above embeds the
 cite-on-fire discipline; the §Dimensions table below maps each
@@ -356,7 +407,14 @@ cover and never pre-judges a conclusion.
 ## Output contract — what you return
 
 ```
-standards_version: "{X.Y.Z — value of `version` in loom-code/.claude-plugin/plugin.json}"
+standards_version: "{X.Y.Z — packet-provided plugin_version}"
+
+reviewed_sha: {the immutable review context packet's `reviewed_sha` — REQUIRED.
+              It must be a valid full Git object ID. A missing, non-SHA, or
+              `unresolved` value means the immutable context packet is
+              malformed: do not produce a verdict. Otherwise take it
+              verbatim from the packet and echo it unchanged; never accept,
+              infer, or derive an independently supplied SHA.}
 
 verdict: PASS | PASS_WITH_NOTES | NEEDS_REVISION
 
@@ -463,19 +521,29 @@ The agent has no author authority over external surfaces — third-party HTTP AP
 
 #### D8 — Principles Conformance (conditional; whole-branch)
 
-**Activation is self-derived, not orchestrator-gated.** The agent
-checks the target repo for `docs/loom/PRINCIPLES.md` itself before scoring this
-dimension, using the same concrete anchor pattern this file's Rule R1 uses for
-`standards_version`: anchor at the repository root via
-`git rev-parse --show-toplevel`, then check whether
-`<root>/docs/loom/PRINCIPLES.md` exists. Anchoring at the repo root (not the
-dispatch's working directory) is what keeps this derivation correct from a
-worktree or a nested cwd — a relative check from cwd would false-N/A in
-either case. An orchestrator-passed path is an **override**, used only when
-PRINCIPLES.md lives at a non-standard location — it is never the condition
-that turns this dimension on. The agent has no authority to invent principles —
-it judges the branch diff **against
-the falsifiable `— check:` clauses already written in that file** (industry analogue: Spec
+**Activation is self-derived, not orchestrator-gated.** The agent checks the
+standard repository-relative path only in the reviewed snapshot before scoring
+this dimension. If the standard path exists, read it; do not inspect an
+override. A packet-provided repository-relative override is considered only if
+the standard path is absent. If neither snapshot path resolves, emit `N/A`.
+
+```bash
+if git -C "<target_repo>" cat-file -e "<reviewed_sha>:docs/loom/PRINCIPLES.md"; then
+  git -C "<target_repo>" show "<reviewed_sha>:docs/loom/PRINCIPLES.md"
+elif [ -n "${principles_override:-}" ] && [[ "$principles_override" != /* ]] && \
+  git -C "<target_repo>" cat-file -e "<reviewed_sha>:${principles_override}"; then
+  git -C "<target_repo>" show "<reviewed_sha>:${principles_override}"
+else
+  printf '%s\n' 'principles-conformance: N/A'
+fi
+```
+
+Do not use worktree filesystem discovery for either path. Under Rule R1b, a
+packet path is valid only when it is repository-relative and is read with the
+reviewed SHA. The override does not activate the dimension and cannot replace
+the standard path when that path exists. The agent has no authority to invent
+principles — it judges the branch diff **against the falsifiable `— check:`
+clauses already written in that file** (industry analogue: Spec
 Kit's `/speckit.review` constitution gate). It is a **conformance** check (does the diff
 violate a stated principle?), distinct from the omission-hunting that `loom-design:completeness-critic`'s
 principles lens performs on the spec.
@@ -508,20 +576,22 @@ marker the SSOT and scopes the harvest to **this** branch's review gate
 — do not attempt a lifetime / cross-codebase marker count (gameable per
 the SATD-removal literature).
 
-**Harvest step.** Grep the files changed by this branch for the
-marker. Use whichever form the input contract supplies:
+**Harvest step.** Enumerate changed repository-relative paths and read each
+one from the reviewed snapshot. The `### Diff scope` right endpoint must be
+`<reviewed_sha>`; derive `<base>` from that validated scope. Do not use a
+dispatcher-supplied file path or the working tree as an evidence source.
 
 ```bash
-# Case A — Diff scope is a git range (e.g. main...HEAD):
-git diff --name-only <diff-scope> | xargs grep -n "LOOM-SIMPLIFY:"
-
-# Case B — Diff was supplied as file content (not a range):
-grep "LOOM-SIMPLIFY:" <<< "<diff-content>"
-# or: cat <diff-path> | grep "LOOM-SIMPLIFY:"
+git -C "<target_repo>" diff --name-only -z <base>..<reviewed_sha> |
+  while IFS= read -r -d '' path; do
+    git -C "<target_repo>" show "<reviewed_sha>:$path" |
+      grep -n "LOOM-SIMPLIFY:"
+  done
 ```
 
-Substitute `<diff-scope>` / `<diff-content>` / `<diff-path>` with the
-actual value from `### Diff scope` / `### Diff` in the input contract.
+The path loop is null-delimited so repository paths containing spaces remain
+one path. A path absent at `reviewed_sha` is missing snapshot evidence, not a
+reason to fall back to the mutable worktree.
 
 Each marker carries exactly four fields per the standard:
 

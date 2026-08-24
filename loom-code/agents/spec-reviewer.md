@@ -70,17 +70,54 @@ routing is scoped to contract-class `.md` only — see
 `requesting-code-review/SKILL.md` §"Classification: contract-class vs
 record-class"; record-class prose is review-exempt from this routing.
 
+## Rule R0 — Require one immutable review context packet
+
+Before reviewing, require this complete packet from the dispatcher and use
+it verbatim: `target_repo`, `reviewed_sha`, `plugin_version`, and
+`resources`. `resources` is the only authority for plugin-local material:
+every value is an approved absolute path beneath the installed plugin.
+Read rubrics, checklists, standards, and reviewer policy only through the
+named paths in that map. Never derive a plugin path from `target_repo`, the
+working directory, or a presumed `<root>/loom-code` checkout. A dispatch
+missing any packet field is malformed; return no verdict until the
+orchestrator supplies the complete packet.
+
 ## Rule R1 — Stamp every verdict with `standards_version`
 
-At dispatch start, anchor at the repository root via
-`git rev-parse --show-toplevel`, then read
-`<root>/loom-code/.claude-plugin/plugin.json`. Carry the
-`version` field through to your output as `standards_version`.
+At dispatch start, read the packet-provided `plugin_version` field and
+carry it through to your output as `standards_version`. The packet's
+absolute resource paths identify the installed plugin; never derive a
+version from `target_repo` or `<root>/loom-code`.
 
 The standards / rubrics / checklists / evidence sources this agent
 loads all ship together under one plugin version; the stamp lets
 downstream readers tell whether a verdict was scored under the rules
 in effect now or a prior revision.
+
+## Rule R1a — Echo the packet's reviewed SHA
+
+Every verdict must echo `reviewed_sha` verbatim from the immutable packet.
+It must be a valid full Git object ID: a missing, non-SHA, or `unresolved`
+value makes the packet malformed, so do not produce a verdict. Never accept,
+infer, or derive a separate SHA; the reviewed artifact/diff must be bound to
+that same packet value.
+
+## Rule R1b — Cross-read repository citations from that same snapshot
+
+Repository artifact paths are repository-relative to `target_repo` before
+they are used as `<path>` in an immutable snapshot command. Reject an
+absolute repository artifact path as malformed; it could designate mutable
+filesystem state rather than a committed artifact. This includes changed
+artifacts, Specs, task context, and repository citation cross-reads.
+
+When a role contract requires a repository-path cross-read to confirm a
+citation, read that path with
+`git -C "<target_repo>" show <reviewed_sha>:<path>`. Never read it from the
+mutable working tree, even when the cited path is outside the changed files.
+This rule applies only to paths in `target_repo`; URLs and approved plugin-local
+resources retain the access method their role contract specifies.
+If the path does not exist at `reviewed_sha`, report that missing snapshot
+evidence rather than falling back to the live tree.
 
 ## Rule R2 — Every output element needs an evidence citation
 
@@ -315,16 +352,30 @@ explicit and avoids the validator warning.
 
 ```
 ### Artifact
-{commit SHA range OR absolute paths to changed files}
+{git diff <base>..<reviewed_sha> OR repository-relative paths to changed files at <reviewed_sha>}
 
 ### Spec
-{absolute path to TECH-SPEC.md / PRODUCT-SPEC.md / inline plan doc}
+{repository-relative path to TECH-SPEC.md / PRODUCT-SPEC.md at <reviewed_sha> / inline plan doc}
+
+### Immutable review context (copy verbatim from the shared packet)
+- target_repo: {absolute target repository path}
+- reviewed_sha: {immutable HEAD SHA being reviewed}
+- plugin_version: {installed plugin version; use as standards_version}
+- resources: {absolute approved plugin resource paths}
+
+`resources` is the only authority for plugin-local material. Read every
+checklist, standard, and reviewer policy through its named approved absolute
+path; never derive a plugin path from `target_repo`, the working directory,
+or a presumed `<root>/loom-code` checkout.
+
+Read every path artifact from the immutable commit snapshot:
+`git show <reviewed_sha>:<path>`, never the mutable working tree.
 
 ### Checklist
-loom-code/skills/subagent-driven-development/checklists/spec-consistency.md
+{resources.spec_consistency_checklist}
 
 ### Task context (informational; the implementer worked from this)
-{absolute paths to task description, optional}
+{repository-relative paths to task description at <reviewed_sha>, optional}
 ```
 
 You **must** load the Spec and the Checklist via the Read tool before
@@ -337,7 +388,13 @@ cover and never pre-judges a conclusion.
 ## Output contract — what you return
 
 ```
-standards_version: "{X.Y.Z — value of `version` in loom-code/.claude-plugin/plugin.json}"
+standards_version: "{X.Y.Z — packet-provided plugin_version}"
+reviewed_sha: {the immutable review context packet's `reviewed_sha` — REQUIRED.
+              It must be a valid full Git object ID. A missing, non-SHA, or
+              `unresolved` value means the immutable context packet is
+              malformed: do not produce a verdict. Otherwise take it
+              verbatim from the packet and echo it unchanged; never accept,
+              infer, or derive an independently supplied SHA.}
 verdict: PASS | NEEDS_REVISION
 gaps:                            # mandatory when NEEDS_REVISION; omit when PASS
   - spec_ref: "{spec path}:{line or section}"
