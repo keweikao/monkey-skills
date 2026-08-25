@@ -74,6 +74,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ALLOWED_VERDICTS = {"PASS", "PASS_WITH_NOTES", "NEEDS_REVISION"}
+# A reviewer's explicit refusal of a malformed dispatch packet.
+# NEVER added to ALLOWED_VERDICTS: the refusal is machine-readable but
+# un-mintable — see `validate_verdict_text`.
+_MALFORMED_PACKET_REFUSAL = "MALFORMED_PACKET"
 MIN_WAIVER_REASON_CHARS = 10
 
 # NOTE: value-capturing regexes use [^\S\n]* (horizontal whitespace),
@@ -440,6 +444,19 @@ def validate_verdict_text(text: str) -> tuple[str | None, list[str]]:
     vm = _KEY_RE["verdict"].search(text)
     if not vm:
         problems.append("verdict: missing")
+    elif vm.group(1) == _MALFORMED_PACKET_REFUSAL:
+        # A reviewer's explicit refusal of a malformed dispatch packet,
+        # not a verdict value — deliberately NOT in ALLOWED_VERDICTS,
+        # so it can never mint a review-pass marker. Its
+        # `missing_fields:` list is accepted refusal syntax (nothing
+        # here flags it). The whole text is a refusal document: the fix
+        # is upstream in the dispatch packet, not in this text's shape.
+        return None, [
+            "verdict: MALFORMED_PACKET is a malformed-packet refusal, "
+            "not a review verdict — no marker can ever be minted from "
+            "it. Fix the dispatch packet (see the refusal's "
+            "missing_fields: list) and re-dispatch the reviewer."
+        ]
     elif vm.group(1) not in ALLOWED_VERDICTS:
         problems.append(
             f"verdict: invalid value {vm.group(1)!r} "
@@ -450,6 +467,14 @@ def validate_verdict_text(text: str) -> tuple[str | None, list[str]]:
 
     if not _KEY_RE["dimension_scores"].search(text):
         problems.append("dimension_scores: block missing")
+
+    # reviewed_sha is required UNCONDITIONALLY (fail-closed intake): a
+    # verdict without a full 40-hex reviewed_sha is evidence-unbound.
+    # `--expected-head` adds its equality binding ON TOP of this shape
+    # check; presence/shape is not opt-in.
+    _, sha_problem = _terminal_reviewed_sha(text)
+    if sha_problem is not None:
+        problems.append(sha_problem)
 
     problems.extend(_finding_problems(text))
     problems.extend(_simplification_ledger_problems(text))
@@ -545,10 +570,10 @@ def _simplification_ledger_problems(text: str) -> list[str]:
 def _terminal_reviewed_sha(text: str) -> tuple[str | None, str | None]:
     """Return a terminal verdict's SHA, or one precise refusal reason.
 
-    This is deliberately separate from ``validate_verdict_text``: historical
-    callers that omit ``--expected-head`` retain their legacy verdict schema.
-    A caller that binds a marker to an immutable head opts into this stronger
-    terminal-verdict provenance contract.
+    ``validate_verdict_text`` calls this for the unconditional
+    presence/shape requirement (a full 40-hex ``reviewed_sha:`` exactly
+    once, outside fenced code); ``--expected-head`` callers additionally
+    compare the returned SHA for equality against the pinned head.
     """
     matches: list[str] = []
     fence: tuple[str, int] | None = None

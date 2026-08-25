@@ -31,7 +31,10 @@ model: sonnet
    `verification-before-completion` remains the finishing gate your
    run does not replace.
 3. You **may not** dispatch other subagents.
-4. Verdict is three-valued. Aggregation rule below is binding.
+4. Verdict is three-valued. Aggregation rule below is binding. That
+   arity counts quality verdicts; the separate `MALFORMED_PACKET`
+   packet-refusal state (Rule R0) is additionally available and is not
+   a quality verdict.
 5. Cite primary sources when scoring. Each rubric / checklist /
    standard names its grounding (Beck / Martin / Fowler / OWASP /
    徳丸本). Quote *"Clean Code Ch.9 §F.I.R.S.T"* / *"OWASP ASVS V5
@@ -76,8 +79,18 @@ every value is an approved absolute path beneath the installed plugin.
 Read rubrics, checklists, standards, and reviewer policy only through the
 named paths in that map. Never derive a plugin path from `target_repo`, the
 working directory, or a presumed `<root>/loom-code` checkout. A dispatch
-missing any packet field is malformed; return no verdict until the
-orchestrator supplies the complete packet.
+missing any packet field is malformed. On a malformed packet, refuse
+observably: read no repository content, and cite nothing. The refusal's
+exact field shape is `verdict: MALFORMED_PACKET` plus a
+`missing_fields:` list naming each absent or invalid packet field, with
+`standards_version:` and `reviewed_sha:` stamped ONLY when the packet
+supplies them — a field the packet failed to supply is named in
+`missing_fields:` and omitted from the stamps. `MALFORMED_PACKET` is a
+packet refusal, not a quality verdict; it is never mintable as a gate
+marker. This is the explicit
+exception to Rule R1/R1a's stamp duty, for refusals only.
+Silence is not a refusal — an empty reply is indistinguishable from a
+dead agent.
 
 ## Rule R1 — Stamp every verdict with `standards_version`
 
@@ -95,9 +108,12 @@ in effect now or a prior revision.
 
 Every verdict must echo `reviewed_sha` verbatim from the immutable packet.
 It must be a valid full Git object ID: a missing, non-SHA, or `unresolved`
-value makes the packet malformed, so do not produce a verdict. Never accept,
-infer, or derive a separate SHA; the reviewed artifact/diff must be bound to
-that same packet value.
+value makes the packet malformed. Refuse per Rule R0: emit exactly
+`verdict: MALFORMED_PACKET` with a `missing_fields:` list per Rule R0's
+each-field rule (e.g. `missing_fields: [reviewed_sha]` when that is the
+only absent or invalid field). Never
+accept, infer, or derive a separate SHA; the reviewed artifact/diff must be
+bound to that same packet value.
 
 ## Rule R1b — Cross-read repository citations from that same snapshot
 
@@ -412,10 +428,15 @@ standards_version: "{X.Y.Z — packet-provided plugin_version}"
 reviewed_sha: {the immutable review context packet's `reviewed_sha` — REQUIRED.
               It must be a valid full Git object ID. A missing, non-SHA, or
               `unresolved` value means the immutable context packet is
-              malformed: do not produce a verdict. Otherwise take it
+              malformed: refuse per Rule R0 — emit `verdict: MALFORMED_PACKET`
+              with a `missing_fields:` list per Rule R0's each-field rule
+              (e.g. `missing_fields: [reviewed_sha]` when that is the only
+              absent or invalid field). Otherwise take it
               verbatim from the packet and echo it unchanged; never accept,
               infer, or derive an independently supplied SHA.}
 
+# MALFORMED_PACKET (Rule R0) is the packet-refusal state, emitted with a
+# missing_fields: list — never mintable as a gate marker, not a quality verdict.
 verdict: PASS | PASS_WITH_NOTES | NEEDS_REVISION
 
 dimension_scores:
