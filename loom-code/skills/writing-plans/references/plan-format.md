@@ -11,6 +11,7 @@ SDD dispatches three subagents per task (implementer + spec-reviewer + code-qual
 - **Context paths** — what the implementer reads (paths-not-content delegation).
 - **Acceptance** — for tdd-iron-law's RED-GREEN-REFACTOR cycle (failing test name + GREEN condition).
 - **Dependencies** — for sequencing / parallelization.
+- **Seam** — the inter-task payload contract SDD carries into dispatch packets (see §Seam).
 
 Free-form plans force SDD to re-parse; this schema makes the parse trivial.
 
@@ -124,6 +125,7 @@ This section deliberately carries no owner field, no deadline field, no routing 
     referent — do NOT add a second field; point at the source `### Requirement:` / `#### Scenario:`
     names rather than copying their prose. One no-requirement value is legal: `none — <reason>`.
     See §`Brief item covered` below for kind (c), that value, and the tie-break rule.>
+- **Seam**: <v0.100.0+ — required when this task's `Dependencies` is not "none"; one bullet per incoming dependency edge. See §Seam below. Omit field entirely when `Dependencies` is "none".>
 - **Status**: <runtime ledger field, DEFAULT-ON — see §Progress ledger. One of:
     "pending" | "claimed(@<agent>)" | "done(<sha>)" | "blocked". writing-plans emits
     "pending" at plan time; an old plan without Status fields behaves exactly as
@@ -291,6 +293,19 @@ Before v0.43.0, this field was one free-prose line combining a behaviour-match c
 
 **Tie-break — one primary referent per task.** When a task plausibly delivers two brief items, the primary referent is the item the task's RED test asserts. The RED test is this repo's definition of done, so it is the least arbitrary anchor available; the rejected alternative — the item most of `Files touched` serves — tracks effort rather than outcome, and a task can spend most of its edits on the item it does not actually deliver.
 
+#### Seam (v0.100.0+)
+
+**`Seam` is a per-task field on the consumer task**, REQUIRED whenever that task's `Dependencies` is not "none" — one bullet per incoming dependency edge. The field attaches to the existing `Dependencies` edges; there is no plan-level parallel section that declares seams separately.
+
+Each bullet takes one of exactly two forms:
+
+- `from Task <N>: payload: none` — nothing crosses the edge; `Dependencies` on `Task <N>` is ordering only.
+- `from Task <N>: payload: <shape>; owner: Task <M>; probe: <name of the executed cross-seam probe in this task's Acceptance>` — data crosses the edge. `owner` names the task that defines the shared parser or schema for that payload; `probe` names the executed check, in this task's own `Acceptance`, that exercises the seam rather than a same-task assumption about it.
+
+Why: a seam owned by no task is how two individually green tasks integrate red — each side's `Acceptance` passes against its own assumption of the shape crossing the edge, and nothing in either task's RED/GREEN pair ever runs the other side's code against it.
+
+A payload-bearing seam obligates two things on top of the bullet itself: (a) one executed cross-seam probe, named in the consumer task's `Acceptance` — the `probe:` value appears verbatim inside that task's `Acceptance` block (substring containment, the checker's rule) — not a same-task unit test that only exercises the consumer's own assumption of the shape; (b) both tasks import one shared parser or schema defined by the `owner` task — never two hand-rolled readers of the same bytes, since two independent readers can each pass while agreeing on nothing. Enforcement splits: `check_seam_coverage.py` — run as writing-plans' unconditional Seam-coverage gate before the plan-document-reviewer dispatch — mechanically checks field presence, per-edge coverage by `from Task <N>` identity, and the `probe:`↔`Acceptance` containment; Check 20 re-checks the same ground at plan review; whether the named probe is actually adequate — whether it would catch a real shape mismatch — stays the reviewers' judgment, not something either check can decide.
+
 ### Stated facts — the pointer-not-copy rule (v0.39.0+)
 
 A plan is a technical SSOT that nothing validates: every downstream station judges the artifact **against the plan**, so a fact the plan states wrongly is implemented faithfully, reviewed as conformant, and typically surfaces only at close-out — the most expensive point to catch it. This rule makes the copy unnecessary — it is not extra ceremony on top of it.
@@ -445,6 +460,9 @@ N/A — no unresolved question: brief left nothing undecided at plan time.
   - **RED**: `reports.test.ts > GET /reports/:id?format=csv returns text/csv body matching renderer output`
   - **GREEN**: end-to-end request returns valid CSV; Content-Type header correct
 - **Dependencies**: Tasks 1, 2 complete first
+- **Seam**:
+  - from Task 1: payload: none
+  - from Task 2: payload: CSV string; owner: Task 2; probe: `reports.test.ts > GET /reports/:id?format=csv returns text/csv body matching renderer output`
 - **Independent**: false  # touches files Task 1 also touches; must run after Task 1
 - **Brief item covered**: "minimum shippable change: end-to-end CSV download path"
 - **Status**: pending

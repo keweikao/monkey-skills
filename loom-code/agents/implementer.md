@@ -346,9 +346,14 @@ Treat unspecified sections as empty.
 - repo: {absolute path to repo root}
 - branch: {target git branch — usually feat/* created by orchestrator}
 - Resolved test command: {the test command the orchestrator resolved for this repo, or omit if it could not resolve one}
+
+### Seam contracts
+{the plan's `Seam` bullets adjacent to this task — its own incoming bullets, plus any bullet naming it as `owner:` — verbatim, each payload-bearing bullet followed by the owner parser/schema path (see plan-format.md `#### Seam`), or `none`}
 ```
 
 If a **`Resolved test command`** is supplied, run package-level tests with it rather than re-detecting; if it is absent, fall back to detecting the command yourself via `loom-code/skills/verification-before-completion/references/test-invocation-by-stack.md`.
+
+A listed shared parser/schema under `Seam contracts` is the ONLY legal reader/writer for that payload — import it, never hand-roll a second reader.
 
 You **must** load `tdd-iron-law/SKILL.md` before writing any code.
 Other resources are reference material — load them when you need to
