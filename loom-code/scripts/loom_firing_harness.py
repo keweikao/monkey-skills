@@ -57,9 +57,16 @@ Stdlib only.
 """
 
 import argparse
+from dataclasses import dataclass
+import hashlib
 import json
+import os
+from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 _SELF_CONTAINED_MIN_LEN = 15
 _REQUIRED_FIELDS = ("query", "expected", "notes")
@@ -343,6 +350,342 @@ def run_corpus(
     return results
 
 
+_HOSTS = ("claude", "codex")
+_OUTCOME_SCORE = {"EXACT": 3, "FAMILY": 2, "MISS": 1, "OVER": 0}
+
+
+@dataclass(frozen=True)
+class HostInvocation:
+    """One root-specific host run, kept injectable for offline tests."""
+
+    host: str
+    root_label: str
+    plugin_root: Path
+    record: dict
+    replicate: int
+    argv: tuple[str, ...]
+    codex_home: Path | None
+    environment: dict[str, str]
+
+
+def run_host(invocation: HostInvocation) -> str:
+    """Execute one host invocation; callers can replace this in unit tests."""
+    env = {**os.environ, **invocation.environment}
+    if invocation.host == "codex":
+        _prepare_codex_root(invocation, env)
+    proc = subprocess.run(
+        invocation.argv, capture_output=True, text=True, check=False, env=env
+    )
+    if proc.returncode:
+        raise RuntimeError(
+            f"{invocation.host} host exited with status {proc.returncode}"
+        )
+    return proc.stdout + proc.stderr
+
+
+def _plugin_tree_fingerprint(root: Path) -> str:
+    """Hash one regular, symlink-free plugin tree for cache identity."""
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Codex plugin root must be a regular directory")
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item.relative_to(root))):
+        relative = str(path.relative_to(root))
+        if path.is_symlink():
+            raise ValueError(f"Codex plugin root contains symlink: {relative}")
+        if path.is_dir():
+            payload = b""
+            kind = "D"
+        elif path.is_file():
+            payload = path.read_bytes()
+            kind = "F"
+        else:
+            raise ValueError(f"Codex plugin root contains special file: {relative}")
+        entry = json.dumps(
+            [
+                kind, relative, path.stat().st_mode & 0o111,
+                hashlib.sha256(payload).hexdigest(),
+            ],
+            ensure_ascii=False, separators=(",", ":"),
+        ).encode()
+        digest.update(len(entry).to_bytes(8, "big"))
+        digest.update(entry)
+    return digest.hexdigest()
+
+
+def _prepare_codex_root(invocation: HostInvocation, env: dict[str, str]) -> None:
+    """Install one source root into its own disposable Codex home."""
+    if invocation.codex_home is None:
+        raise ValueError("Codex invocation requires an isolated CODEX_HOME")
+    lexical_home = Path(os.path.abspath(os.fspath(invocation.codex_home)))
+    if invocation.codex_home.is_symlink() or lexical_home != invocation.codex_home.resolve():
+        raise ValueError("Codex home must not contain a symlink alias")
+    plugin_fingerprint = _plugin_tree_fingerprint(invocation.plugin_root)
+    manifest = invocation.plugin_root / ".codex-plugin" / "plugin.json"
+    try:
+        plugin_name = json.loads(manifest.read_text(encoding="utf-8"))["name"]
+    except (OSError, json.JSONDecodeError, KeyError) as exc:
+        raise ValueError("Codex plugin root must contain a named .codex-plugin manifest") from exc
+    if (
+        not isinstance(plugin_name, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", plugin_name) is None
+    ):
+        raise ValueError("Codex plugin root manifest name has an invalid identifier")
+    marketplace = invocation.codex_home / "marketplace"
+    if marketplace.is_symlink():
+        raise ValueError("Codex marketplace must not be a symlink")
+    marker = invocation.codex_home / ".loom-harness-prepared"
+    if marker.is_symlink():
+        raise ValueError("Codex preparation marker must not be a symlink")
+    marker_payload = {
+        "plugin_fingerprint": plugin_fingerprint,
+        "plugin_name": plugin_name,
+        "root_label": invocation.root_label,
+    }
+    target = marketplace / plugin_name
+    try:
+        installed_matches = (
+            not target.is_symlink()
+            and _plugin_tree_fingerprint(target) == plugin_fingerprint
+        )
+        prepared = (
+            json.loads(marker.read_text(encoding="utf-8")) == marker_payload
+            and installed_matches
+        )
+    except (OSError, json.JSONDecodeError):
+        prepared = False
+    except ValueError:
+        prepared = False
+    if not prepared:
+        invocation.codex_home.mkdir(parents=True, exist_ok=True)
+        if marketplace.exists():
+            shutil.rmtree(marketplace)
+        if target.parent.resolve() != marketplace.resolve():
+            raise ValueError("Codex plugin manifest name escapes marketplace")
+        shutil.copytree(invocation.plugin_root, target)
+        manifest_dir = marketplace / ".claude-plugin"
+        manifest_dir.mkdir()
+        marketplace_name = f"loom-harness-{invocation.root_label}"
+        (manifest_dir / "marketplace.json").write_text(
+            json.dumps({
+                "name": marketplace_name,
+                "owner": {"name": "loom-harness"},
+                "plugins": [{"name": plugin_name, "source": f"./{plugin_name}/"}],
+            }),
+            encoding="utf-8",
+        )
+        for command in (
+            ("codex", "plugin", "marketplace", "add", str(marketplace)),
+            ("codex", "plugin", "add", f"{plugin_name}@{marketplace_name}"),
+        ):
+            result = subprocess.run(command, capture_output=True, text=True, check=False, env=env)
+            if result.returncode:
+                raise RuntimeError("Codex plugin installation failed for comparison root")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".loom-harness-prepared.", dir=invocation.codex_home
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(marker_payload, sort_keys=True) + "\n")
+            os.replace(temporary, marker)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def host_argv_for_root(
+    host: str,
+    plugin_root: Path,
+    record: dict,
+    *,
+    max_turns: int,
+    working_directory: Path,
+    claude_model: str | None = None,
+    codex_model: str | None = None,
+) -> tuple[str, ...]:
+    """Build the host-specific argv for one explicitly named plugin root.
+
+    Claude accepts a source plugin directory directly. Codex loads plugins
+    from its configured installation, so the root stays in the invocation
+    provenance rather than being passed as Claude's unsupported flag.
+    """
+    root = Path(plugin_root).resolve()
+    if host == "claude":
+        argv = (
+            "claude", "-p", record["query"], "--max-turns", str(max_turns),
+            "--allowedTools", "Skill", "--output-format", "stream-json",
+            "--verbose", "--plugin-dir", str(root),
+        )
+        return argv if claude_model is None else argv + ("--model", claude_model)
+    if host == "codex":
+        argv = (
+            "codex", "exec", "--ephemeral",
+            "--ignore-rules", "--sandbox", "workspace-write",
+            "--skip-git-repo-check", "-C", str(Path(working_directory).resolve()),
+            "--json", record["query"],
+        )
+        return argv if codex_model is None else argv[:-1] + ("--model", codex_model, argv[-1])
+    raise ValueError(f"unsupported host: {host}")
+
+
+def _host_events(transcript: str) -> list[dict]:
+    events, _ = _parse_stream_json_lines(transcript)
+    return events
+
+
+def _normalize_observable(host: str, transcript: str) -> dict:
+    """Keep only structured host observations; deliberately omit prose."""
+    events = _host_events(transcript)
+    if host == "claude":
+        fired = _extract_fired_skill(events)
+        subtype, _ = _extract_result(events)
+        tool_sequence = tuple(
+            block.get("name")
+            for event in events if event.get("type") == "assistant"
+            for block in event.get("message", {}).get("content", [])
+            if block.get("type") == "tool_use" and isinstance(block.get("name"), str)
+        )
+        return {"fired": fired, "result_subtype": subtype, "tool_sequence": tool_sequence}
+
+    commands = []
+    fired = None
+    tokens = None
+    for event in events:
+        item = event.get("item")
+        if event.get("type") == "item.completed" and isinstance(item, dict):
+            if item.get("type") == "command_execution" and isinstance(item.get("command"), str):
+                command = item["command"]
+                commands.append(command)
+                parts = command.split(maxsplit=1)
+                if fired is None and len(parts) == 2 and parts[0] == "skill":
+                    fired = parts[1]
+                if fired is None:
+                    match = re.search(
+                        r"/(loom-[^/\s]+)/[^/\s]+/skills/([^/\s]+)/SKILL\.md",
+                        command,
+                    )
+                    if match:
+                        fired = f"{match.group(1)}:{match.group(2)}"
+        usage = event.get("usage")
+        if isinstance(usage, dict):
+            tokens = dict(usage)
+    completed = any(event.get("type") == "turn.completed" for event in events)
+    return {
+        "fired": fired,
+        "result_subtype": "completed" if completed else "",
+        "tool_sequence": tuple(commands),
+        "tokens": tokens,
+    }
+
+
+def _comparison_verdict(pairs: list[tuple[dict, dict]]) -> str:
+    """Require two identical observable changes before assigning direction."""
+    gradeable = {"success", "error_max_turns", "completed"}
+    if any(
+        run["observable"].get("result_subtype") not in gradeable
+        for pair in pairs for run in pair
+    ):
+        return "INCONCLUSIVE"
+    differences: dict[tuple[str, str], list[tuple[dict, dict]]] = {}
+    for baseline, candidate in pairs:
+        before_observable = {
+            key: value for key, value in baseline["observable"].items()
+            if key != "tokens"
+        }
+        after_observable = {
+            key: value for key, value in candidate["observable"].items()
+            if key != "tokens"
+        }
+        before = json.dumps(before_observable, sort_keys=True, default=list)
+        after = json.dumps(after_observable, sort_keys=True, default=list)
+        if before != after:
+            differences.setdefault((before, after), []).append((baseline, candidate))
+    if not differences:
+        return "PASS"
+    if len(differences) != 1:
+        return "INCONCLUSIVE"
+    matching = max(differences.values(), key=len)
+    if len(matching) < 2:
+        return "INCONCLUSIVE"
+    before = grade_record({"expected": matching[0][0]["expected"], **matching[0][0]["observable"]})
+    after = grade_record({"expected": matching[0][1]["expected"], **matching[0][1]["observable"]})
+    if _OUTCOME_SCORE[after] < _OUTCOME_SCORE[before]:
+        return "REGRESSION"
+    if _OUTCOME_SCORE[after] > _OUTCOME_SCORE[before]:
+        return "IMPROVEMENT"
+    return "INCONCLUSIVE"
+
+
+def compare_hosts(
+    records: list[dict],
+    baseline_root: Path,
+    candidate_root: Path,
+    *,
+    replicates: int = 2,
+    raw_dir: Path,
+    runner,
+    max_turns: int = _MAX_TURNS_FLOOR,
+    working_directory: Path | None = None,
+    claude_model: str | None = None,
+    codex_model: str | None = None,
+) -> dict:
+    """Run baseline and candidate roots through both hosts and compare facts.
+
+    ``runner`` receives a :class:`HostInvocation` and returns raw JSONL. This
+    preserves transcript evidence while making unit tests and future live
+    adapters share the same comparison logic.
+    """
+    if replicates < 2:
+        raise ValueError("comparison requires at least two replicates")
+    roots = (("baseline", Path(baseline_root).resolve()), ("candidate", Path(candidate_root).resolve()))
+    raw_directory = Path(raw_dir).resolve()
+    raw_directory.mkdir(parents=True, exist_ok=True)
+    cwd = Path.cwd() if working_directory is None else Path(working_directory)
+    runs = []
+    for record_index, record in enumerate(records):
+        for host in _HOSTS:
+            for root_label, plugin_root in roots:
+                for replicate in range(replicates):
+                    invocation = HostInvocation(
+                        host, root_label, plugin_root, record, replicate,
+                        host_argv_for_root(
+                            host, plugin_root, record, max_turns=max_turns,
+                            working_directory=cwd, claude_model=claude_model,
+                            codex_model=codex_model,
+                        ),
+                        raw_directory / f"codex-home-{root_label}" if host == "codex" else None,
+                        {"CODEX_HOME": str(raw_directory / f"codex-home-{root_label}")} if host == "codex" else {},
+                    )
+                    transcript = runner(invocation)
+                    raw_path = raw_directory / f"{record_index}-{host}-{root_label}-{replicate}.jsonl"
+                    raw_path.write_text(transcript, encoding="utf-8")
+                    runs.append({
+                        **record,
+                        "record_index": record_index,
+                        "host": host,
+                        "root_label": root_label,
+                        "plugin_root": str(plugin_root),
+                        "replicate": replicate,
+                        "model": claude_model if host == "claude" else codex_model,
+                        "argv": invocation.argv,
+                        "raw_transcript_path": str(raw_path),
+                        "observable": _normalize_observable(host, transcript),
+                    })
+    comparisons = []
+    for record_index, record in enumerate(records):
+        for host in _HOSTS:
+            pairs = []
+            for replicate in range(replicates):
+                matching = [
+                    run for run in runs
+                    if run["host"] == host
+                    and run["replicate"] == replicate
+                    and run["record_index"] == record_index
+                ]
+                pairs.append((next(run for run in matching if run["root_label"] == "baseline"), next(run for run in matching if run["root_label"] == "candidate")))
+            comparisons.append({"record_index": record_index, "host": host, "verdict": _comparison_verdict(pairs)})
+    return {"runs": runs, "comparisons": comparisons}
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     with open(args.corpus, encoding="utf-8") as f:
         records = parse_corpus(f.read())
@@ -367,9 +710,29 @@ def _cmd_grade(args: argparse.Namespace) -> None:
         print(f"{key}: {counts[key]}")
 
 
+def _cmd_compare(args: argparse.Namespace) -> None:
+    with open(args.corpus, encoding="utf-8") as f:
+        records = parse_corpus(f.read())
+    result = compare_hosts(
+        records,
+        args.baseline,
+        args.candidate,
+        replicates=args.replicates,
+        raw_dir=args.raw_dir,
+        runner=run_host,
+        max_turns=args.max_turns,
+        working_directory=args.working_directory,
+        claude_model=args.claude_model,
+        codex_model=args.codex_model,
+    )
+    output = json.dumps(result, ensure_ascii=False, default=list)
+    if args.out:
+        args.out.write_text(output + "\n", encoding="utf-8")
+    print(output)
+
+
 def main(argv: list[str] | None = None) -> None:
-    """CLI entry: `run --corpus <path> [--max-turns N] [--out <path>]` or
-    `grade --in <path>`."""
+    """CLI entry for Claude-only run/grade and dual-host comparison."""
     parser = argparse.ArgumentParser(description="loom-* firing/refusal harness")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -382,6 +745,19 @@ def main(argv: list[str] | None = None) -> None:
     grade_parser = subparsers.add_parser("grade")
     grade_parser.add_argument("--in", dest="in_path", required=True)
     grade_parser.set_defaults(func=_cmd_grade)
+
+    compare_parser = subparsers.add_parser("compare")
+    compare_parser.add_argument("--corpus", required=True)
+    compare_parser.add_argument("--baseline", required=True, type=Path)
+    compare_parser.add_argument("--candidate", required=True, type=Path)
+    compare_parser.add_argument("--raw-dir", required=True, type=Path)
+    compare_parser.add_argument("--out", type=Path)
+    compare_parser.add_argument("--replicates", type=int, default=2)
+    compare_parser.add_argument("--max-turns", type=int, default=_MAX_TURNS_FLOOR)
+    compare_parser.add_argument("--working-directory", type=Path, default=Path.cwd())
+    compare_parser.add_argument("--claude-model")
+    compare_parser.add_argument("--codex-model")
+    compare_parser.set_defaults(func=_cmd_compare)
 
     args = parser.parse_args(argv)
     args.func(args)

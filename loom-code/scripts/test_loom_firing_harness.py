@@ -392,6 +392,410 @@ def test_run_corpus_refuses_below_floor(monkeypatch):
         run_corpus(records, claude_bin="claude", max_turns=3)
 
 
+def test_compare_hosts_normalizes_baseline_candidate_replicates(tmp_path, monkeypatch, capsys):
+    """Both hosts retain raw evidence, but compare only observables.
+
+    One changed replicate is not enough to claim a regression.  The same
+    baseline/candidate observable difference must recur in at least two
+    replicates before the comparison has a divergence verdict.
+    """
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    raw_dir = tmp_path / "raw"
+    baseline.mkdir()
+    candidate.mkdir()
+    for root in (baseline, candidate):
+        (root / ".codex-plugin").mkdir()
+        (root / ".codex-plugin" / "plugin.json").write_text(
+            '{"name": "loom-code"}\n', encoding="utf-8"
+        )
+
+    invocations = []
+
+    def runner(invocation):
+        invocations.append(invocation)
+        changed = (
+            invocation.root_label == "candidate"
+            and invocation.record["query"] == "diverge"
+            and (invocation.replicate == 0 or invocation.record.get("repeat"))
+        )
+        fired = "loom-code:other" if changed else "loom-code:brainstorming"
+        if invocation.host == "claude":
+            return "\n".join((
+                json.dumps({"type": "assistant", "message": {"content": [{
+                    "type": "tool_use", "name": "Skill",
+                    "input": {"skill": fired},
+                }]} }),
+                json.dumps({"type": "result", "subtype": "success", "result": "wording varies"}),
+            ))
+        return "\n".join((
+            json.dumps({"type": "item.completed", "item": {
+                "type": "command_execution", "command": "skill " + fired,
+            }}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 3}}),
+        ))
+
+    records = [{"query": "diverge", "expected": "loom-code:brainstorming", "notes": "n"}]
+    inconclusive = loom_firing_harness.compare_hosts(
+        records, baseline, candidate, replicates=2, raw_dir=raw_dir, runner=runner
+    )
+    assert {item["host"] for item in inconclusive["runs"]} == {"claude", "codex"}
+    assert all(Path(item["raw_transcript_path"]).is_file() for item in inconclusive["runs"])
+    assert {item["plugin_root"] for item in inconclusive["runs"]} == {str(baseline), str(candidate)}
+    assert all("text" not in item["observable"] for item in inconclusive["runs"])
+    assert {item["verdict"] for item in inconclusive["comparisons"]} == {"INCONCLUSIVE"}
+    codex_invocations = [item for item in invocations if item.host == "codex"]
+    assert {item.codex_home for item in codex_invocations} == {
+        raw_dir / "codex-home-baseline", raw_dir / "codex-home-candidate",
+    }
+    assert all(item.environment["CODEX_HOME"] == str(item.codex_home) for item in codex_invocations)
+
+    commands = []
+
+    class Completed:
+        returncode = 0
+        stdout = "{}\n"
+        stderr = ""
+
+    def fake_subprocess(argv, *, env, **_kwargs):
+        commands.append((tuple(argv), env["CODEX_HOME"]))
+        return Completed()
+
+    monkeypatch.setattr(loom_firing_harness.subprocess, "run", fake_subprocess)
+    loom_firing_harness.run_host(codex_invocations[0])
+    baseline_home = raw_dir / "codex-home-baseline"
+    assert commands == [
+        (
+            ("codex", "plugin", "marketplace", "add", str(baseline_home / "marketplace")),
+            str(baseline_home),
+        ),
+        (
+            ("codex", "plugin", "add", "loom-code@loom-harness-baseline"),
+            str(baseline_home),
+        ),
+        (codex_invocations[0].argv, str(baseline_home)),
+    ]
+    assert (baseline_home / "marketplace" / "loom-code" / ".codex-plugin" / "plugin.json").is_file()
+
+    compared = loom_firing_harness.compare_hosts(
+        [{**records[0], "repeat": True}], baseline, candidate,
+        replicates=3, raw_dir=raw_dir, runner=runner
+    )
+    assert {item["verdict"] for item in compared["comparisons"]} == {"REGRESSION"}
+
+    claude_argv = loom_firing_harness.host_argv_for_root(
+        "claude", baseline, records[0], max_turns=4, working_directory=tmp_path
+    )
+    codex_argv = loom_firing_harness.host_argv_for_root(
+        "codex", candidate, records[0], max_turns=4, working_directory=tmp_path
+    )
+    assert "--plugin-dir" in claude_argv and str(baseline) in claude_argv
+    assert codex_argv[:2] == ("codex", "exec")
+    assert "--plugin-dir" not in codex_argv
+
+    corpus = tmp_path / "corpus.jsonl"
+    comparison_out = tmp_path / "comparison.json"
+    corpus.write_text(json.dumps(records[0]) + "\n", encoding="utf-8")
+    monkeypatch.setattr(loom_firing_harness, "run_host", runner)
+    loom_firing_harness.main([
+        "compare", "--corpus", str(corpus), "--baseline", str(baseline),
+        "--candidate", str(candidate), "--raw-dir", str(raw_dir),
+        "--out", str(comparison_out),
+    ])
+    stdout = capsys.readouterr().out
+    assert '"verdict": "INCONCLUSIVE"' in stdout
+    assert json.loads(comparison_out.read_text(encoding="utf-8"))["comparisons"]
+
+
+def test_compare_hosts_passes_explicit_economy_models_to_each_host(tmp_path):
+    """The two CLIs must receive their own explicitly pinned economy model."""
+    record = {"query": "exercise the skill", "expected": "NONE", "notes": "model pin"}
+
+    claude_argv = loom_firing_harness.host_argv_for_root(
+        "claude", tmp_path, record, max_turns=4, working_directory=tmp_path,
+        claude_model="haiku", codex_model="gpt-5.6-luna",
+    )
+    codex_argv = loom_firing_harness.host_argv_for_root(
+        "codex", tmp_path, record, max_turns=4, working_directory=tmp_path,
+        claude_model="haiku", codex_model="gpt-5.6-luna",
+    )
+
+    assert claude_argv[claude_argv.index("--model") + 1] == "haiku"
+    assert codex_argv[codex_argv.index("--model") + 1] == "gpt-5.6-luna"
+
+
+def test_run_host_rejects_nonzero_exit(monkeypatch, tmp_path):
+    """Authentication and host failures must never normalize into PASS."""
+    invocation = loom_firing_harness.HostInvocation(
+        host="claude",
+        root_label="baseline",
+        plugin_root=tmp_path,
+        record={"query": "probe", "expected": "NONE", "notes": "failure"},
+        replicate=0,
+        argv=("claude", "-p", "probe"),
+        codex_home=None,
+        environment={},
+    )
+
+    class Failed:
+        returncode = 1
+        stdout = '{"type":"error","message":"unauthorized"}\n'
+        stderr = "credential detail must not leak"
+
+    monkeypatch.setattr(loom_firing_harness.subprocess, "run", lambda *a, **k: Failed())
+
+    with pytest.raises(RuntimeError, match="claude host exited with status 1"):
+        loom_firing_harness.run_host(invocation)
+
+
+def _codex_invocation(plugin_root, codex_home):
+    return loom_firing_harness.HostInvocation(
+        host="codex", root_label="baseline", plugin_root=plugin_root,
+        record={"query": "probe", "expected": "NONE", "notes": "isolation"},
+        replicate=0, argv=("codex", "exec", "probe"), codex_home=codex_home,
+        environment={"CODEX_HOME": str(codex_home)},
+    )
+
+
+def test_prepare_codex_root_rejects_manifest_name_path_traversal(tmp_path):
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / ".codex-plugin").mkdir(parents=True)
+    (plugin_root / ".codex-plugin" / "plugin.json").write_text(
+        '{"name": "../escaped"}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="invalid identifier"):
+        loom_firing_harness._prepare_codex_root(
+            _codex_invocation(plugin_root, tmp_path / "home"), {}
+        )
+    assert not (tmp_path / "home" / "escaped").exists()
+
+
+def test_prepare_codex_root_rejects_symlinked_home_without_deleting_target(
+    tmp_path, monkeypatch
+):
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / ".codex-plugin").mkdir(parents=True)
+    (plugin_root / ".codex-plugin" / "plugin.json").write_text(
+        '{"name": "loom-code"}\n', encoding="utf-8"
+    )
+    outside = tmp_path / "outside"
+    (outside / "marketplace").mkdir(parents=True)
+    sentinel = outside / "marketplace" / "sentinel"
+    sentinel.write_text("keep", encoding="utf-8")
+    home = tmp_path / "home"
+    home.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        loom_firing_harness._prepare_codex_root(
+            _codex_invocation(plugin_root, home), {}
+        )
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_prepare_codex_root_rejects_symlinked_home_ancestor_without_deleting_target(
+    tmp_path,
+):
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / ".codex-plugin").mkdir(parents=True)
+    (plugin_root / ".codex-plugin" / "plugin.json").write_text(
+        '{"name": "loom-code"}\n', encoding="utf-8"
+    )
+    outside = tmp_path / "outside"
+    (outside / "home" / "marketplace").mkdir(parents=True)
+    sentinel = outside / "home" / "marketplace" / "sentinel"
+    sentinel.write_text("keep", encoding="utf-8")
+    alias = tmp_path / "alias"
+    alias.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="alias|symlink"):
+        loom_firing_harness._prepare_codex_root(
+            _codex_invocation(plugin_root, alias / "home"), {}
+        )
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_prepare_codex_root_rejects_symlinked_marker_without_overwriting_target(
+    tmp_path,
+):
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / ".codex-plugin").mkdir(parents=True)
+    (plugin_root / ".codex-plugin" / "plugin.json").write_text(
+        '{"name": "loom-code"}\n', encoding="utf-8"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_text("KEEP", encoding="utf-8")
+    (home / ".loom-harness-prepared").symlink_to(sentinel)
+
+    with pytest.raises(ValueError, match="marker.*symlink"):
+        loom_firing_harness._prepare_codex_root(
+            _codex_invocation(plugin_root, home), {}
+        )
+    assert sentinel.read_text(encoding="utf-8") == "KEEP"
+
+
+def test_prepare_codex_root_refreshes_changed_plugin_bytes(tmp_path, monkeypatch):
+    roots = []
+    for label in ("old", "new"):
+        root = tmp_path / label
+        (root / ".codex-plugin").mkdir(parents=True)
+        (root / ".codex-plugin" / "plugin.json").write_text(
+            '{"name": "loom-code"}\n', encoding="utf-8"
+        )
+        (root / "identity").write_text(label, encoding="utf-8")
+        roots.append(root)
+
+    class Completed:
+        returncode = 0
+
+    monkeypatch.setattr(
+        loom_firing_harness.subprocess, "run", lambda *args, **kwargs: Completed()
+    )
+    home = tmp_path / "home"
+    for root in roots:
+        loom_firing_harness._prepare_codex_root(_codex_invocation(root, home), {})
+
+    assert (home / "marketplace" / "loom-code" / "identity").read_text() == "new"
+    installed = home / "marketplace" / "loom-code" / "identity"
+    installed.write_text("tampered", encoding="utf-8")
+    loom_firing_harness._prepare_codex_root(_codex_invocation(roots[-1], home), {})
+    assert installed.read_text(encoding="utf-8") == "new"
+
+
+def test_plugin_tree_fingerprint_frames_file_boundaries(tmp_path):
+    first = tmp_path / "first"; first.mkdir()
+    second = tmp_path / "second"; second.mkdir()
+    (first / "a").write_bytes(b"XF\0b\0Y")
+    (second / "a").write_bytes(b"X")
+    (second / "b").write_bytes(b"Y")
+
+    assert (
+        loom_firing_harness._plugin_tree_fingerprint(first)
+        != loom_firing_harness._plugin_tree_fingerprint(second)
+    )
+
+
+def test_plugin_tree_fingerprint_includes_executable_mode(tmp_path):
+    root = tmp_path / "plugin"; root.mkdir()
+    executable = root / "hook"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    before = loom_firing_harness._plugin_tree_fingerprint(root)
+    executable.chmod(executable.stat().st_mode | 0o100)
+    assert loom_firing_harness._plugin_tree_fingerprint(root) != before
+
+
+def test_compare_hosts_empty_transcripts_are_inconclusive(tmp_path):
+    result = loom_firing_harness.compare_hosts(
+        [{"query": "same", "expected": "NONE", "notes": "empty"}],
+        tmp_path / "baseline", tmp_path / "candidate", replicates=2,
+        raw_dir=tmp_path / "raw", runner=lambda invocation: "",
+    )
+    assert {item["verdict"] for item in result["comparisons"]} == {"INCONCLUSIVE"}
+
+
+def test_compare_hosts_pairs_duplicate_queries_by_record_index(tmp_path):
+    records = [
+        {"query": "same", "expected": "loom-code:brainstorming", "notes": "first"},
+        {"query": "same", "expected": "loom-code:brainstorming", "notes": "second"},
+    ]
+
+    def runner(invocation):
+        fired = "loom-code:brainstorming"
+        if invocation.root_label == "candidate" and invocation.record["notes"] == "second":
+            fired = "loom-code:other"
+        if invocation.host == "claude":
+            return "\n".join((
+                json.dumps({"type": "assistant", "message": {"content": [{
+                    "type": "tool_use", "name": "Skill", "input": {"skill": fired},
+                }]}}),
+                json.dumps({"type": "result", "subtype": "success", "result": "ok"}),
+            ))
+        return "\n".join((
+            json.dumps({"type": "item.completed", "item": {
+                "type": "command_execution", "command": f"skill {fired}",
+            }}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1}}),
+        ))
+
+    result = loom_firing_harness.compare_hosts(
+        records, tmp_path / "baseline", tmp_path / "candidate", replicates=2,
+        raw_dir=tmp_path / "raw", runner=runner,
+    )
+    verdicts = {(item["record_index"], item["host"]): item["verdict"] for item in result["comparisons"]}
+    assert verdicts[(0, "claude")] == "PASS"
+    assert verdicts[(0, "codex")] == "PASS"
+    assert verdicts[(1, "claude")] == "REGRESSION"
+    assert verdicts[(1, "codex")] == "REGRESSION"
+
+
+def test_codex_root_invocation_loads_isolated_plugin_config(tmp_path):
+    """CODEX_HOME is isolated already; ignoring its config hides the plugin."""
+    argv = loom_firing_harness.host_argv_for_root(
+        "codex", tmp_path,
+        {"query": "probe", "expected": "NONE", "notes": "plugin load"},
+        max_turns=4, working_directory=tmp_path,
+    )
+
+    assert "--ignore-user-config" not in argv
+
+
+def test_codex_observable_detects_loaded_plugin_skill_path():
+    transcript = json.dumps({
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "command": "sed -n 1,240p /tmp/cache/loom/loom-workflow/1.0.0/skills/distill-sessions/SKILL.md",
+        },
+    })
+
+    observable = loom_firing_harness._normalize_observable("codex", transcript)
+
+    assert observable["fired"] == "loom-workflow:distill-sessions"
+
+
+def test_comparison_verdict_reports_tokens_without_treating_cost_as_behavior_change():
+    baseline = {
+        "expected": "loom-code:brainstorming",
+        "observable": {
+            "fired": "loom-code:brainstorming", "result_subtype": "completed",
+            "tool_sequence": ("Skill",), "tokens": {"input_tokens": 100},
+        },
+    }
+    candidate = {
+        "expected": "loom-code:brainstorming",
+        "observable": {
+            "fired": "loom-code:brainstorming", "result_subtype": "completed",
+            "tool_sequence": ("Skill",), "tokens": {"input_tokens": 60},
+        },
+    }
+
+    assert loom_firing_harness._comparison_verdict(
+        [(baseline, candidate), (baseline, candidate)]
+    ) == "PASS"
+
+
+def test_comparison_verdict_refuses_conflicting_difference_groups():
+    def run(fired):
+        return {
+            "expected": "loom-code:brainstorming",
+            "observable": {
+                "fired": fired, "result_subtype": "completed", "tool_sequence": (),
+            },
+        }
+
+    exact = run("loom-code:brainstorming")
+    miss = run(None)
+    over = run("loom-code:other")
+    assert loom_firing_harness._comparison_verdict(
+        [(exact, miss), (exact, miss), (miss, exact), (miss, exact)]
+    ) == "INCONCLUSIVE"
+    assert loom_firing_harness._comparison_verdict(
+        [(exact, miss), (exact, miss), (exact, over)]
+    ) == "INCONCLUSIVE"
+
+
 def test_shipped_corpus_validates():
     """F2: EVERY shipped firing corpus parses and validates cleanly.
 
