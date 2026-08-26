@@ -32,14 +32,15 @@ only plugin needed. No cross-plugin dependency.
 ## The Iron Law
 
 ```
-NO REFACTOR SHIPS WITHOUT (1) EQUIVALENCE PROVEN
-                          (2) TOKEN REDUCTION ≥10%
-                          (3) INVARIANTS PRESERVED
+NO REFACTOR AUTO-SHIPS WITHOUT (1) EQUIVALENCE PROVEN
+                               (2) TOKEN REDUCTION ≥10%
+                               (3) INVARIANTS PRESERVED
 ```
 
-If any of three fails, the round is rolled back via `git revert`.
-This is the ratchet — only refactors that **measurably preserve
-behavior while measurably shrinking the file** survive.
+If either behavior or invariant preservation fails, discard the candidate. A
+5–10% reduction may ship only after explicit user acceptance of the marginal
+win; it does not auto-advance the ratchet. Only refactors that **measurably
+preserve behavior while measurably shrinking the file** survive.
 
 ## Before You Begin — Establish Baseline
 
@@ -59,7 +60,26 @@ Before proposing any refactor, the target skill needs:
    non-description fields, declared dependencies, file structure
    (subdirectories, key bundled files). This is what Q3 protects.
 
-**Do not propose Q1's refactor moves until baseline is captured.**
+**Do not edit a candidate or propose Q1's refactor moves until baseline is captured.**
+
+Use **entrypoint mode** when only `SKILL.md` changes. Use package-resource
+mode only when the candidate changes a bundled resource; then read
+`references/package-resource-mode.md` before creating the candidate.
+
+**PACKAGE-MODE LOAD GATE.** For any bundled-resource request, before
+explaining, planning, or capturing a baseline, use the host's file-reading
+capability to read `references/package-resource-mode.md` whole. If that read
+is unavailable or fails, STOP with `UNGRADABLE`. Do not reconstruct package
+mode from this entrypoint or continue from memory.
+
+### Round scope
+
+- **Entrypoint mode: split a round** when it would change `SKILL.md` and a
+  bundled resource; retain the one-file-per-round rule.
+- **Package mode: one isolated package round may change** its target and
+  **directly supporting bundled resources** when the package protocol needs
+  them together for equivalent behavior. Unrelated bundled resources remain
+  split into later rounds.
 
 If any of (1)-(4) cannot be obtained (e.g., skill has no
 deterministic test prompts because output is purely creative), the
@@ -90,9 +110,9 @@ auto-escalate to human Tier 2 (do not auto-keep).
 **Pass = output is functionally the same as before.** This is the
 load-bearing guarantee of refactor work.
 
-### Q2. Token reduction ≥10%
+### Q2. Entrypoint-mode token reduction ≥10%
 
-`wc -w` on candidate SKILL.md compared to baseline:
+Entrypoint mode measures `wc -w` on candidate `SKILL.md` compared to baseline:
 
 | Reduction | Verdict |
 |---|---|
@@ -116,7 +136,7 @@ Begin:
 | Other frontmatter fields (e.g., `compatibility`) | Never change |
 | Declared dependencies (scripts called, references referenced) | Never change without going to skill-creator-advance |
 | Subdirectory structure (`agents/`, `references/`, `scripts/`) | Allowed to add files (e.g. extract content); never to remove without skill-creator-advance |
-| Bundled file *contents* | Allowed (refactor cascades) but each cascade is its own round |
+| Bundled file *contents* | Allowed. Entrypoint mode: each cascade is its own round. Package mode follows §Round scope: one isolated package round may include target + directly supporting bundled resources; unrelated resources split. |
 
 **Pass rule**: all "never change" items unchanged; "allowed" items
 verified to still serve the skill's documented behavior.
@@ -125,13 +145,13 @@ verified to still serve the skill's documented behavior.
 
 After Q1, Q2, Q3:
 
-- **PROCEED** — all three pass strictly. `git commit` the candidate;
-  ratchet advances.
-- **RESHAPE** — Q1 or Q3 passes, Q2 marginal (5–10% reduction). Show
+- **PROCEED** — all three pass strictly. Apply the isolated candidate to the
+  user's worktree, then `git commit` it; ratchet advances.
+- **RESHAPE** — Q1 and Q3 pass, Q2 marginal (5–10% reduction). Show
   user the candidate + which dimension is weak; user decides keep
   or further-refactor. Do not auto-merge.
 - **REJECT** — Q1 fails (output not equivalent), or Q2 shows
-  increase / no reduction, or Q3 violated. `git revert` the
+  increase / no reduction, or Q3 violated. Discard the isolated
   candidate; record the failed move in `results.tsv`; move to next
   round (or skill, if this skill has hit its bound).
 
@@ -212,7 +232,7 @@ into "which output is better?", we've left refactor territory.
 | Q1 says equivalent but token reduction <5% | The refactor cost exceeds the gain; reject |
 | Q1's ensemble disagrees and you want to "majority-rules" anyway | Don't — that's how taste creep enters via judge bias |
 | Skill has no `test-prompts.json` and user is unwilling to write any | The gate cannot run; revert to `skill-creator-advance` |
-| Refactor would touch SKILL.md and bundled files in same round | Cascade-refactor — split into separate rounds (one file per round) |
+| Entrypoint mode would touch `SKILL.md` and bundled files in one round | Split the round; package mode has the narrow directly-supporting-resource exception in §Round scope |
 
 ## Rationalization Prevention
 
@@ -352,6 +372,11 @@ Scripts:
 - `scripts/golden_compare.py` — compares candidate output to a
   golden reference (used in Tier 2 escalation)
 
+For a bundled-resource refactor only, read
+`references/package-resource-mode.md`. It supplies the immutable-baseline,
+whole-package accounting, and layered evidence protocol; entrypoint-only
+requests do not load it.
+
 Optional Tier 3 hand-off path: if golden anchors exist for the
 target skill (in `<skill>/golden/`), Q1's pass criterion can be
 strengthened to "equivalence check passes AND candidate output
@@ -360,6 +385,6 @@ matches golden anchor pattern"; see `golden-anchor-protocol.md`.
 ## Bottom Line
 
 ```
-Output preserved. Tokens shrunk. Invariants intact. Or revert.
+Output preserved. Tokens shrunk. Invariants intact. Otherwise discard the candidate.
 Refactor is structure, not feature. Prove equivalence; don't promise it.
 ```
