@@ -31,9 +31,13 @@ Fire when the user wants existing reasoning made visible to someone else.
 Do not fire to *do* the thinking — this skill explains thinking that has
 already happened.
 
-Route active reasoning elsewhere; use `loom-workflow:recap-state` for
-in-chat re-orientation, `loom-workflow:handoff` for future-session state,
-and a general Mermaid skill for diagrams that are not reasoning chains.
+Route active reasoning elsewhere: `think-orbit:thinking-session` when the
+problem is still being worked out across sessions with tracked assumptions,
+`think-orbit:break-assumption` when an assumption behind past reasoning just
+broke, `loom-workflow:recap-state` for in-chat re-orientation,
+`loom-workflow:handoff` for future-session state, and
+`obsidian:obsidian-mermaid-visualizer` for a generic diagram that is not a
+reasoning chain.
 
 ## Step 1 — Resolve the source
 

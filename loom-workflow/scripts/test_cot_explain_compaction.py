@@ -1,16 +1,22 @@
 from pathlib import Path
-import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_PATH = REPO_ROOT / "loom-workflow/skills/cot-explain/SKILL.md"
-BASELINE_WORDS = 4350
 
 
-def test_entrypoint_preserves_extraction_render_and_fidelity_gates_under_word_ceiling():
+def test_entrypoint_preserves_extraction_render_and_fidelity_gates():
     text = SKILL_PATH.read_text(encoding="utf-8")
 
     essence = {
+        # Restored in the #740 follow-up after the compaction deleted the routing
+        # destinations while keeping the prohibition. Pinned so a re-deletion
+        # fails instead of going green under the word band's slack.
+        "active-reasoning routing": [
+            "think-orbit:thinking-session",
+            "think-orbit:break-assumption",
+            "obsidian:obsidian-mermaid-visualizer",
+        ],
         "source selection": ["File mode", "Conversation mode", "State which mode"],
         "extraction net": [
             "Rejected options",
@@ -63,6 +69,3 @@ def test_entrypoint_preserves_extraction_render_and_fidelity_gates_under_word_ce
     )
     assert commands in text
 
-    words = re.findall(r"\S+", text)
-    assert len(words) >= int(BASELINE_WORDS * 0.75), len(words)
-    assert len(words) <= 3567, len(words)

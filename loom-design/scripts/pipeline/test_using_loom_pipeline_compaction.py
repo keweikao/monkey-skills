@@ -21,13 +21,11 @@ def _section(body: str, heading: str) -> str:
     return body[start:] if end == -1 else body[start:end]
 
 
-def test_entrypoint_preserves_availability_driver_gates_and_queue_lifecycle_within_word_range():
+def test_entrypoint_preserves_availability_driver_gates_and_queue_lifecycle():
     assert "<SUBAGENT-STOP>" in BODY and "Workflow tool is available" in BODY
     assert "Codex hosts: N/A by definition" in BODY and "no fallback path" in BODY
     assert "## §Run inputs" in BODY and "## §Segments" in BODY
     assert "## §Human gates" in BODY and "## §Batch mode" in BODY
-    words = len(TEXT.split())
-    assert 1870 <= words <= 2136, f"SKILL.md has {words} words; expected 1870–2136"
 
 
 def test_availability_boundary_and_six_field_driver_contract():
@@ -76,7 +74,6 @@ def test_three_segments_and_exactly_four_human_gates():
     for contract in ("Change-id minting", "brief-before-asking", "Cost policy", "Final merge"):
         assert contract in gates
     assert "The pipeline never merges; it returns PR branches plus the ledger for human action." in gates_flat
-
 
 
 def test_conductor_prohibitions_and_stable_prefix_remain_explicit():

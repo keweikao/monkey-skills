@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 
@@ -12,12 +11,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import skill_compaction_preflight as preflight
 
 
-def test_entrypoint_preserves_exemptions_red_green_refactor_and_false_green_within_word_range():
+def test_entrypoint_preserves_exemptions_red_green_refactor_and_false_green():
     text = SKILL.read_text(encoding="utf-8")
-    words = int(subprocess.run(
-        ["wc", "-w", str(SKILL)], capture_output=True, check=True, text=True
-    ).stdout.split()[0])
-    assert 1284 <= words <= 1466
 
     required = (
         "NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST",

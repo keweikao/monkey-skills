@@ -4,6 +4,25 @@ All notable changes to the dev-workflow plugin will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] — 2026-08-27 — restore routing and governance dropped by 1.0.1
+
+### Fixed
+
+- `cot-explain`: restored all three routing destinations 1.0.1 dropped —
+  `think-orbit:thinking-session`, `think-orbit:break-assumption`, and
+  `obsidian:obsidian-mermaid-visualizer`. 1.0.1 kept the prohibition on doing
+  the thinking here but removed everywhere to send it.
+- `complexity-critique`: restored the mindset SSOT rule — edits land in the
+  canonical `code-team/standards/` copies first, and a fifth mindset is
+  governed by `mindset-extension-standard.md`.
+- Removed the per-file word-count bounds from the `test_*_compaction.py` files.
+  They froze the 1.0.1 compaction's own measurement into a permanent contract
+  and could not detect a deleted rule; presence assertions now carry that job.
+- `complexity-critique`: Q2's `after > before` row now speaks the skill's own
+  verdict vocabulary (RESHAPE, or PROCEED-WITH-CAVEAT only when the added
+  volume is explicitly justified and costed). Both the pre-1.0.1 wording and
+  1.0.1's replacement conflicted with the file's own verdict list.
+
 ## [1.0.1] — 2026-08-26 — behavior-preserving skill compaction
 
 ### Changed

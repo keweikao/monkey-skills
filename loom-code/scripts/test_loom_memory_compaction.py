@@ -2,28 +2,16 @@
 
 from pathlib import Path
 import re
-import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL = REPO_ROOT / "loom-code" / "skills" / "loom-memory" / "SKILL.md"
 
 
-def test_entrypoint_preserves_conditional_record_recall_prune_contract_within_word_range():
+def test_entrypoint_preserves_conditional_record_recall_prune_contract():
     text = SKILL.read_text(encoding="utf-8")
     flat = re.sub(r"\s+", " ", text)
-    words = int(
-        subprocess.run(
-            ("wc", "-w", str(SKILL)),
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.split()[0]
-    )
     violations = []
-
-    if not 741 <= words <= 846:
-        violations.append(f"word count {words} is outside 741..846")
 
     # Immutable package surface and verb structure.
     for marker in (

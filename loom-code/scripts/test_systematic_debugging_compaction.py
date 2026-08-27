@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 
@@ -12,12 +11,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import skill_compaction_preflight as preflight
 
 
-def test_entrypoint_preserves_four_phase_evidence_and_bounded_fix_loop_within_word_range():
+def test_entrypoint_preserves_four_phase_evidence_and_bounded_fix_loop():
     text = SKILL.read_text(encoding="utf-8")
-    words = int(subprocess.run(
-        ["wc", "-w", str(SKILL)], capture_output=True, check=True, text=True
-    ).stdout.split()[0])
-    assert 1540 <= words <= 1760
 
     required = (
         "<SUBAGENT-STOP>",

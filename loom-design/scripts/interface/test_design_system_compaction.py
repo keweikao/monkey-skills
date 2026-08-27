@@ -9,7 +9,7 @@ LOW = TEXT.lower()
 FLAT = " ".join(LOW.split())
 
 
-def test_entrypoint_preserves_modality_gui_contract_and_ending_gate_within_word_range():
+def test_entrypoint_preserves_modality_gui_contract_and_ending_gate():
     assert "references/design-md-schema.md" in TEXT
     assert "docs/loom/principles.md" in LOW and "## anchors" in LOW
     assert "3-5 tone & manner adjectives" in LOW and "governing mood" in LOW
@@ -38,5 +38,3 @@ def test_entrypoint_preserves_modality_gui_contract_and_ending_gate_within_word_
     assert "docs/loom/" in TEXT and "scripts/interface/validate_design_output.py" in TEXT
     assert "ending gate" in LOW and "exists on disk" in LOW and "failed run" in LOW
     assert "visual system only" in LOW and "not flows" in LOW
-    words = len(TEXT.split())
-    assert 1_388 <= words <= 1_585, f"expected 1388..1585 words, got {words}"

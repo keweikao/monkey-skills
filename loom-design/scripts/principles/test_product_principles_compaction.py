@@ -9,13 +9,11 @@ LOW = TEXT.lower()
 FLAT = " ".join(LOW.replace("*", "").split())
 
 
-def test_entrypoint_preserves_elicitation_canon_artifact_and_headless_traceability_within_word_range():
+def test_entrypoint_preserves_elicitation_canon_artifact_and_headless_traceability():
     assert "own words" in LOW and "target user" in LOW
     assert "same-axis" in LOW and "same question" in LOW
     assert "docs/loom/PRINCIPLES.md" in TEXT
     assert "seed-traceability invariant" in LOW and "no silent drops" in LOW
-    words = len(TEXT.split())
-    assert 2_117 <= words <= 2_418, f"expected 2117..2418 words, got {words}"
 
 
 def test_entrypoint_keeps_all_authoring_references_and_elicitation_rules():

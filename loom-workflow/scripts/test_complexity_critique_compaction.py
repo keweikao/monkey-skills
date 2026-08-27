@@ -9,10 +9,9 @@ SKILL = (
 )
 
 
-def test_entrypoint_preserves_mindset_three_questions_and_verdicts_under_word_ceiling():
+def test_entrypoint_preserves_mindset_three_questions_and_verdicts():
     text = SKILL.read_text(encoding="utf-8")
 
-    assert 1_397 <= len(text.split()) <= 1_612
     assert "Load at least one" in text
     assert "references/" in text
 
@@ -24,6 +23,11 @@ def test_entrypoint_preserves_mindset_three_questions_and_verdicts_under_word_ce
     positions = [text.index(question) for question in questions]
     assert positions == sorted(positions)
 
+    # Both restored/rewritten in the #740 follow-up; pinned so a re-deletion
+    # fails instead of going green under the word band's slack.
+    assert "mindset-extension-standard.md" in text
+    assert "domain-teams:code-team/standards/mindset-*.md" in text
+    assert "never a silent PROCEED" in text
     assert "Pure greenfield handling" in text
     assert '"0 lines = decline to build"' in text
     for verdict in ("PROCEED", "PROCEED-WITH-CAVEAT", "RESHAPE", "REJECT"):

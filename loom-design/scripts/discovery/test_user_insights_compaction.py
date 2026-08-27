@@ -10,15 +10,11 @@ FOLDED = " ".join(LOW.split())
 PLAIN = FOLDED.replace("**", "")
 
 
-def test_entrypoint_preserves_modes_evidence_commitment_and_validation_within_word_range():
+def test_entrypoint_preserves_modes_evidence_commitment_and_validation():
     assert "mode 1" in LOW and "mode 2" in LOW
     assert "never interrogate the user for facts that are researchable" in LOW
     assert "agents never self-commit" in LOW
     assert "validate_discovery_artifacts.py" in TEXT
-    words = len(TEXT.split())
-    assert 925 <= words <= 1056, (
-        f"user-insights/SKILL.md is {words} words; expected 925–1,056"
-    )
 
 
 def test_modes_keep_distinct_authorities_and_problem_space_evidence():

@@ -39,7 +39,13 @@ against the immutable baseline.
   (12 Claude, one Codex). Host errors were never treated as passes.
 - Supplemental corpus: explicit skill-loading, read-only behavioral probes for
   inconclusive cells and repaired escape paths. Only pairs grounded in the
-  expected skill were semantically compared.
+  expected skill were semantically compared. **Limitation:** this grounding
+  filter excludes pairs where the candidate never fired the expected skill, so
+  the semantic comparison cannot observe a *triggering-rate* regression — a
+  candidate that fires less often drops out of the comparison rather than
+  registering as a regression. Firing rate is covered only by the static
+  contract oracles and the harness's own EXACT/FAMILY/MISS/OVER grading, not by
+  this comparison.
 - Strong adjudication: transcript review only; `NON_REGRESSION`, `REGRESSION`,
   or `INCONCLUSIVE` relative to the matching baseline behavior.
 
@@ -125,8 +131,12 @@ and no such side effect appears in the accepted read-only supplemental runs.
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest loom-code/scripts -q`:
   **1,824 passed** after the final repair.
 - Every compaction oracle remains inside its target word range.
-- The SDD oracle counts `SKILL.md` plus its extracted reference and enforces a
-  maximum of 4,053 words; the final pair is 3,240 + 812 = 4,052.
+- The SDD oracle counts `SKILL.md` plus its extracted reference and enforced a
+  maximum of 4,053 words at the time of this run; the final pair was
+  3,240 + 812 = 4,052. **Superseded bound:** the follow-up branch
+  `fix/740-compaction-followups` restored a rule this compaction had dropped and
+  re-baselined that oracle to 4,110; the figures above are the historical
+  measurement, not the bound in force today.
 - `git diff 821bc938..411faeae -- 'loom-code/skills/*/references'` is empty.
 - `git diff --check`, plugin-boundary validation, citation validation, and the
   two-layer commit-carrier privacy gate pass.

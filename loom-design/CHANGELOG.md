@@ -11,6 +11,18 @@ The five plugins this one absorbed keep their own histories alongside:
 `CHANGELOG-interface-design.md`, `CHANGELOG-product-principles.md`. Their
 version numbers do not continue here — `loom-design` starts fresh at 0.1.0.
 
+## [0.5.3] — 2026-08-27 — restore the deletable-lenses section
+
+### Fixed
+
+- `completeness-critic`: restored the "Deletable lenses (Bitter Lesson)"
+  section, including the standing prune candidate (state-completeness) and the
+  last-to-go pair (NFR-security, permissions/data-boundary). The 0.5.2
+  compaction dropped it while the sibling `design-critic` kept its copy.
+- Removed the per-file word-count bounds from the `test_*_compaction.py` files.
+  They froze the 0.5.2 compaction's own measurement into a permanent contract
+  and could not detect a deleted rule; presence assertions now carry that job.
+
 ## [0.5.2] — 2026-08-26 — behavior-preserving skill compaction
 
 ### Changed

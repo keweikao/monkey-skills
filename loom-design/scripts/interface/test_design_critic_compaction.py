@@ -10,7 +10,7 @@ LOW = TEXT.lower()
 FLAT = " ".join(LOW.split())
 
 
-def test_entrypoint_preserves_artifact_guard_panel_nielsen_and_bounded_verdict_within_word_range():
+def test_entrypoint_preserves_artifact_guard_panel_nielsen_and_bounded_verdict():
     assert "design.md" in LOW and "ui-flows.md" in LOW
     assert "wrong-artifact guard" in LOW and "spec" in LOW and "code" in LOW
     assert "surface" in LOW and "writer≠judge" in LOW
@@ -19,8 +19,6 @@ def test_entrypoint_preserves_artifact_guard_panel_nielsen_and_bounded_verdict_w
     assert set(re.findall(r"`(NEEDS_REVISION|PASS_WITH_NOTES)`", TEXT)) == {
         "NEEDS_REVISION", "PASS_WITH_NOTES"
     }
-    words = len(TEXT.split())
-    assert 1_627 <= words <= 1_858, f"expected 1627..1858 words, got {words}"
 
 
 def test_precheck_preserves_enum_tiers_and_panel_after_precheck():

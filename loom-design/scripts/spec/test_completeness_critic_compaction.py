@@ -10,13 +10,17 @@ LOW = TEXT.lower()
 FLAT = " ".join(LOW.split())
 
 
-def test_entrypoint_preserves_panel_lenses_synthesis_and_bounded_verdict_within_word_range():
+def test_entrypoint_preserves_panel_lenses_synthesis_and_bounded_verdict():
     assert "omissions" in LOW and "spec" in LOW
     assert "fresh context" in LOW and "general reasoning agent" in LOW
     assert "writer" in LOW and "judge" in LOW
     assert "review code" in LOW and "run tdd" in LOW and "hard boundary" in LOW
-    words = len(TEXT.split())
-    assert 2_803 <= words <= 3_203, f"expected 2803..3203 words, got {words}"
+    # Restored in the #740 follow-up after the compaction deleted the whole
+    # section. Pinned so a re-deletion fails instead of going green: the
+    # word floor has ~480 words of slack and cannot see it leave.
+    assert "### Deletable lenses (Bitter Lesson)" in TEXT
+    assert "state-completeness lens" in TEXT
+    assert "nfr-security" in LOW and "permissions / data-boundary" in LOW
 
 
 def test_targeted_loop_preserves_dry_and_no_skip_semantics():
