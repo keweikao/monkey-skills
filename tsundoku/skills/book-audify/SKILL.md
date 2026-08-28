@@ -15,20 +15,35 @@ description: >-
 
 # Book Audify
 
-Converts a book (already extracted to per-chapter Markdown by
-`book-extract`) into a `.m4b` audiobook with chapter bookmarks, using free
+Converts a book into a `.m4b` audiobook with chapter bookmarks, using free
 neural TTS. Personal use of books the user owns — do not distribute the
-produced audio.
+produced audio. Note the input text is sent to a third party: edge-tts is a
+client for Microsoft's online read-aloud endpoint, so **the full text of the
+book is uploaded, chapter by chapter, to Microsoft at synthesis time** —
+tell the user if they haven't clearly assumed it.
+
+**Routing: this skill's input is per-chapter Markdown (`NN-title.md`).** If
+the user starts from an EPUB (or any e-book file), run
+`tsundoku:book-extract` on it first, then return here with its output
+folder.
 
 ## Pipeline
 
 ```
+Step 0: scripts/install_deps.sh              ← edge-tts + ffmpeg/ffprobe
 book-extract output (NN-chapter.md ...)
   → scripts/clean_for_tts.py   src_dir dst_dir [--lang zh|en|ja]
+  → REVIEW the printed skip list against the book's chapter list
   → scripts/validate_tts.py    dst_dir            ← HARD GATE
   → scripts/batch_tts.sh       dst_dir mp3_dir [voice] [rate]
   → scripts/build_m4b.sh       mp3_dir out.m4b [title] [author]
 ```
+
+The skip-list review is a mandatory human/agent step, not a formality: the
+cleaner drops front/back matter by filename, and a body chapter wrongly
+matched there is silent data loss — the validator only inspects files that
+exist, so no automated gate can catch it. Compare the `SKIPPED` list against
+the book's actual chapter list before synthesizing.
 
 Roughly 1 hour of synthesis per full-length book; the m4b plays in Apple
 Books (macOS), BookPlayer (iOS — iOS Books does not accept sideloaded
@@ -82,14 +97,20 @@ spending a full-book translation.
 
 ## Pre-conditions
 
-- `pip install edge-tts` (network required at synthesis time)
-- `ffmpeg`/`ffprobe` on PATH (m4b merge step only)
+- `scripts/install_deps.sh` installs both external legs: `edge-tts` as an
+  isolated CLI tool (`uv tool install` / `pipx install` — never bare `pip`)
+  and `ffmpeg`/`ffprobe` (PATH → brew → SHA256-verified static build;
+  tools it installs are found by the scripts via `$TSUNDOKU_ROOT/bin` and
+  `~/.local/bin` PATH fallbacks). Synthesis
+  needs network access — chapter text goes to Microsoft's TTS endpoint.
 - Chapters from `book-extract` (or any `NN-title.md` folder)
 
 ## Verify before declaring done
 
-- Chapter count in m4b == chapter files; spot-decode two offsets
-  (`ffmpeg -v error -ss <t> -i out.m4b -t 20 -f null -`)
+- `build_m4b.sh` already checks output duration against the sum of the
+  inputs (ffmpeg's concat can drop a chapter and still exit 0); still
+  confirm chapter count in the m4b == chapter files, and spot-decode two
+  offsets (`ffmpeg -v error -ss <t> -i out.m4b -t 20 -f null -`)
 - Listen to 30 seconds of one chapter (or have the user do it)
 - Large m4b files (300MB+) usually exceed chat upload limits — hand the user
   a local path instead

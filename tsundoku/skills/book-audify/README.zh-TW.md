@@ -15,5 +15,9 @@
 - 原文書:逐章全文「為聽而譯」(一書一譯名表、專有名詞不夾英文),
   先翻一章試聽通過才翻全書。
 
-需要 `pip install edge-tts` 與 `ffmpeg`。僅限個人使用自己擁有的書,
-請勿散布產出的音檔。
+依賴由 `scripts/install_deps.sh` 安裝:`edge-tts` 以隔離的 CLI 工具安裝
+(`uv tool install edge-tts` 或 `pipx install edge-tts`,不用裸 `pip`),
+`ffmpeg`/`ffprobe` 走 brew 或經 SHA256 驗證的 static build。
+
+資料流提醒:edge-tts 是 Microsoft 線上朗讀服務的 client,合成時整本書的
+全文會逐章上傳到 Microsoft。僅限個人使用自己擁有的書,請勿散布產出的音檔。

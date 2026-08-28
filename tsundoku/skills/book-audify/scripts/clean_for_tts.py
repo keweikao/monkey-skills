@@ -7,7 +7,9 @@ Reads every numbered chapter .md in <src_dir>, strips everything a TTS
 engine would mispronounce (markup, footnote anchors, decorative titles,
 end-of-chapter translator notes), and writes one .txt per chapter to
 <dst_dir>. Front/back matter (dedication, acknowledgments, copyright,
-index) is skipped entirely.
+index) is skipped entirely — the skip list is printed at the end and MUST
+be reviewed against the book's chapter list: a wrongly skipped chapter is
+silent data loss no downstream check can catch.
 
 Output contract is enforced by validate_tts.py — run it before synthesis.
 """
@@ -16,16 +18,46 @@ import os
 import re
 import sys
 
-SKIP_PATTERNS = (
-    'story', 'index', '致謝', '版權', '獻詞', '注釋',
-    'acknowledg', 'copyright', 'dedication', 'colophon', 'notes',
-    '謝辞', '奥付', '献辞',
-)
+# Front/back matter is skipped by EXACT match on the normalized stem (or a
+# few unambiguous prefixes), never by substring — "A Few Notes about Notes"
+# is a body chapter, "Notes" is back matter.
+SKIP_EXACT = {
+    # front matter
+    'cover', 'title page', 'half title', 'half title page', 'frontispiece',
+    'copyright', 'copyright page', 'dedication', 'epigraph',
+    'contents', 'table of contents', 'toc', 'newsletters',
+    # back matter
+    'acknowledgments', 'acknowledgements', 'notes', 'endnotes', 'footnotes',
+    'index', 'bibliography', 'references', 'further reading',
+    'references and further reading', 'suggestions for listening and viewing',
+    'about the author', 'about the authors', 'colophon', 'credits',
+    'permissions',
+    # zh
+    '封面', '書名頁', '版權', '版權頁', '版權聲明', '獻詞', '致謝', '目錄',
+    '注釋', '註釋', '索引', '參考書目', '參考文獻', '延伸閱讀',
+    '作者簡介', '關於作者',
+    # ja
+    '謝辞', '奥付', '献辞', '目次', '訳者あとがき', '著者について',
+}
+SKIP_PREFIXES = ('also by ', 'praise for ', 'other books by ')
 
 CN_NUM = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
           '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十']
 
-CIRCLED = r'[❶-❿⓫-⓴➀-➓➊-➓]'
+# ➀-➓ (U+2780–U+2793) already covers ➊-➓
+CIRCLED = r'[❶-❿⓫-⓴➀-➓]'
+
+
+def normalized_stem(stem: str) -> str:
+    s = re.sub(r'^\d+[-._\s]*', '', stem)       # play-order prefix "05-"
+    s = re.sub(r'^\d+[.、]?[-_\s]+', '', s)     # in-book number "9.-"
+    s = re.sub(r'[-_\s]+', ' ', s.lower())
+    return s.strip(' .,:;!?')
+
+
+def should_skip(stem: str) -> bool:
+    s = normalized_stem(stem)
+    return s in SKIP_EXACT or any(s.startswith(p) for p in SKIP_PREFIXES)
 
 
 def spoken_chapter(n: int, lang: str) -> str:
@@ -33,6 +65,16 @@ def spoken_chapter(n: int, lang: str) -> str:
         num = CN_NUM[n] if n < len(CN_NUM) else str(n)
         return f'第{num}章'
     return f'Chapter {n}.'
+
+
+def clean_inline(line: str) -> str:
+    line = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', line)
+    # bold is non-greedy so nested emphasis (**bold *italic* inside**)
+    # unwraps instead of leaving stray asterisks
+    line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+    line = re.sub(r'\*([^*]+)\*', r'\1', line)
+    line = re.sub(r'`([^`]+)`', r'\1', line)
+    return line
 
 
 def clean_chapter(text: str, lang: str) -> str:
@@ -47,10 +89,11 @@ def clean_chapter(text: str, lang: str) -> str:
         i += 1
     text = '\n'.join(out)
 
-    # HTML: drop footnote anchors and images entirely, unwrap everything else
+    # HTML: drop footnote anchors and images entirely, unwrap everything else.
+    # Tag pattern requires a tag-like start so prose "a < b" survives.
     text = re.sub(r'<a\b[^>]*>.*?</a>', '', text, flags=re.DOTALL)
     text = re.sub(r'<img\b[^>]*/?>', '', text)
-    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'<[A-Za-z/!][^>]*>', '', text)
 
     # Decorative chapter-title blocks: │第一章│ rules, setext underlines + the
     # duplicated title line above them, and --- horizontal rules
@@ -59,7 +102,7 @@ def clean_chapter(text: str, lang: str) -> str:
         s = line.strip().rstrip('\\').strip()
         if re.fullmatch(r'│[^│]*│', s):
             continue
-        if re.fullmatch(r'={3,}|-{3,}', s):
+        if re.fullmatch(r'=+|-{3,}', s):
             if out and out[-1].strip() and not out[-1].startswith('#'):
                 out.pop()
             continue
@@ -71,9 +114,16 @@ def clean_chapter(text: str, lang: str) -> str:
         line = line.strip().rstrip('\\').strip()
         if not line:
             continue
+        # Markdown tables are layout, not prose — narrated cells are noise
+        if re.match(r'^\|.*\|$', line) or re.fullmatch(r'\|?[\s:|-]+\|?', line):
+            continue
         m = re.match(r'^(#{1,6})\s*(.+)$', line)
         if m:
-            title = m.group(2).strip()
+            # Headings share the inline cleaning path with body text — pandoc
+            # gives EPUB headings a TOC link, italic sub-headings are common
+            title = clean_inline(m.group(2).strip()).strip()
+            if not title:
+                continue
             # H1 like "01　Title" would be read digit-by-digit → spoken form
             m2 = re.match(r'^(\d{1,2})[\s　]+(.+)$', title)
             if m.group(1) == '#' and m2:
@@ -85,18 +135,15 @@ def clean_chapter(text: str, lang: str) -> str:
             end = '。' if lang in ('zh', 'ja') else '.'
             result.append(title.rstrip('。.') + end)
             continue
-        # Inline markdown
-        line = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', line)
-        line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
-        line = re.sub(r'\*([^*]+)\*', r'\1', line)
-        line = re.sub(r'`([^`]+)`', r'\1', line)
+        line = clean_inline(line)
         line = re.sub(r'^>\s*', '', line)          # ordinary quotes: keep the words
         # End-of-chapter translator/footnote paragraphs (circled-number bullets)
         # are orphans once their inline anchors are gone — drop them
         if re.match(rf'^{CIRCLED}', line):
             continue
         line = re.sub(CIRCLED, '', line)
-        result.append(line)
+        if line.strip():
+            result.append(line)
     return '\n\n'.join(result)
 
 
@@ -108,12 +155,13 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(args.dst_dir, exist_ok=True)
-    total = 0
+    total, skipped = 0, []
     for fname in sorted(os.listdir(args.src_dir)):
         if not fname.endswith('.md'):
             continue
         stem = fname[:-3]
-        if any(p in stem.lower() for p in SKIP_PATTERNS):
+        if should_skip(stem):
+            skipped.append(fname)
             print(f'skip  {fname}')
             continue
         text = open(os.path.join(args.src_dir, fname), encoding='utf-8').read()
@@ -122,6 +170,12 @@ def main():
         total += len(cleaned)
         print(f'ok    {fname}  -> {len(cleaned)} chars')
     print(f'TOTAL {total} chars')
+    if skipped:
+        print(f'SKIPPED {len(skipped)} file(s) as front/back matter:')
+        for f in skipped:
+            print(f'  - {f}')
+        print('REVIEW this list against the book\'s chapter list before synthesis —')
+        print('a wrongly skipped chapter is silent data loss no gate can catch.')
     if total == 0:
         print('nothing produced — check src_dir', file=sys.stderr)
         sys.exit(1)

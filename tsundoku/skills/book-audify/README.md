@@ -18,5 +18,12 @@ clean → **validated hard gate** → per-chapter TTS → ffmpeg m4b merge.
   glossary, no English parentheticals) with a one-chapter listen gate before
   committing to the whole book.
 
-Requires `pip install edge-tts` and `ffmpeg`. Personal use of books you own;
-do not distribute the audio.
+`scripts/install_deps.sh` installs both dependencies: `edge-tts` as an
+isolated CLI tool (`uv tool install edge-tts` / `pipx install edge-tts` —
+never bare `pip`) and `ffmpeg`/`ffprobe` (brew, or a SHA256-verified
+static build).
+
+Note on data flow: edge-tts is a client for Microsoft's online read-aloud
+service, so the book's full text is uploaded to Microsoft, chapter by
+chapter, at synthesis time. Personal use of books you own; do not
+distribute the audio.

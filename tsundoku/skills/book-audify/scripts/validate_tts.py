@@ -12,9 +12,15 @@ import os
 import re
 import sys
 
-BANNED_CHARS = re.compile(r'[<>#*`\[\]|=]|[❶-❿⓫-⓴➀-➓➊-➓]')
-BANNED_TOKENS = re.compile(r'https?://|\.xhtml|\.jpe?g|\.png|│')
-FNAME = re.compile(r'^\d{2}-.+\.txt$')
+# '=' and '<'/'>' can be legitimate prose ("4 x 4 = 16", "a < b"), so they
+# are banned only in markup-shaped positions: '='-runs of 3+ (setext
+# residue; the cleaner strips whole '='-underline lines, so shorter runs in
+# prose are fine), and '<'/'>' not surrounded by whitespace (tag residue —
+# a comparison operator sits between spaces).
+BANNED_CHARS = re.compile(r'[#*`\[\]|]|[❶-❿⓫-⓴➀-➓]')
+BANNED_TOKENS = re.compile(r'https?://|\.xhtml|\.jpe?g|\.png|│|={3,}'
+                           r'|(?<!\s)[<>]|[<>](?!\s)')
+FNAME = re.compile(r'^\d{2,}-.+\.txt$')
 
 root = sys.argv[1]
 errors = []

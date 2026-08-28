@@ -16,5 +16,11 @@
 - 外国語の書籍:章ごとの全文「聴くための翻訳」(書籍ごとの用語集付き)。
   まず 1 章だけ翻訳して試聴 OK が出てから全体を翻訳します。
 
-`pip install edge-tts` と `ffmpeg` が必要。所有する書籍の個人利用に限る。
-音声ファイルの配布は不可。
+依存関係は `scripts/install_deps.sh` が導入します:`edge-tts` は隔離された
+CLI ツールとして(`uv tool install edge-tts` / `pipx install edge-tts`、
+素の `pip` は不使用)、`ffmpeg`/`ffprobe` は brew または SHA256 検証付き
+static build。
+
+データフローに関する注意:edge-tts は Microsoft のオンライン読み上げ
+サービスのクライアントであり、合成時に書籍の全文が章ごとに Microsoft へ
+送信されます。所有する書籍の個人利用に限る。音声ファイルの配布は不可。
