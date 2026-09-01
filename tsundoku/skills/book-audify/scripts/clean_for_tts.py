@@ -135,6 +135,13 @@ def clean_chapter(text: str, lang: str) -> str:
             end = '。' if lang in ('zh', 'ja') else '.'
             result.append(title.rstrip('。.') + end)
             continue
+        # Markdown-footnote noise: definition blocks at chapter end, scene
+        # dividers (e.g. "\　\　\*" or "* * *"), then inline [^N] references
+        if re.match(r'^\\?\[\^[^\]]+\]:', line):
+            continue
+        if re.fullmatch(r'[\\\s　*·]+', line) and '*' in line:
+            continue
+        line = re.sub(r'\[\^[^\]]+\]', '', line)
         line = clean_inline(line)
         line = re.sub(r'^>\s*', '', line)          # ordinary quotes: keep the words
         # End-of-chapter translator/footnote paragraphs (circled-number bullets)
